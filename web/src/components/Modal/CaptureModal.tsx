@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { X, Link, Mic, MicOff, FileText } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useNoteStore } from '../../stores/noteStore';
@@ -6,6 +7,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useToastStore } from '../../components/Toast/ToastContainer';
 import { useNavigate } from 'react-router-dom';
 import { captureURL, captureVoice, listTemplates, applyTemplate } from '../../api/client';
+import { ConfirmModal } from '../ConfirmModal/ConfirmModal';
 import type { TemplateMeta } from '../../api/types';
 import styles from './Modal.module.css';
 
@@ -34,14 +36,23 @@ export function CaptureModal() {
   const [templates, setTemplates] = useState<TemplateMeta[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ open: false, title: '', message: '', onConfirm: () => {} });
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      // Save focus for restoration on close.
+      previousFocusRef.current = document.activeElement as HTMLElement | null;
       // Pre-select the default project if provided (e.g. from ProjectPage).
       setProjectId(defaultProjectId);
       // Auto-focus body textarea
@@ -163,18 +174,7 @@ export function CaptureModal() {
     }
   };
 
-  const handleSelectTemplate = async (name: string) => {
-    setSelectedTemplate(name);
-    setShowTemplatePicker(false);
-    if (!name) return;
-
-    // Warn before overwriting existing content.
-    if (body.trim()) {
-      if (!window.confirm('This will replace your current text with the template. Continue?')) {
-        return;
-      }
-    }
-
+  const applyTemplateByName = useCallback(async (name: string) => {
     try {
       const vars: Record<string, string> = {};
       if (title.trim()) vars.title = title.trim();
@@ -185,7 +185,43 @@ export function CaptureModal() {
     } catch {
       addToast('Failed to apply template', 'error');
     }
+  }, [title, projectId, projects, addToast]);
+
+  const handleSelectTemplate = (name: string) => {
+    setSelectedTemplate(name);
+    setShowTemplatePicker(false);
+    if (!name) return;
+
+    if (body.trim()) {
+      setConfirmState({
+        open: true,
+        title: 'Replace content',
+        message: 'This will replace your current text with the template. Continue?',
+        onConfirm: () => {
+          setConfirmState((s) => ({ ...s, open: false }));
+          applyTemplateByName(name);
+        },
+      });
+    } else {
+      applyTemplateByName(name);
+    }
   };
+
+  const confirmDiscardAndClose = useCallback(() => {
+    if (body.trim() || title.trim()) {
+      setConfirmState({
+        open: true,
+        title: 'Discard changes',
+        message: 'You have unsaved content. Discard it?',
+        onConfirm: () => {
+          setConfirmState((s) => ({ ...s, open: false }));
+          setOpen(false);
+        },
+      });
+    } else {
+      setOpen(false);
+    }
+  }, [body, title, setOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -193,12 +229,7 @@ export function CaptureModal() {
       handleSave();
     }
     if (e.key === 'Escape') {
-      if (body.trim() || title.trim()) {
-        if (!window.confirm('You have unsaved content. Discard it?')) {
-          return;
-        }
-      }
-      setOpen(false);
+      confirmDiscardAndClose();
     }
   };
 
@@ -225,28 +256,39 @@ export function CaptureModal() {
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === backdropRef.current) {
-      if (body.trim() || title.trim()) {
-        if (!window.confirm('You have unsaved content. Discard it?')) {
-          return;
-        }
-      }
-      setOpen(false);
+      confirmDiscardAndClose();
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div
-      ref={backdropRef}
-      className={styles.backdrop}
-      onClick={handleBackdropClick}
-      onKeyDown={(e) => { handleFocusTrap(e); handleKeyDown(e); }}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Quick capture"
-    >
-      <div ref={modalRef} className={styles.modal} style={{ maxWidth: 'var(--modal-width-sm)' }}>
+    <>
+    <AnimatePresence onExitComplete={() => {
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    }}>
+      {isOpen && (
+        <motion.div
+          ref={backdropRef}
+          className={styles.backdrop}
+          onClick={handleBackdropClick}
+          onKeyDown={(e) => { handleFocusTrap(e); handleKeyDown(e); }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Quick capture"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25, ease: [0.4, 0, 1, 1] }}
+        >
+          <motion.div
+            ref={modalRef}
+            className={styles.modal}
+            style={{ maxWidth: 'var(--modal-width-sm)' }}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          >
         <div className={styles.modalHeader}>
           <h2 className={styles.modalTitle}>Quick Capture</h2>
           <button
@@ -370,7 +412,20 @@ export function CaptureModal() {
             </button>
           </div>
         </div>
-      </div>
-    </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    <ConfirmModal
+      open={confirmState.open}
+      title={confirmState.title}
+      message={confirmState.message}
+      confirmLabel="Discard"
+      destructive
+      onConfirm={confirmState.onConfirm}
+      onCancel={() => setConfirmState((s) => ({ ...s, open: false }))}
+    />
+    </>
   );
 }

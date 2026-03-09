@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Project, CreateProjectReq, UpdateProjectReq } from '../api/types';
 import * as api from '../api/client';
+import { useToastStore } from '../components/Toast/ToastContainer';
 
 interface ProjectState {
   projects: Project[];
@@ -30,6 +31,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to fetch projects';
       set({ error: message, isLoading: false });
+      useToastStore.getState().addToast(message, 'error');
     }
   },
 
@@ -41,6 +43,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to fetch project';
       set({ error: message, isLoading: false });
+      useToastStore.getState().addToast(message, 'error');
     }
   },
 
@@ -48,10 +51,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
     try {
       const project = await api.createProject(req);
       set((state) => ({ projects: [...state.projects, project] }));
+      useToastStore.getState().addToast('Project created', 'success');
       return project;
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to create project';
       set({ error: message });
+      useToastStore.getState().addToast(message, 'error');
       throw err;
     }
   },
@@ -67,6 +72,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to update project';
       set({ error: message });
+      useToastStore.getState().addToast(message, 'error');
       throw err;
     }
   },
@@ -78,9 +84,11 @@ export const useProjectStore = create<ProjectState>((set) => ({
         projects: state.projects.filter((p) => p.id !== id),
         currentProject: state.currentProject?.id === id ? null : state.currentProject,
       }));
+      useToastStore.getState().addToast('Project deleted', 'success');
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to delete project';
       set({ error: message });
+      useToastStore.getState().addToast(message, 'error');
       throw err;
     }
   },

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
+import { Menu } from 'lucide-react';
 import { Sidebar } from '../Sidebar/Sidebar';
 import { CommandPalette } from '../CommandPalette/CommandPalette';
 import { CaptureModal } from '../Modal/CaptureModal';
@@ -12,6 +13,8 @@ import styles from './Layout.module.css';
 export function Layout() {
   const location = useLocation();
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen);
+  const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const setCaptureModalOpen = useUIStore((s) => s.setCaptureModalOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
@@ -41,6 +44,25 @@ export function Layout() {
       <a href="#main-content" className="skipToContent">
         Skip to content
       </a>
+
+      {/* Hamburger button for mobile (visible <640px) */}
+      <button
+        className={styles.hamburger}
+        onClick={() => setSidebarOpen(true)}
+        aria-label="Open navigation"
+      >
+        <Menu size={20} />
+      </button>
+
+      {/* Mobile backdrop (visible <640px when sidebar open) */}
+      {sidebarOpen && (
+        <div
+          className={styles.mobileBackdrop}
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       <Sidebar />
       <main
         id="main-content"

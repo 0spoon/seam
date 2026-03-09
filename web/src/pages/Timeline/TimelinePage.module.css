@@ -268,3 +268,16 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Responsive: <640px tighter padding, room for hamburger */
+@media (max-width: 640px) {
+  .container {
+    padding: 44px var(--space-3) var(--space-3);
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+}

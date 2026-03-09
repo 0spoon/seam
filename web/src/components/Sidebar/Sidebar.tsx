@@ -11,12 +11,19 @@ import {
   Network,
   Calendar,
   Check,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  FilePlus,
 } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useKeyboard } from '../../hooks/useKeyboard';
 import { useNoteWebSocket } from '../../hooks/useWebSocket';
+import { useNoteStore } from '../../stores/noteStore';
+import { ConfirmModal } from '../ConfirmModal/ConfirmModal';
 import { getProjectColor } from '../../lib/tagColor';
 import { searchFTS } from '../../api/client';
 import type { FTSResult } from '../../api/types';
@@ -29,12 +36,13 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen);
+  const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const tags = useUIStore((s) => s.tags);
   const setCaptureModalOpen = useUIStore((s) => s.setCaptureModalOpen);
   const projects = useProjectStore((s) => s.projects);
   const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
   const addToast = useToastStore((s) => s.addToast);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FTSResult[]>([]);
@@ -44,11 +52,29 @@ export function Sidebar() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const createProject = useProjectStore((s) => s.createProject);
-  const [projectsExpanded, setProjectsExpanded] = useState(true);
-  const [tagsExpanded, setTagsExpanded] = useState(true);
+  const settingsProjectsExpanded = useSettingsStore((s) => s.settings.sidebar_projects_expanded);
+  const settingsTagsExpanded = useSettingsStore((s) => s.settings.sidebar_tags_expanded);
+  const updateSetting = useSettingsStore((s) => s.updateSetting);
+  const projectsExpanded = settingsProjectsExpanded !== 'false';
+  const tagsExpanded = settingsTagsExpanded !== 'false';
+  const setProjectsExpanded = useCallback((expanded: boolean) => {
+    updateSetting('sidebar_projects_expanded', String(expanded));
+  }, [updateSetting]);
+  const setTagsExpanded = useCallback((expanded: boolean) => {
+    updateSetting('sidebar_tags_expanded', String(expanded));
+  }, [updateSetting]);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const newProjectRef = useRef<HTMLInputElement>(null);
+  const createNoteInProject = useNoteStore((s) => s.createNote);
+  const updateProject = useProjectStore((s) => s.updateProject);
+  const deleteProject = useProjectStore((s) => s.deleteProject);
+  const [contextMenuProjectId, setContextMenuProjectId] = useState<string | null>(null);
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; projectId: string; projectName: string }>({ open: false, projectId: '', projectName: '' });
+  const [deleteCascade, setDeleteCascade] = useState<'inbox' | 'delete'>('inbox');
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   // Subscribe to WS note.changed events so the note list stays fresh.
   useNoteWebSocket();
@@ -114,7 +140,7 @@ export function Sidebar() {
     e.preventDefault();
     if (searchQuery.trim()) {
       setShowDropdown(false);
-      navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      navTo(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
     }
   };
 
@@ -135,10 +161,16 @@ export function Sidebar() {
       if (result) {
         setShowDropdown(false);
         setSearchQuery('');
-        navigate(`/notes/${result.note_id}`);
+        navTo(`/notes/${result.note_id}`);
       }
     }
   };
+
+  // Close mobile sidebar overlay after navigating.
+  const navTo = useCallback((path: string) => {
+    navigate(path);
+    setSidebarOpen(false);
+  }, [navigate, setSidebarOpen]);
 
   const handleCreateProject = useCallback(async () => {
     const name = newProjectName.trim();
@@ -147,11 +179,11 @@ export function Sidebar() {
       const project = await createProject({ name });
       setShowNewProject(false);
       setNewProjectName('');
-      navigate(`/projects/${project.id}`);
+      navTo(`/projects/${project.id}`);
     } catch {
       addToast('Failed to create project', 'error');
     }
-  }, [newProjectName, createProject, navigate, addToast]);
+  }, [newProjectName, createProject, navTo, addToast]);
 
   useEffect(() => {
     if (showNewProject) {
@@ -159,18 +191,75 @@ export function Sidebar() {
     }
   }, [showNewProject]);
 
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!contextMenuProjectId) return;
+    const handleClick = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenuProjectId(null);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenuProjectId(null);
+    };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [contextMenuProjectId]);
+
+  const handleRenameProject = useCallback(async (projectId: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      setRenamingProjectId(null);
+      return;
+    }
+    try {
+      await updateProject(projectId, { name: trimmed });
+      setRenamingProjectId(null);
+    } catch {
+      // Error toast handled by store
+    }
+  }, [updateProject]);
+
+  const handleDeleteProject = useCallback(async () => {
+    if (!deleteConfirm.projectId) return;
+    try {
+      await deleteProject(deleteConfirm.projectId, deleteCascade);
+      setDeleteConfirm({ open: false, projectId: '', projectName: '' });
+      // If we were viewing this project, navigate away
+      if (location.pathname === `/projects/${deleteConfirm.projectId}`) {
+        navTo('/');
+      }
+    } catch {
+      // Error toast handled by store
+    }
+  }, [deleteConfirm, deleteCascade, deleteProject, navTo, location.pathname]);
+
+  const handleNewNoteInProject = useCallback(async (projectId: string) => {
+    setContextMenuProjectId(null);
+    try {
+      const note = await createNoteInProject({ title: 'Untitled', body: '', project_id: projectId });
+      navTo(`/notes/${note.id}`);
+    } catch {
+      addToast('Failed to create note', 'error');
+    }
+  }, [createNoteInProject, navTo, addToast]);
+
   const isActive = (path: string) => location.pathname === path;
   const isProjectActive = (id: string) =>
     location.pathname === `/projects/${id}`;
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
+  const handleSettings = () => {
+    navTo('/settings');
   };
 
   return (
+    <>
     <nav
-      className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''}`}
+      className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''} ${sidebarOpen ? styles.mobileOpen : ''}`}
       role="navigation"
       aria-label="Main navigation"
     >
@@ -178,7 +267,7 @@ export function Sidebar() {
         {/* Wordmark */}
         <button
           className={styles.wordmark}
-          onClick={() => navigate('/')}
+          onClick={() => navTo('/')}
           title="Go to Inbox"
         >
           {collapsed ? 'S' : 'Seam'}
@@ -188,7 +277,7 @@ export function Sidebar() {
         {collapsed ? (
           <button
             className={styles.iconButton}
-            onClick={() => navigate('/search')}
+            onClick={() => navTo('/search')}
             title="Search notes"
             aria-label="Search notes"
           >
@@ -206,7 +295,7 @@ export function Sidebar() {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleSearchKeyDown}
               onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
-              aria-label="Search notes"
+              aria-label="Search notes (press / to focus)"
               role="combobox"
               aria-expanded={showDropdown}
               aria-controls="sidebar-search-listbox"
@@ -216,12 +305,16 @@ export function Sidebar() {
                   : undefined
               }
             />
+            {!searchQuery && (
+              <kbd className={styles.searchHint}>/</kbd>
+            )}
             {showDropdown && (
               <div
                 ref={dropdownRef}
                 className={styles.searchDropdown}
                 role="listbox"
                 id="sidebar-search-listbox"
+                aria-live="polite"
               >
                 {searchResults.map((result, index) => (
                   <button
@@ -231,7 +324,7 @@ export function Sidebar() {
                     onClick={() => {
                       setShowDropdown(false);
                       setSearchQuery('');
-                      navigate(`/notes/${result.note_id}`);
+                      navTo(`/notes/${result.note_id}`);
                     }}
                     onMouseEnter={() => setSelectedIndex(index)}
                     role="option"
@@ -252,41 +345,41 @@ export function Sidebar() {
         {/* Inbox */}
         <button
           className={`${styles.navItem} ${isActive('/') ? styles.active : ''}`}
-          onClick={() => navigate('/')}
+          onClick={() => navTo('/')}
           title="Inbox"
         >
           <Inbox size={16} />
-          {!collapsed && <span>Inbox</span>}
+          <span className={styles.fadeLabel}>Inbox</span>
         </button>
 
         {/* Ask Seam */}
         <button
           className={`${styles.navItem} ${isActive('/ask') ? styles.active : ''}`}
-          onClick={() => navigate('/ask')}
+          onClick={() => navTo('/ask')}
           title="Ask Seam"
         >
           <MessageCircle size={16} />
-          {!collapsed && <span>Ask Seam</span>}
+          <span className={styles.fadeLabel}>Ask Seam</span>
         </button>
 
         {/* Graph */}
         <button
           className={`${styles.navItem} ${isActive('/graph') ? styles.active : ''}`}
-          onClick={() => navigate('/graph')}
+          onClick={() => navTo('/graph')}
           title="Knowledge Graph"
         >
           <Network size={16} />
-          {!collapsed && <span>Graph</span>}
+          <span className={styles.fadeLabel}>Graph</span>
         </button>
 
         {/* Timeline */}
         <button
           className={`${styles.navItem} ${isActive('/timeline') ? styles.active : ''}`}
-          onClick={() => navigate('/timeline')}
+          onClick={() => navTo('/timeline')}
           title="Timeline"
         >
           <Calendar size={16} />
-          {!collapsed && <span>Timeline</span>}
+          <span className={styles.fadeLabel}>Timeline</span>
         </button>
 
         {/* Projects */}
@@ -337,25 +430,90 @@ export function Sidebar() {
           )}
           {(collapsed || projectsExpanded) &&
             projects.map((project, index) => (
-              <button
-                key={project.id}
-                className={`${styles.navItem} ${isProjectActive(project.id) ? styles.active : ''}`}
-                onClick={() => navigate(`/projects/${project.id}`)}
-                title={project.name}
-                style={
-                  isProjectActive(project.id)
-                    ? { borderLeftColor: getProjectColor(index) }
-                    : undefined
-                }
-              >
-                <span
-                  className={styles.projectDot}
-                  style={{ backgroundColor: getProjectColor(index) }}
-                />
-                {!collapsed && (
-                  <span className={styles.navLabel}>{project.name}</span>
+              <div key={project.id} className={styles.projectRow} ref={contextMenuProjectId === project.id ? contextMenuRef : undefined}>
+                {renamingProjectId === project.id ? (
+                  <input
+                    className={styles.renameInput}
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleRenameProject(project.id, renameValue);
+                      if (e.key === 'Escape') setRenamingProjectId(null);
+                    }}
+                    onBlur={() => handleRenameProject(project.id, renameValue)}
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    className={`${styles.navItem} ${isProjectActive(project.id) ? styles.active : ''}`}
+                    onClick={() => navTo(`/projects/${project.id}`)}
+                    onContextMenu={(e) => {
+                      if (collapsed) return;
+                      e.preventDefault();
+                      setContextMenuProjectId(project.id);
+                    }}
+                    title={project.name}
+                    style={{
+                      flex: 1,
+                      ...(isProjectActive(project.id) ? { borderLeftColor: getProjectColor(index) } : undefined),
+                    }}
+                  >
+                    <span
+                      className={styles.projectDot}
+                      style={{ backgroundColor: getProjectColor(index) }}
+                    />
+                    {!collapsed && (
+                      <span className={styles.navLabel}>{project.name}</span>
+                    )}
+                  </button>
                 )}
-              </button>
+                {!collapsed && !renamingProjectId && (
+                  <button
+                    className={styles.projectMenuTrigger}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setContextMenuProjectId(contextMenuProjectId === project.id ? null : project.id);
+                    }}
+                    aria-label={`${project.name} options`}
+                  >
+                    <MoreHorizontal size={12} />
+                  </button>
+                )}
+                {contextMenuProjectId === project.id && (
+                  <div className={styles.contextMenu}>
+                    <button
+                      className={styles.contextMenuItem}
+                      onClick={() => {
+                        setContextMenuProjectId(null);
+                        setRenamingProjectId(project.id);
+                        setRenameValue(project.name);
+                      }}
+                    >
+                      <Pencil size={12} />
+                      Rename
+                    </button>
+                    <button
+                      className={styles.contextMenuItem}
+                      onClick={() => handleNewNoteInProject(project.id)}
+                    >
+                      <FilePlus size={12} />
+                      New note
+                    </button>
+                    <div className={styles.contextMenuDivider} />
+                    <button
+                      className={styles.contextMenuItemDanger}
+                      onClick={() => {
+                        setContextMenuProjectId(null);
+                        setDeleteConfirm({ open: true, projectId: project.id, projectName: project.name });
+                        setDeleteCascade('inbox');
+                      }}
+                    >
+                      <Trash2 size={12} />
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
             ))}
         </div>
 
@@ -373,7 +531,7 @@ export function Sidebar() {
                 <button
                   key={tag.name}
                   className={styles.navItem}
-                  onClick={() => navigate(`/?tag=${encodeURIComponent(tag.name)}`)}
+                  onClick={() => navTo(`/?tag=${encodeURIComponent(tag.name)}`)}
                   title={`${tag.name} (${tag.count})`}
                 >
                   <Tag size={14} />
@@ -398,9 +556,9 @@ export function Sidebar() {
               <span className={styles.username}>{user?.username}</span>
               <button
                 className={styles.iconButton}
-                onClick={handleLogout}
-                title="Log out"
-                aria-label="Log out"
+                onClick={handleSettings}
+                title="Settings"
+                aria-label="Settings"
               >
                 <Settings size={14} />
               </button>
@@ -433,6 +591,52 @@ export function Sidebar() {
         </button>
       </div>
     </nav>
+
+    <ConfirmModal
+      open={deleteConfirm.open}
+      title={`Delete "${deleteConfirm.projectName}"`}
+      message={
+        deleteCascade === 'inbox'
+          ? 'Notes in this project will be moved to Inbox.'
+          : 'This project and all its notes will be permanently deleted.'
+      }
+      confirmLabel={deleteCascade === 'inbox' ? 'Keep notes' : 'Delete everything'}
+      destructive={deleteCascade === 'delete'}
+      onConfirm={handleDeleteProject}
+      onCancel={() => setDeleteConfirm({ open: false, projectId: '', projectName: '' })}
+    >
+      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+        <button
+          onClick={() => setDeleteCascade('inbox')}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--font-size-xs)',
+            fontFamily: 'var(--font-ui)',
+            border: `1px solid ${deleteCascade === 'inbox' ? 'var(--accent-primary)' : 'var(--border-default)'}`,
+            color: deleteCascade === 'inbox' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+            background: deleteCascade === 'inbox' ? 'var(--accent-muted)' : 'transparent',
+          }}
+        >
+          Keep notes
+        </button>
+        <button
+          onClick={() => setDeleteCascade('delete')}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--font-size-xs)',
+            fontFamily: 'var(--font-ui)',
+            border: `1px solid ${deleteCascade === 'delete' ? 'var(--status-error)' : 'var(--border-default)'}`,
+            color: deleteCascade === 'delete' ? 'var(--status-error)' : 'var(--text-secondary)',
+            background: deleteCascade === 'delete' ? 'rgba(196,107,107,0.1)' : 'transparent',
+          }}
+        >
+          Delete everything
+        </button>
+      </div>
+    </ConfirmModal>
+    </>
   );
 }
 

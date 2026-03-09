@@ -1,11 +1,14 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { motion } from 'motion/react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowUpDown, Sparkles } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
 import { useUIStore } from '../../stores/uiStore';
 import { NoteCard } from '../../components/NoteCard/NoteCard';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { SynthesisModal } from '../../components/SynthesisModal/SynthesisModal';
+import { NoteListSkeleton } from '../../components/Skeleton/Skeleton';
 import type { Note } from '../../api/types';
 import styles from './InboxPage.module.css';
 
@@ -21,6 +24,7 @@ export function InboxPage() {
   const [sort, setSort] = useState<'modified' | 'created'>('modified');
   const [showSynthesis, setShowSynthesis] = useState(false);
   const [loadedNotes, setLoadedNotes] = useState<Note[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchNotes({
@@ -55,8 +59,19 @@ export function InboxPage() {
     });
   }, [fetchNotes, tagFilter, sort, loadedNotes.length]);
 
+  // Include "load more" as an extra row if there are more notes.
+  const hasMore = loadedNotes.length < total;
+  const itemCount = loadedNotes.length + (hasMore ? 1 : 0);
+
+  const virtualizer = useVirtualizer({
+    count: itemCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 100,
+    overscan: 10,
+  });
+
   return (
-    <div className={styles.page}>
+    <div className={styles.page} ref={scrollRef}>
       <header className={styles.header}>
         <h1 className={styles.title}>Inbox</h1>
         <div className={styles.controls}>
@@ -92,7 +107,7 @@ export function InboxPage() {
       <div className={styles.divider} />
 
       {isLoading ? (
-        <div className={styles.loading}>Loading...</div>
+        <NoteListSkeleton count={6} />
       ) : loadedNotes.length === 0 ? (
         <EmptyState
           heading="Nothing in the inbox"
@@ -103,18 +118,60 @@ export function InboxPage() {
           }}
         />
       ) : (
-        <div className={styles.noteList} role="list">
-          {loadedNotes.map((note) => (
-            <NoteCard key={note.id} note={note} />
-          ))}
-          {loadedNotes.length < total && (
-            <button
-              className={styles.loadMore}
-              onClick={handleLoadMore}
-            >
-              Load more
-            </button>
-          )}
+        <div
+          className={styles.noteList}
+          role="list"
+          style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            // "Load more" button as the last virtual row.
+            if (virtualRow.index >= loadedNotes.length) {
+              return (
+                <div
+                  key="load-more"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <button
+                    className={styles.loadMore}
+                    onClick={handleLoadMore}
+                  >
+                    Load more
+                  </button>
+                </div>
+              );
+            }
+
+            const note = loadedNotes[virtualRow.index];
+            return (
+              <motion.div
+                key={note.id}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: 0.2,
+                  ease: [0.16, 1, 0.3, 1],
+                  delay: virtualRow.index < 20 ? virtualRow.index * 0.03 : 0,
+                }}
+              >
+                <NoteCard note={note} />
+              </motion.div>
+            );
+          })}
         </div>
       )}
 

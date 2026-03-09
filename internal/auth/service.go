@@ -217,6 +217,67 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	}, nil
 }
 
+// GetMe retrieves the authenticated user's profile.
+func (s *Service) GetMe(ctx context.Context, userID string) (*UserInfo, error) {
+	user, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("auth.Service.GetMe: %w", err)
+	}
+	return &UserInfo{
+		ID:       user.ID,
+		Username: user.Username,
+		Email:    user.Email,
+	}, nil
+}
+
+// ChangePassword verifies the current password and sets a new one.
+func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	if currentPassword == "" || newPassword == "" {
+		return fmt.Errorf("auth.Service.ChangePassword: %w", ErrInvalidCredentials)
+	}
+	if len(newPassword) < 8 {
+		return fmt.Errorf("auth.Service.ChangePassword: password must be at least 8 characters: %w", ErrValidation)
+	}
+	if len(newPassword) > 1024 {
+		return fmt.Errorf("auth.Service.ChangePassword: password must not exceed 1024 characters: %w", ErrValidation)
+	}
+
+	user, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("auth.Service.ChangePassword: %w", err)
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(currentPassword)); err != nil {
+		return fmt.Errorf("auth.Service.ChangePassword: %w", ErrInvalidCredentials)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), s.bcryptCost)
+	if err != nil {
+		return fmt.Errorf("auth.Service.ChangePassword: hash: %w", err)
+	}
+
+	if err := s.store.UpdateUserPassword(ctx, userID, string(hash)); err != nil {
+		return fmt.Errorf("auth.Service.ChangePassword: %w", err)
+	}
+
+	s.logger.Info("password changed", "user_id", userID)
+	return nil
+}
+
+// UpdateEmail validates and updates the user's email address.
+func (s *Service) UpdateEmail(ctx context.Context, userID, email string) error {
+	if email == "" || !isValidEmail(email) {
+		return fmt.Errorf("auth.Service.UpdateEmail: invalid email: %w", ErrValidation)
+	}
+
+	if err := s.store.UpdateUserEmail(ctx, userID, email); err != nil {
+		return fmt.Errorf("auth.Service.UpdateEmail: %w", err)
+	}
+
+	s.logger.Info("email updated", "user_id", userID)
+	return nil
+}
+
 // Logout revokes a refresh token.
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	if refreshToken == "" {

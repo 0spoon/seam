@@ -7,6 +7,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useToastStore } from '../../components/Toast/ToastContainer';
 import { getProjectColor } from '../../lib/tagColor';
+import { GraphSkeleton } from '../../components/Skeleton/Skeleton';
 import type { GraphData } from '../../api/types';
 import styles from './GraphPage.module.css';
 
@@ -503,7 +504,7 @@ export function GraphPage() {
   if (loading && !graphData) {
     return (
       <div className={styles.container}>
-        <div className={styles.loading}>Loading graph...</div>
+        <GraphSkeleton />
       </div>
     );
   }

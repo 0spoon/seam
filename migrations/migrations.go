@@ -16,9 +16,15 @@ var userInitialSQL string
 //go:embed user/002_add_slug.sql
 var userAddSlugSQL string
 
+//go:embed user/003_settings.sql
+var userSettingsSQL string
+
+//go:embed user/004_chat_history.sql
+var userChatHistorySQL string
+
 // UserSQL contains all user-database migrations concatenated in order.
 // Used by legacy callers and tests that run the full schema in one shot.
-var UserSQL = userInitialSQL + "\n" + userAddSlugSQL
+var UserSQL = userInitialSQL + "\n" + userAddSlugSQL + "\n" + userSettingsSQL + "\n" + userChatHistorySQL
 
 // Migration represents a single numbered migration step.
 type Migration struct {
@@ -51,6 +57,8 @@ func UserMigrations() []Migration {
 				return nil
 			},
 		},
+		{Version: 3, SQL: userSettingsSQL},
+		{Version: 4, SQL: userChatHistorySQL},
 	}
 }
 

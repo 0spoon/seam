@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { format, isToday, parseISO } from 'date-fns';
 import { listNotes } from '../../api/client';
 import { useToastStore } from '../../components/Toast/ToastContainer';
+import { NoteListSkeleton } from '../../components/Skeleton/Skeleton';
 import type { Note } from '../../api/types';
 import styles from './TimelinePage.module.css';
 
@@ -117,7 +118,10 @@ export function TimelinePage() {
   if (loading) {
     return (
       <div className={styles.container}>
-        <div className={styles.loading}>Loading timeline...</div>
+        <div className={styles.header}>
+          <h1 className={styles.title}>Timeline</h1>
+        </div>
+        <NoteListSkeleton count={8} />
       </div>
     );
   }

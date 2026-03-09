@@ -18,12 +18,14 @@ import (
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/auth"
 	"github.com/katata/seam/internal/capture"
+	"github.com/katata/seam/internal/chat"
 	"github.com/katata/seam/internal/config"
 	"github.com/katata/seam/internal/graph"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/server"
+	"github.com/katata/seam/internal/settings"
 	"github.com/katata/seam/internal/template"
 	"github.com/katata/seam/internal/userdb"
 	"github.com/katata/seam/internal/watcher"
@@ -202,6 +204,16 @@ func run() error {
 	// Create graph components.
 	graphSvc := graph.NewService(userDBMgr, logger)
 	graphHandler := graph.NewHandler(graphSvc, logger)
+
+	// Create settings components.
+	settingsStore := settings.NewStore()
+	settingsSvc := settings.NewService(settingsStore, userDBMgr, logger)
+	settingsHandler := settings.NewHandler(settingsSvc, logger)
+
+	// Create chat history components.
+	chatHistoryStore := chat.NewStore()
+	chatHistorySvc := chat.NewService(chatHistoryStore, userDBMgr, logger)
+	chatHistoryHandler := chat.NewHandler(chatHistorySvc, logger)
 
 	// Create AI components (Ollama, ChromaDB, embedder, chat, synthesizer, linker, writer).
 	ollamaClient := ai.NewOllamaClient(
@@ -577,6 +589,8 @@ func run() error {
 		CaptureHandler:   captureHandler,
 		TemplateHandler:  templateHandler,
 		GraphHandler:     graphHandler,
+		SettingsHandler:  settingsHandler,
+		ChatHandler:      chatHistoryHandler,
 		WSMessageHandler: wsHandler,
 	})
 

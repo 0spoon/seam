@@ -74,10 +74,16 @@ func WithBodyTruncateLen(length int) func(*ChatService) {
 	}
 }
 
-// ChatResult contains the response and cited note IDs.
+// Citation represents a cited note with its ID and title.
+type Citation struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// ChatResult contains the response and cited notes.
 type ChatResult struct {
-	Response  string   `json:"response"`
-	Citations []string `json:"citations"`
+	Response  string     `json:"response"`
+	Citations []Citation `json:"citations"`
 }
 
 // noteSnippet holds retrieved note content for prompt construction.
@@ -125,7 +131,7 @@ func (c *ChatService) Ask(ctx context.Context, userID, query string, history []C
 
 // AskStream is like Ask but returns a streaming response.
 // Returns token channel, citations list, and error channel.
-func (c *ChatService) AskStream(ctx context.Context, userID, query string, history []ChatMessage) (<-chan string, []string, <-chan error) {
+func (c *ChatService) AskStream(ctx context.Context, userID, query string, history []ChatMessage) (<-chan string, []Citation, <-chan error) {
 	tokenCh := make(chan string, 64)
 	errCh := make(chan error, 1)
 
@@ -171,7 +177,7 @@ func (c *ChatService) AskStream(ctx context.Context, userID, query string, histo
 
 // retrieveContext embeds the query, retrieves relevant chunks from ChromaDB,
 // and fetches the note content from the user's database.
-func (c *ChatService) retrieveContext(ctx context.Context, userID, query string) ([]noteSnippet, []string, error) {
+func (c *ChatService) retrieveContext(ctx context.Context, userID, query string) ([]noteSnippet, []Citation, error) {
 	queryEmbedding, err := c.ollama.GenerateEmbedding(ctx, c.embedModel, query)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ai.ChatService.retrieveContext: embed query: %w", err)
@@ -195,7 +201,7 @@ func (c *ChatService) retrieveContext(ctx context.Context, userID, query string)
 
 	seen := make(map[string]bool)
 	var contexts []noteSnippet
-	var citations []string
+	var citations []Citation
 
 	for _, cr := range chromaResults {
 		noteID := cr.Metadata["note_id"]
@@ -218,7 +224,7 @@ func (c *ChatService) retrieveContext(ctx context.Context, userID, query string)
 		}
 
 		contexts = append(contexts, noteSnippet{Title: title, Body: body})
-		citations = append(citations, noteID)
+		citations = append(citations, Citation{ID: noteID, Title: title})
 	}
 
 	return contexts, citations, nil

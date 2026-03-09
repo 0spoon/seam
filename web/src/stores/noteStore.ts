@@ -42,6 +42,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to fetch notes';
       set({ error: message, isLoading: false });
+      useToastStore.getState().addToast(message, 'error');
     }
   },
 
@@ -53,6 +54,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to fetch note';
       set({ error: message, isLoading: false });
+      useToastStore.getState().addToast(message, 'error');
     }
   },
 

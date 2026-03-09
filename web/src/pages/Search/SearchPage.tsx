@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { motion } from 'motion/react';
 import { searchFTS, searchSemantic } from '../../api/client';
 import type { FTSResult, SemanticResult } from '../../api/types';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
+import { SearchResultSkeleton } from '../../components/Skeleton/Skeleton';
+import { useToastStore } from '../../components/Toast/ToastContainer';
 import { sanitizeHtml } from '../../lib/sanitize';
 import styles from './SearchPage.module.css';
 
@@ -26,6 +29,7 @@ export function SearchPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
+  const addToast = useToastStore((s) => s.addToast);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -86,6 +90,8 @@ export function SearchPage() {
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         setResults([]);
+        const message = err instanceof Error ? err.message : 'Search failed';
+        addToast(message, 'error');
       } finally {
         if (!controller.signal.aborted) {
           setIsLoading(false);
@@ -141,8 +147,16 @@ export function SearchPage() {
         </button>
       </div>
 
+      <div className={styles.srOnly} aria-live="polite" role="status">
+        {!isLoading && query.trim() && (
+          results.length > 0
+            ? `${results.length} result${results.length === 1 ? '' : 's'} found`
+            : 'No results found'
+        )}
+      </div>
+
       {isLoading ? (
-        <div className={styles.loading}>Searching...</div>
+        <SearchResultSkeleton count={4} />
       ) : results.length === 0 && query.trim() ? (
         <EmptyState
           heading="No matches"
@@ -153,9 +167,22 @@ export function SearchPage() {
           }
         />
       ) : (
-        <div className={styles.results}>
+        <motion.div
+          className={styles.results}
+          initial="hidden"
+          animate="visible"
+          variants={{
+            hidden: {},
+            visible: { transition: { staggerChildren: 0.03 } },
+          }}
+        >
           {results.map((result) => (
-            <button
+            <motion.button
+              variants={{
+                hidden: { opacity: 0, y: 4 },
+                visible: { opacity: 1, y: 0 },
+              }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
               key={result.note_id}
               className={styles.resultItem}
               onClick={() => navigate(`/notes/${result.note_id}`)}
@@ -172,9 +199,17 @@ export function SearchPage() {
                 className={styles.resultSnippet}
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(result.snippet) }}
               />
-            </button>
+              {result.score !== undefined && (
+                <div className={styles.relevanceBarTrack}>
+                  <div
+                    className={styles.relevanceBarFill}
+                    style={{ width: `${Math.round(result.score * 100)}%` }}
+                  />
+                </div>
+              )}
+            </motion.button>
           ))}
-        </div>
+        </motion.div>
       )}
     </div>
   );

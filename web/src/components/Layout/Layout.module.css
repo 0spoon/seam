@@ -13,18 +13,57 @@
   height: 100%;
 }
 
+/* Hamburger button -- hidden by default, shown on mobile */
+.hamburger {
+  display: none;
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: calc(var(--z-sidebar) + 1);
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.hamburger:hover {
+  background: var(--bg-elevated);
+}
+
+/* Mobile sidebar backdrop -- hidden by default */
+.mobileBackdrop {
+  display: none;
+}
+
 /* >1024px: full sidebar (260px) -- default styles apply */
 
 /* 640-1024px: collapsed sidebar (icons only, 52px) */
 @media (max-width: 1024px) {
   .main {
-    margin-left: var(--sidebar-collapsed);
+    margin-left: var(--sidebar-collapsed) !important;
   }
 }
 
-/* <640px: sidebar hidden, full-width content */
+/* <640px: sidebar hidden by default, hamburger visible, sidebar as overlay */
 @media (max-width: 640px) {
   .main {
-    margin-left: 0;
+    margin-left: 0 !important;
+  }
+
+  .hamburger {
+    display: flex;
+  }
+
+  .mobileBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-sidebar) - 1);
+    background: rgba(0, 0, 0, 0.5);
   }
 }

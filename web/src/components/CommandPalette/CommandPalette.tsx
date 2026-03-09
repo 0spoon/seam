@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   Plus,
   Search,
@@ -122,11 +123,8 @@ export function CommandPalette() {
       setQuery('');
       setSelectedIndex(0);
       setTimeout(() => inputRef.current?.focus(), 50);
-    } else if (previousFocusRef.current) {
-      // Return focus to the previously focused element on close.
-      previousFocusRef.current.focus();
-      previousFocusRef.current = null;
     }
+    // Focus restoration is handled by AnimatePresence onExitComplete.
   }, [isOpen]);
 
   useEffect(() => {
@@ -181,53 +179,69 @@ export function CommandPalette() {
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div
-      ref={backdropRef}
-      className={styles.backdrop}
-      onClick={handleBackdropClick}
-    >
-      <div
-        ref={paletteRef}
-        className={styles.palette}
-        onKeyDown={handleKeyDown}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-      >
-        <input
-          ref={inputRef}
-          type="text"
-          className={styles.input}
-          placeholder="Type a command..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Command palette search"
-        />
-        <div className={styles.results} role="listbox">
-          {filtered.map((cmd, index) => (
-            <button
-              key={cmd.id}
-              className={`${styles.item} ${index === selectedIndex ? styles.selected : ''}`}
-              onClick={cmd.action}
-              role="option"
-              aria-selected={index === selectedIndex}
-              onMouseEnter={() => setSelectedIndex(index)}
-            >
-              <span className={styles.icon}>{cmd.icon}</span>
-              <span className={styles.label}>{cmd.label}</span>
-              {cmd.shortcut && (
-                <span className={styles.shortcut}>{cmd.shortcut}</span>
+    <AnimatePresence onExitComplete={() => {
+      if (previousFocusRef.current) {
+        previousFocusRef.current.focus();
+        previousFocusRef.current = null;
+      }
+    }}>
+      {isOpen && (
+        <motion.div
+          ref={backdropRef}
+          className={styles.backdrop}
+          onClick={handleBackdropClick}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25, ease: [0.4, 0, 1, 1] }}
+        >
+          <motion.div
+            ref={paletteRef}
+            className={styles.palette}
+            onKeyDown={handleKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Command palette"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              className={styles.input}
+              placeholder="Type a command..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Command palette search"
+              aria-keyshortcuts="Meta+K Control+K"
+            />
+            <div className={styles.results} role="listbox">
+              {filtered.map((cmd, index) => (
+                <button
+                  key={cmd.id}
+                  className={`${styles.item} ${index === selectedIndex ? styles.selected : ''}`}
+                  onClick={cmd.action}
+                  role="option"
+                  aria-selected={index === selectedIndex}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                >
+                  <span className={styles.icon}>{cmd.icon}</span>
+                  <span className={styles.label}>{cmd.label}</span>
+                  {cmd.shortcut && (
+                    <span className={styles.shortcut}>{cmd.shortcut}</span>
+                  )}
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <div className={styles.empty}>No matching commands</div>
               )}
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <div className={styles.empty}>No matching commands</div>
-          )}
-        </div>
-      </div>
-    </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

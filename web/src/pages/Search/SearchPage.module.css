@@ -120,10 +120,49 @@
   padding: 0 2px;
 }
 
+.relevanceBarTrack {
+  margin-top: var(--space-2);
+  height: 3px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.relevanceBarFill {
+  height: 100%;
+  background: var(--accent-tertiary);
+  border-radius: var(--radius-full);
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
 .loading {
   padding: var(--space-8);
   text-align: center;
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
   color: var(--text-tertiary);
+}
+
+/* Responsive: <640px tighter padding, room for hamburger */
+@media (max-width: 640px) {
+  .page {
+    padding: 44px var(--space-3) var(--space-3);
+  }
+
+  .searchInput {
+    height: 40px;
+    font-size: var(--font-size-base);
+  }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

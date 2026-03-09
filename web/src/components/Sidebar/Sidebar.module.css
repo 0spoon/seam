@@ -17,6 +17,20 @@
   width: var(--sidebar-collapsed);
 }
 
+/* Content fade for smooth collapse/expand.
+   Applied to text labels that should fade when sidebar collapses. */
+.fadeLabel {
+  opacity: 1;
+  transition: opacity 100ms var(--ease-out) 80ms;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.collapsed .fadeLabel {
+  opacity: 0;
+  transition: opacity 60ms var(--ease-in);
+}
+
 .top {
   flex: 1;
   overflow-y: auto;
@@ -82,6 +96,26 @@
   outline: none;
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.searchInput:focus + .searchHint {
+  display: none;
+}
+
+.searchHint {
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  line-height: 18px;
+  pointer-events: none;
 }
 
 .searchDropdown {
@@ -376,14 +410,124 @@
   color: var(--text-secondary);
 }
 
+/* Project context menu */
+.projectRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.projectRow:hover .projectMenuTrigger {
+  opacity: 1;
+}
+
+.projectMenuTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.projectMenuTrigger:hover {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.contextMenu {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: var(--space-1);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  min-width: 160px;
+  z-index: var(--z-dropdown);
+  padding: var(--space-1);
+}
+
+.contextMenuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.contextMenuItem:hover {
+  background: var(--bg-elevated);
+  color: var(--accent-primary);
+}
+
+.contextMenuItemDanger {
+  composes: contextMenuItem;
+  color: var(--status-error);
+}
+
+.contextMenuItemDanger:hover {
+  background: var(--bg-elevated);
+  color: var(--status-error);
+}
+
+.contextMenuDivider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--space-1) 0;
+}
+
+.renameInput {
+  flex: 1;
+  height: 26px;
+  padding: 0 var(--space-2);
+  background: var(--bg-base);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+}
+
+.renameInput:focus {
+  outline: none;
+}
+
+/* 640-1024px: collapsed sidebar (icons only, 52px) */
 @media (max-width: 1024px) {
   .sidebar {
     width: var(--sidebar-collapsed);
   }
 }
 
+/* <640px: sidebar hidden, slides in as overlay when mobileOpen */
 @media (max-width: 640px) {
   .sidebar {
-    display: none;
+    width: var(--sidebar-width);
+    transform: translateX(-100%);
+    transition: transform var(--duration-normal) var(--ease-out),
+      width var(--duration-normal) var(--ease-out);
+    box-shadow: none;
+  }
+
+  .sidebar.collapsed {
+    width: var(--sidebar-width);
+  }
+
+  .sidebar.mobileOpen {
+    transform: translateX(0);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.3);
   }
 }

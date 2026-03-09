@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/katata/seam/internal/reqctx"
 )
 
 // Handler handles HTTP requests for authentication endpoints.
@@ -32,6 +34,102 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/refresh", h.refresh)
 	r.Post("/logout", h.logout)
 	return r
+}
+
+// ProtectedRoutes returns a chi router with account management routes
+// that require authentication middleware.
+func (h *Handler) ProtectedRoutes() chi.Router {
+	r := chi.NewRouter()
+	r.Get("/me", h.getMe)
+	r.Put("/password", h.changePassword)
+	r.Put("/email", h.updateEmail)
+	return r
+}
+
+func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	info, err := h.service.GetMe(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("get me failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, info)
+}
+
+func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	err := h.service.ChangePassword(r.Context(), userID, req.CurrentPassword, req.NewPassword)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCredentials) {
+			writeError(w, http.StatusBadRequest, "current password is incorrect")
+			return
+		}
+		if errors.Is(err, ErrValidation) {
+			writeError(w, http.StatusBadRequest, "password must be 8-1024 characters")
+			return
+		}
+		h.logger.Error("change password failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) updateEmail(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	err := h.service.UpdateEmail(r.Context(), userID, req.Email)
+	if err != nil {
+		if errors.Is(err, ErrValidation) {
+			writeError(w, http.StatusBadRequest, "invalid email format")
+			return
+		}
+		if errors.Is(err, ErrUserExists) {
+			writeError(w, http.StatusConflict, "email already in use")
+			return
+		}
+		h.logger.Error("update email failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {

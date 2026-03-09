@@ -1,97 +1,102 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { sanitizeHtml } from '../../lib/sanitize';
 import { useNavigate } from 'react-router-dom';
-import { Send, Loader2, FileText } from 'lucide-react';
-import { askSeam, getNote } from '../../api/client';
+import { Send, Loader2, FileText, Plus, Trash2 } from 'lucide-react';
+import {
+  askSeam,
+  createConversation,
+  listConversations,
+  getConversation,
+  addChatMessage,
+  deleteConversation,
+} from '../../api/client';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { send as wsSend, isConnected } from '../../api/ws';
 import { renderMarkdown } from '../../lib/markdown';
-import type { ChatMessage, WSMessage } from '../../api/types';
+import { useToastStore } from '../../components/Toast/ToastContainer';
+import type { ChatCitation, ChatMessage, WSMessage } from '../../api/types';
 import styles from './AskPage.module.css';
 
 const STREAM_TIMEOUT_MS = 60_000;
 // Maximum number of messages to send to the server for context.
 const MAX_HISTORY_MESSAGES = 10;
 
+const STARTER_SUGGESTIONS = [
+  'What are my recent notes about?',
+  'Find connections between my notes',
+  'Summarize my key ideas',
+  'What topics do I write about most?',
+];
+
 interface DisplayMessage {
   role: 'user' | 'assistant';
   content: string;
-  citations?: string[];
-}
-
-// Cache for resolved note titles to avoid repeated fetches.
-const noteTitleCache = new Map<string, string>();
-
-async function resolveNoteTitle(noteId: string): Promise<string> {
-  if (noteTitleCache.has(noteId)) {
-    return noteTitleCache.get(noteId)!;
-  }
-  try {
-    const note = await getNote(noteId);
-    noteTitleCache.set(noteId, note.title);
-    return note.title;
-  } catch {
-    return noteId.slice(0, 8);
-  }
+  citations?: ChatCitation[];
 }
 
 export function AskPage() {
   const navigate = useNavigate();
+  const addToast = useToastStore((s) => s.addToast);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
-  const [citationTitles, setCitationTitles] = useState<Map<string, string>>(new Map());
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const useStreaming = true;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamingRef = useRef('');
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isStreamingRef = useRef(false);
+  const conversationIdRef = useRef<string | null>(null);
+
+  // Keep ref in sync for use in callbacks.
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   // Auto-scroll to bottom when messages change.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Focus input on mount.
+  // Load most recent conversation on mount.
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Resolve citation note titles when messages with citations appear.
-  useEffect(() => {
-    const unresolvedIds: string[] = [];
-    for (const msg of messages) {
-      if (msg.citations) {
-        for (const noteId of msg.citations) {
-          if (!citationTitles.has(noteId)) {
-            unresolvedIds.push(noteId);
-          }
+    let cancelled = false;
+    async function loadRecentConversation() {
+      try {
+        const { conversations } = await listConversations(1, 0);
+        if (cancelled) return;
+        if (conversations.length > 0) {
+          const recent = conversations[0];
+          const { conversation, messages: msgs } = await getConversation(recent.id);
+          if (cancelled) return;
+          setConversationId(conversation.id);
+          setMessages(
+            msgs.map((m) => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              citations: m.citations,
+            })),
+          );
         }
+      } catch {
+        // Silently fail -- show empty state.
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
     }
-    if (unresolvedIds.length === 0) return;
-
-    let cancelled = false;
-    Promise.all(
-      unresolvedIds.map(async (id) => {
-        const title = await resolveNoteTitle(id);
-        return [id, title] as const;
-      }),
-    ).then((results) => {
-      if (cancelled) return;
-      setCitationTitles((prev) => {
-        const next = new Map(prev);
-        for (const [id, title] of results) {
-          next.set(id, title);
-        }
-        return next;
-      });
-    });
-
+    loadRecentConversation();
     return () => { cancelled = true; };
-  }, [messages, citationTitles]);
+  }, []);
+
+  // Focus input once loading is complete.
+  useEffect(() => {
+    if (!isLoading) {
+      inputRef.current?.focus();
+    }
+  }, [isLoading]);
 
   // Clear any active streaming timeout.
   const clearStreamTimeout = useCallback(() => {
@@ -121,8 +126,7 @@ export function AskPage() {
     }, STREAM_TIMEOUT_MS);
   }, [clearStreamTimeout]);
 
-  // Recover from a streaming error. Shared by chat.error handler,
-  // timeout, and WS disconnect detection.
+  // Recover from a streaming error.
   const recoverFromStreamError = useCallback(
     (errorMessage: string) => {
       clearStreamTimeout();
@@ -138,6 +142,23 @@ export function AskPage() {
     [clearStreamTimeout],
   );
 
+  // Persist a message to the server (fire-and-forget with error toast).
+  const persistMessage = useCallback(
+    async (
+      convId: string,
+      role: string,
+      content: string,
+      citations?: ChatCitation[],
+    ) => {
+      try {
+        await addChatMessage(convId, { role, content, citations });
+      } catch {
+        addToast('Failed to save message', 'error');
+      }
+    },
+    [addToast],
+  );
+
   // Handle streaming WebSocket messages.
   const handleWSMessage = useCallback(
     (msg: WSMessage) => {
@@ -148,7 +169,7 @@ export function AskPage() {
         resetStreamTimeout();
       } else if (msg.type === 'chat.done') {
         clearStreamTimeout();
-        const payload = msg.payload as { citations?: string[] };
+        const payload = msg.payload as { citations?: ChatCitation[] };
         const completedContent = streamingRef.current;
         streamingRef.current = '';
         setMessages((prev) => {
@@ -162,6 +183,12 @@ export function AskPage() {
         setStreamingContent('');
         setIsStreaming(false);
         isStreamingRef.current = false;
+
+        // Persist assistant message.
+        const convId = conversationIdRef.current;
+        if (convId) {
+          persistMessage(convId, 'assistant', completedContent, payload.citations);
+        }
       } else if (msg.type === 'chat.error') {
         const payload = msg.payload as { error?: string } | undefined;
         const detail = (payload as { error?: string })?.error ?? 'An error occurred';
@@ -170,7 +197,7 @@ export function AskPage() {
         );
       }
     },
-    [clearStreamTimeout, resetStreamTimeout, recoverFromStreamError],
+    [clearStreamTimeout, resetStreamTimeout, recoverFromStreamError, persistMessage],
   );
 
   useWebSocket(handleWSMessage);
@@ -201,6 +228,19 @@ export function AskPage() {
     const query = input.trim();
     if (!query || isStreaming) return;
 
+    // Ensure we have a conversation.
+    let convId = conversationId;
+    if (!convId) {
+      try {
+        const conv = await createConversation();
+        convId = conv.id;
+        setConversationId(conv.id);
+      } catch {
+        addToast('Failed to create conversation', 'error');
+        return;
+      }
+    }
+
     // Add user message.
     const userMsg: DisplayMessage = { role: 'user', content: query };
     setMessages((prev) => [...prev, userMsg]);
@@ -208,8 +248,10 @@ export function AskPage() {
     setIsStreaming(true);
     isStreamingRef.current = true;
 
+    // Persist user message.
+    persistMessage(convId, 'user', query);
+
     // Build history from previous messages (for multi-turn conversation).
-    // Only send the last N messages to keep server context manageable.
     const allHistory: ChatMessage[] = messages.map((m) => ({
       role: m.role,
       content: m.content,
@@ -217,13 +259,11 @@ export function AskPage() {
     const history = allHistory.slice(-MAX_HISTORY_MESSAGES);
 
     if (useStreaming) {
-      // Send via WebSocket for streaming response.
       wsSend('chat.ask', { query, history });
       streamingRef.current = '';
       setStreamingContent('');
       resetStreamTimeout();
     } else {
-      // Use HTTP endpoint (non-streaming).
       try {
         const result = await askSeam(query, history);
         setMessages((prev) => [
@@ -234,6 +274,7 @@ export function AskPage() {
             citations: result.citations,
           },
         ]);
+        persistMessage(convId, 'assistant', result.response, result.citations);
       } catch {
         setMessages((prev) => [
           ...prev,
@@ -255,14 +296,83 @@ export function AskPage() {
     }
   };
 
+  const handleNewConversation = async () => {
+    try {
+      const conv = await createConversation();
+      setConversationId(conv.id);
+      setMessages([]);
+      setInput('');
+      inputRef.current?.focus();
+    } catch {
+      addToast('Failed to create conversation', 'error');
+    }
+  };
+
+  const handleClearConversation = async () => {
+    if (conversationId) {
+      try {
+        await deleteConversation(conversationId);
+      } catch {
+        addToast('Failed to delete conversation', 'error');
+      }
+    }
+    setConversationId(null);
+    setMessages([]);
+    setInput('');
+    inputRef.current?.focus();
+  };
+
+  const handleSuggestionClick = (suggestion: string) => {
+    setInput(suggestion);
+    // Auto-submit with a slight delay so the input updates visually.
+    setTimeout(() => {
+      inputRef.current?.form?.requestSubmit();
+    }, 0);
+  };
+
+  if (isLoading) {
+    return (
+      <div className={styles.page}>
+        <header className={styles.header}>
+          <h1 className={styles.title}>Ask Seam</h1>
+          <p className={styles.subtitle}>Loading conversation...</p>
+        </header>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <h1 className={styles.title}>Ask Seam</h1>
-        <p className={styles.subtitle}>
-          Ask questions about your notes. Answers are grounded in your knowledge
-          base.
-        </p>
+        <div className={styles.headerRow}>
+          <div>
+            <h1 className={styles.title}>Ask Seam</h1>
+            <p className={styles.subtitle}>
+              Ask questions about your notes. Answers are grounded in your knowledge
+              base.
+            </p>
+          </div>
+          <div className={styles.headerActions}>
+            {messages.length > 0 && (
+              <button
+                className={styles.headerButton}
+                onClick={handleClearConversation}
+                title="Clear conversation"
+                aria-label="Clear conversation"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+            <button
+              className={styles.headerButton}
+              onClick={handleNewConversation}
+              title="New conversation"
+              aria-label="New conversation"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
       </header>
 
       <div className={styles.chatArea}>
@@ -271,6 +381,17 @@ export function AskPage() {
             <p className={styles.emptyText}>
               Ask a question and Seam will search your notes to find the answer.
             </p>
+            <div className={styles.suggestions}>
+              {STARTER_SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  className={styles.suggestionChip}
+                  onClick={() => handleSuggestionClick(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -292,15 +413,15 @@ export function AskPage() {
             {msg.citations && msg.citations.length > 0 && (
               <div className={styles.citations}>
                 <span className={styles.citationsLabel}>Sources:</span>
-                {msg.citations.map((noteId) => (
+                {msg.citations.map((citation) => (
                   <button
-                    key={noteId}
+                    key={citation.id}
                     className={styles.citationLink}
-                    onClick={() => navigate(`/notes/${noteId}`)}
-                    title={noteId}
+                    onClick={() => navigate(`/notes/${citation.id}`)}
+                    title={citation.title}
                   >
                     <FileText size={12} />
-                    <span>{citationTitles.get(noteId) ?? noteId.slice(0, 8)}</span>
+                    <span>{citation.title.length > 30 ? citation.title.slice(0, 30) + '...' : citation.title}</span>
                   </button>
                 ))}
               </div>

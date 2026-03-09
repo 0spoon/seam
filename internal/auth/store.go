@@ -40,6 +40,8 @@ type Store interface {
 	CreateUser(ctx context.Context, u *User) error
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
 	GetUserByID(ctx context.Context, id string) (*User, error)
+	UpdateUserPassword(ctx context.Context, id, passwordHash string) error
+	UpdateUserEmail(ctx context.Context, id, email string) error
 
 	CreateRefreshToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error
 	GetRefreshToken(ctx context.Context, tokenHash string) (userID string, expiresAt time.Time, err error)
@@ -132,6 +134,49 @@ func (s *SQLStore) GetUserByID(ctx context.Context, id string) (*User, error) {
 			"user_id", id, "raw", updatedAt, "error", parseErr)
 	}
 	return u, nil
+}
+
+// UpdateUserPassword updates the password hash for a user.
+func (s *SQLStore) UpdateUserPassword(ctx context.Context, id, passwordHash string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE users SET password = ?, updated_at = ? WHERE id = ?`,
+		passwordHash, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("auth.Store.UpdateUserPassword: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("auth.Store.UpdateUserPassword: rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("auth.Store.UpdateUserPassword: %w", ErrNotFound)
+	}
+	return nil
+}
+
+// UpdateUserEmail updates the email for a user.
+func (s *SQLStore) UpdateUserEmail(ctx context.Context, id, email string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE users SET email = ?, updated_at = ? WHERE id = ?`,
+		email, now, id,
+	)
+	if err != nil {
+		if isUniqueConstraintError(err) {
+			return fmt.Errorf("auth.Store.UpdateUserEmail: %w", ErrUserExists)
+		}
+		return fmt.Errorf("auth.Store.UpdateUserEmail: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("auth.Store.UpdateUserEmail: rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("auth.Store.UpdateUserEmail: %w", ErrNotFound)
+	}
+	return nil
 }
 
 // CreateRefreshToken stores a hashed refresh token.

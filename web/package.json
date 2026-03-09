@@ -18,6 +18,7 @@
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "^6.39.16",
     "@lezer/highlight": "^1.2.3",
+    "@tanstack/react-virtual": "^3.13.21",
     "@uiw/react-codemirror": "^4.25.8",
     "codemirror": "^6.0.2",
     "cytoscape": "^3.33.1",

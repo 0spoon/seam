@@ -116,9 +116,14 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface ChatCitation {
+  id: string;
+  title: string;
+}
+
 export interface ChatResult {
   response: string;
-  citations: string[];
+  citations: ChatCitation[];
 }
 
 export interface SynthesizeReq {
@@ -206,6 +211,23 @@ export interface GraphFilter {
   since?: string;
   until?: string;
   limit?: number;
+}
+
+// Phase 2: Chat history types
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatHistoryMessage {
+  id: string;
+  conversation_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  citations?: ChatCitation[];
+  created_at: string;
 }
 
 // Phase 4: Two-hop backlinks (includes the intermediate connecting note)

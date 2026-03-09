@@ -2,8 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { motion } from 'motion/react';
-import { Loader2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   Bold,
   Italic,
@@ -22,6 +21,10 @@ import {
   Check,
   X,
   Sparkles,
+  Copy,
+  ExternalLink,
+  Files,
+  Download,
 } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -39,7 +42,9 @@ import {
   wikilinkDecorationTheme,
   wikilinkAutocomplete,
 } from './wikilinkExtension';
-import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage } from '../../api/types';
+import { EditorSkeleton } from '../../components/Skeleton/Skeleton';
+import { ConfirmModal } from '../../components/ConfirmModal/ConfirmModal';
+import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
 type ViewMode = 'editor' | 'split' | 'preview';
@@ -59,6 +64,7 @@ export function NoteEditorPage() {
   const toggleRightPanel = useUIStore((s) => s.toggleRightPanel);
 
   const [viewMode, setViewMode] = useState<ViewMode>('split');
+  const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [noteLoading, setNoteLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
@@ -68,13 +74,17 @@ export function NoteEditorPage() {
   const [twoHopBacklinks, setTwoHopBacklinks] = useState<TwoHopBacklink[]>([]);
   const [isOrphan, setIsOrphan] = useState(false);
   const [showAIMenu, setShowAIMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const aiMenuRef = useRef<HTMLDivElement>(null);
   const addToast = useToastStore((s) => s.addToast);
   const [aiLoading, setAILoading] = useState(false);
   const [aiResult, setAIResult] = useState<{ action: string; text: string } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const titleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const contentRef = useRef('');
+  const titleRef = useRef('');
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -143,7 +153,16 @@ export function NoteEditorPage() {
     if (currentNote) {
       setContent(currentNote.body);
       contentRef.current = currentNote.body;
+      setTitle(currentNote.title);
+      titleRef.current = currentNote.title;
       setSaveStatus('saved');
+      // Auto-focus and select title when it's "Untitled"
+      if (currentNote.title === 'Untitled') {
+        setTimeout(() => {
+          titleInputRef.current?.focus();
+          titleInputRef.current?.select();
+        }, 100);
+      }
     }
   }, [currentNote?.id]); // Only reset content on note change, not on every update
 
@@ -155,8 +174,30 @@ export function NoteEditorPage() {
       setSaveStatus('saved');
     } catch {
       setSaveStatus('unsaved');
+      addToast('Failed to save note', 'error');
     }
-  }, [id, updateNote]);
+  }, [id, updateNote, addToast]);
+
+  const handleTitleChange = useCallback((newTitle: string) => {
+    setTitle(newTitle);
+    titleRef.current = newTitle;
+    setSaveStatus('unsaved');
+
+    if (titleTimerRef.current) {
+      clearTimeout(titleTimerRef.current);
+    }
+    titleTimerRef.current = setTimeout(async () => {
+      if (!id) return;
+      setSaveStatus('saving');
+      try {
+        await updateNote(id, { title: newTitle });
+        setSaveStatus('saved');
+      } catch {
+        setSaveStatus('unsaved');
+        addToast('Failed to save title', 'error');
+      }
+    }, 1000);
+  }, [id, updateNote, addToast]);
 
   const handleChange = useCallback((value: string) => {
     setContent(value);
@@ -171,7 +212,7 @@ export function NoteEditorPage() {
     }, 1000);
   }, [handleSave]);
 
-  // Cleanup save timer on unmount -- flush any pending save.
+  // Cleanup save timers on unmount -- flush any pending saves.
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) {
@@ -179,21 +220,73 @@ export function NoteEditorPage() {
         // Flush the pending save with the latest content.
         handleSave(contentRef.current);
       }
-    };
-  }, [handleSave]);
-
-  const handleDelete = async () => {
-    if (!id) return;
-    if (window.confirm('Delete this note? This cannot be undone.')) {
-      try {
-        await deleteNote(id);
-        navigate('/');
-      } catch {
-        // Error is surfaced via noteStore.error
+      if (titleTimerRef.current) {
+        clearTimeout(titleTimerRef.current);
+        // Flush the pending title save.
+        if (id && titleRef.current !== currentNote?.title) {
+          updateNote(id, { title: titleRef.current });
+        }
       }
-    }
+    };
+  }, [handleSave, id, updateNote, currentNote?.title]);
+
+  const handleDeleteClick = () => {
     setShowMenu(false);
+    setShowDeleteConfirm(true);
   };
+
+  const handleDeleteConfirm = async () => {
+    if (!id) return;
+    setShowDeleteConfirm(false);
+    try {
+      await deleteNote(id);
+      navigate('/');
+    } catch {
+      addToast('Failed to delete note', 'error');
+    }
+  };
+
+  const handleDuplicate = useCallback(async () => {
+    if (!currentNote) return;
+    setShowMenu(false);
+    try {
+      const { createNote } = useNoteStore.getState();
+      const note = await createNote({
+        title: `${currentNote.title} (copy)`,
+        body: currentNote.body,
+        project_id: currentNote.project_id,
+        tags: currentNote.tags,
+      });
+      navigate(`/notes/${note.id}`);
+    } catch {
+      addToast('Failed to duplicate note', 'error');
+    }
+  }, [currentNote, navigate, addToast]);
+
+  const handleCopyLink = useCallback(() => {
+    if (!id) return;
+    setShowMenu(false);
+    navigator.clipboard.writeText(`${window.location.origin}/notes/${id}`);
+    addToast('Link copied to clipboard', 'success');
+  }, [id, addToast]);
+
+  const handleExportMarkdown = useCallback(() => {
+    if (!currentNote) return;
+    setShowMenu(false);
+    const blob = new Blob([currentNote.body], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${currentNote.title.replace(/[/\\]/g, '_')}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [currentNote]);
+
+  const handleOpenInNewTab = useCallback(() => {
+    if (!id) return;
+    setShowMenu(false);
+    window.open(`/notes/${id}`, '_blank');
+  }, [id]);
 
   const handleAcceptLink = useCallback(
     (targetTitle: string) => {
@@ -230,11 +323,96 @@ export function NoteEditorPage() {
   const handleProjectChange = useCallback(async (newProjectId: string) => {
     if (!id) return;
     try {
-      await updateNote(id, { project_id: newProjectId || null });
+      await updateNote(id, { project_id: newProjectId || '' });
     } catch {
-      // Failed silently
+      addToast('Failed to move note', 'error');
     }
-  }, [id, updateNote]);
+  }, [id, updateNote, addToast]);
+
+  // -- Tag editing --
+  const allTags = useUIStore((s) => s.tags);
+  const fetchTags = useUIStore((s) => s.fetchTags);
+  const [tagInput, setTagInput] = useState('');
+  const [tagSuggestions, setTagSuggestions] = useState<TagCount[]>([]);
+  const [tagSuggestionIndex, setTagSuggestionIndex] = useState(-1);
+  const tagTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const saveTagsDebounced = useCallback((newTags: string[]) => {
+    if (!id) return;
+    if (tagTimerRef.current) clearTimeout(tagTimerRef.current);
+    tagTimerRef.current = setTimeout(async () => {
+      try {
+        await updateNote(id, { tags: newTags });
+        fetchTags();
+      } catch {
+        addToast('Failed to update tags', 'error');
+      }
+    }, 500);
+  }, [id, updateNote, fetchTags, addToast]);
+
+  const handleAddTag = useCallback((tagName: string) => {
+    const cleaned = tagName.trim().replace(/^#/, '').toLowerCase();
+    if (!cleaned || !currentNote) return;
+    const existing = currentNote.tags ?? [];
+    if (existing.includes(cleaned)) {
+      setTagInput('');
+      return;
+    }
+    const newTags = [...existing, cleaned];
+    saveTagsDebounced(newTags);
+    setTagInput('');
+    setTagSuggestions([]);
+    setTagSuggestionIndex(-1);
+  }, [currentNote, saveTagsDebounced]);
+
+  const handleRemoveTag = useCallback((tagName: string) => {
+    if (!currentNote) return;
+    const existing = currentNote.tags ?? [];
+    const newTags = existing.filter((t) => t !== tagName);
+    saveTagsDebounced(newTags);
+  }, [currentNote, saveTagsDebounced]);
+
+  const handleTagInputChange = useCallback((value: string) => {
+    setTagInput(value);
+    setTagSuggestionIndex(-1);
+    if (!value.trim()) {
+      setTagSuggestions([]);
+      return;
+    }
+    const query = value.trim().toLowerCase().replace(/^#/, '');
+    const existing = new Set(currentNote?.tags ?? []);
+    const matches = allTags
+      .filter((t) => t.name.toLowerCase().includes(query) && !existing.has(t.name))
+      .slice(0, 8);
+    setTagSuggestions(matches);
+  }, [allTags, currentNote?.tags]);
+
+  const handleTagInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (tagSuggestionIndex >= 0 && tagSuggestionIndex < tagSuggestions.length) {
+        handleAddTag(tagSuggestions[tagSuggestionIndex].name);
+      } else if (tagInput.trim()) {
+        handleAddTag(tagInput);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setTagSuggestionIndex((i) => Math.min(i + 1, tagSuggestions.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setTagSuggestionIndex((i) => Math.max(i - 1, -1));
+    } else if (e.key === 'Escape') {
+      setTagSuggestions([]);
+      setTagSuggestionIndex(-1);
+    }
+  }, [tagInput, tagSuggestions, tagSuggestionIndex, handleAddTag]);
+
+  // Cleanup tag timer on unmount
+  useEffect(() => {
+    return () => {
+      if (tagTimerRef.current) clearTimeout(tagTimerRef.current);
+    };
+  }, []);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -391,9 +569,21 @@ export function NoteEditorPage() {
     };
   }, [navigate, viewMode]);
 
+  const wordStats = useMemo(() => {
+    const chars = content.length;
+    const words = content.trim() ? content.trim().split(/\s+/).length : 0;
+    const readingMinutes = Math.max(1, Math.ceil(words / 238));
+    return { words, chars, readingMinutes };
+  }, [content]);
+
   const renderedHtml = useMemo(
     () => (viewMode === 'editor' ? '' : sanitizeHtml(renderMarkdown(content))),
     [content, viewMode],
+  );
+
+  const cmExtensions = useMemo(
+    () => [markdown(), wikilinkDecorationPlugin, wikilinkDecorationTheme, wikilinkAutocomplete],
+    [],
   );
 
   return (
@@ -521,7 +711,24 @@ export function NoteEditorPage() {
             </button>
             {showMenu && (
               <div className={styles.menu} role="menu">
-                <button className={styles.menuItem} role="menuitem" onClick={handleDelete}>
+                <button className={styles.menuItemDefault} role="menuitem" onClick={handleDuplicate}>
+                  <Files size={14} />
+                  Duplicate note
+                </button>
+                <button className={styles.menuItemDefault} role="menuitem" onClick={handleCopyLink}>
+                  <Copy size={14} />
+                  Copy link
+                </button>
+                <button className={styles.menuItemDefault} role="menuitem" onClick={handleExportMarkdown}>
+                  <Download size={14} />
+                  Export as Markdown
+                </button>
+                <button className={styles.menuItemDefault} role="menuitem" onClick={handleOpenInNewTab}>
+                  <ExternalLink size={14} />
+                  Open in new tab
+                </button>
+                <div className={styles.menuDivider} />
+                <button className={styles.menuItem} role="menuitem" onClick={handleDeleteClick}>
                   <Trash2 size={14} />
                   Delete note
                 </button>
@@ -534,10 +741,7 @@ export function NoteEditorPage() {
       {/* Content area */}
       <div className={styles.contentArea}>
         {noteLoading ? (
-          <div className={styles.noteLoadingState}>
-            <Loader2 size={24} className={styles.noteLoadingSpinner} />
-            <span className={styles.noteLoadingText}>Loading note...</span>
-          </div>
+          <EditorSkeleton />
         ) : (<>
         <div className={styles.editorWrapper}>
           {/* Editor pane */}
@@ -546,16 +750,20 @@ export function NoteEditorPage() {
               className={styles.editorPane}
               style={{ flex: viewMode === 'split' ? '1' : undefined }}
             >
+              <input
+                ref={titleInputRef}
+                type="text"
+                className={styles.titleInput}
+                value={title}
+                onChange={(e) => handleTitleChange(e.target.value)}
+                placeholder="Untitled"
+                aria-label="Note title"
+              />
               <CodeMirror
                 ref={editorRef}
                 value={content}
                 onChange={handleChange}
-                extensions={[
-                  markdown(),
-                  wikilinkDecorationPlugin,
-                  wikilinkDecorationTheme,
-                  wikilinkAutocomplete,
-                ]}
+                extensions={cmExtensions}
                 theme={seamEditorTheme}
                 basicSetup={{
                   lineNumbers: true,
@@ -564,6 +772,13 @@ export function NoteEditorPage() {
                 }}
                 className={styles.codeMirror}
               />
+              <div className={styles.wordCountBar}>
+                <span>{wordStats.words.toLocaleString()} words</span>
+                <span className={styles.wordCountSeparator}>/</span>
+                <span>{wordStats.chars.toLocaleString()} chars</span>
+                <span className={styles.wordCountSeparator}>/</span>
+                <span>{wordStats.readingMinutes} min read</span>
+              </div>
             </div>
           )}
 
@@ -575,7 +790,7 @@ export function NoteEditorPage() {
               style={{ flex: viewMode === 'split' ? '1' : undefined }}
             >
               <div className={styles.previewContent}>
-                <h1 className={styles.previewTitle}>{currentNote?.title}</h1>
+                <h1 className={styles.previewTitle}>{title || 'Untitled'}</h1>
                 <div
                   className={styles.renderedMarkdown}
                   dangerouslySetInnerHTML={{ __html: renderedHtml }}
@@ -586,8 +801,15 @@ export function NoteEditorPage() {
         </div>
 
         {/* Right panel */}
+        <AnimatePresence>
         {rightPanelOpen && (
-          <aside className={styles.rightPanel}>
+          <motion.aside
+            className={styles.rightPanel}
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0, 0, 0.2, 1] }}
+          >
             {/* Link suggestions */}
             {linkSuggestions.length > 0 && (
               <section className={styles.panelSection}>
@@ -768,10 +990,48 @@ export function NoteEditorPage() {
                     }}
                   >
                     #{tag}
+                    <button
+                      className={styles.tagRemove}
+                      onClick={() => handleRemoveTag(tag)}
+                      aria-label={`Remove tag ${tag}`}
+                    >
+                      <X size={10} />
+                    </button>
                   </span>
                 ))}
-                {(!currentNote?.tags || currentNote.tags.length === 0) && (
-                  <p className={styles.panelEmpty}>No tags</p>
+              </div>
+              <div className={styles.tagInputWrapper}>
+                <input
+                  type="text"
+                  className={styles.tagInputField}
+                  placeholder="Add tag..."
+                  value={tagInput}
+                  onChange={(e) => handleTagInputChange(e.target.value)}
+                  onKeyDown={handleTagInputKeyDown}
+                  onBlur={() => {
+                    // Delay to allow click on suggestion
+                    setTimeout(() => {
+                      setTagSuggestions([]);
+                      setTagSuggestionIndex(-1);
+                    }, 150);
+                  }}
+                  aria-label="Add tag"
+                />
+                {tagSuggestions.length > 0 && (
+                  <div className={styles.tagSuggestions}>
+                    {tagSuggestions.map((t, i) => (
+                      <button
+                        key={t.name}
+                        className={`${styles.tagSuggestionItem} ${i === tagSuggestionIndex ? styles.tagSuggestionItemActive : ''}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleAddTag(t.name);
+                        }}
+                      >
+                        #{t.name} ({t.count})
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             </section>
@@ -818,8 +1078,9 @@ export function NoteEditorPage() {
                 </div>
               </div>
             </section>
-          </aside>
+          </motion.aside>
         )}
+        </AnimatePresence>
         </>)}
       </div>
 
@@ -833,6 +1094,16 @@ export function NoteEditorPage() {
         )}
         {saveStatus === 'unsaved' && 'Unsaved'}
       </div>
+
+      <ConfirmModal
+        open={showDeleteConfirm}
+        title="Delete note"
+        message="This note will be permanently deleted. This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   );
 }

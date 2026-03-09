@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Note } from '../../api/types';
 import { timeAgo } from '../../lib/dates';
@@ -10,7 +11,7 @@ interface NoteCardProps {
   projectColor?: string;
 }
 
-export function NoteCard({ note, projectName, projectColor }: NoteCardProps) {
+export const NoteCard = memo(function NoteCard({ note, projectName, projectColor }: NoteCardProps) {
   const navigate = useNavigate();
 
   const preview = note.body
@@ -66,4 +67,4 @@ export function NoteCard({ note, projectName, projectColor }: NoteCardProps) {
       </div>
     </article>
   );
-}
+});

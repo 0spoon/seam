@@ -19,18 +19,6 @@
   font-size: var(--font-size-sm);
   color: var(--text-primary);
   cursor: pointer;
-  animation: toastIn var(--duration-normal) var(--ease-out);
-}
-
-@keyframes toastIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .error {

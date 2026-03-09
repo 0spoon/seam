@@ -16,10 +16,12 @@ import (
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/auth"
 	"github.com/katata/seam/internal/capture"
+	"github.com/katata/seam/internal/chat"
 	"github.com/katata/seam/internal/graph"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/search"
+	"github.com/katata/seam/internal/settings"
 	"github.com/katata/seam/internal/template"
 	"github.com/katata/seam/internal/ws"
 )
@@ -48,6 +50,8 @@ type Config struct {
 	CaptureHandler   *capture.Handler
 	TemplateHandler  *template.Handler
 	GraphHandler     *graph.Handler
+	SettingsHandler  *settings.Handler
+	ChatHandler      *chat.Handler
 	WSMessageHandler ws.MessageHandler
 }
 
@@ -97,6 +101,12 @@ func New(cfg Config) *Server {
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(cfg.JWTManager))
 
+		if cfg.AuthHandler != nil {
+			r.Route("/api/auth", func(r chi.Router) {
+				r.Mount("/", cfg.AuthHandler.ProtectedRoutes())
+			})
+		}
+
 		if cfg.ProjectHandler != nil {
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Mount("/", cfg.ProjectHandler.Routes())
@@ -139,6 +149,18 @@ func New(cfg Config) *Server {
 		if cfg.GraphHandler != nil {
 			r.Route("/api/graph", func(r chi.Router) {
 				r.Mount("/", cfg.GraphHandler.Routes())
+			})
+		}
+
+		if cfg.SettingsHandler != nil {
+			r.Route("/api/settings", func(r chi.Router) {
+				r.Mount("/", cfg.SettingsHandler.Routes())
+			})
+		}
+
+		if cfg.ChatHandler != nil {
+			r.Route("/api/chat", func(r chi.Router) {
+				r.Mount("/", cfg.ChatHandler.Routes())
 			})
 		}
 	})

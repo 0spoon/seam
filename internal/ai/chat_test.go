@@ -120,7 +120,9 @@ func TestChatService_Ask(t *testing.T) {
 	result, err := chat.Ask(ctx, "user1", "Tell me about caching", nil)
 	require.NoError(t, err)
 	require.Contains(t, result.Response, "caching")
-	require.Contains(t, result.Citations, "note1")
+	require.Len(t, result.Citations, 1)
+	require.Equal(t, "note1", result.Citations[0].ID)
+	require.Equal(t, "API Design", result.Citations[0].Title)
 }
 
 func TestChatService_HandleChatTask(t *testing.T) {

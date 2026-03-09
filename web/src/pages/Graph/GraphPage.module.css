@@ -245,3 +245,13 @@
   outline: 2px solid var(--accent-primary);
   outline-offset: -2px;
 }
+
+/* Responsive: <640px filter panel full-width overlay */
+@media (max-width: 640px) {
+  .filterPanel {
+    top: 44px;
+    left: var(--space-2);
+    right: var(--space-2);
+    width: auto;
+  }
+}

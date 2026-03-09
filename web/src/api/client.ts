@@ -29,6 +29,8 @@ import type {
   GraphFilter,
   GraphNode,
   TwoHopBacklink,
+  Conversation,
+  ChatHistoryMessage,
 } from './types';
 
 const BASE_URL = '/api';
@@ -441,6 +443,40 @@ export async function getOrphanNotes(): Promise<GraphNode[]> {
   return request<GraphNode[]>('/graph/orphans');
 }
 
+// Account management endpoints
+export async function getMe(): Promise<{ id: string; username: string; email: string }> {
+  return request<{ id: string; username: string; email: string }>('/auth/me');
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await request<void>('/auth/password', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+export async function updateEmail(email: string): Promise<void> {
+  await request<void>('/auth/email', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+// Settings endpoints
+export async function getSettings(): Promise<Record<string, string>> {
+  return request<Record<string, string>>('/settings/');
+}
+
+export async function updateSettings(settings: Record<string, string>): Promise<void> {
+  await request<void>('/settings/', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+}
+
 // Search endpoints
 export async function searchFTS(
   query: string,
@@ -458,4 +494,54 @@ export async function searchFTS(
   const results: FTSResult[] = await res.json();
   const total = parseInt(res.headers.get('X-Total-Count') ?? '0', 10);
   return { results, total };
+}
+
+// Chat history endpoints
+
+export async function createConversation(): Promise<Conversation> {
+  return request<Conversation>('/chat/conversations', {
+    method: 'POST',
+  });
+}
+
+export async function listConversations(
+  limit = 20,
+  offset = 0,
+): Promise<{ conversations: Conversation[]; total: number }> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  const res = await requestRaw(`/chat/conversations?${params}`);
+  const conversations: Conversation[] = await res.json();
+  const total = parseInt(res.headers.get('X-Total-Count') ?? '0', 10);
+  return { conversations, total };
+}
+
+export async function getConversation(
+  id: string,
+): Promise<{ conversation: Conversation; messages: ChatHistoryMessage[] }> {
+  return request<{ conversation: Conversation; messages: ChatHistoryMessage[] }>(
+    `/chat/conversations/${id}`,
+  );
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  await request<void>(`/chat/conversations/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function addChatMessage(
+  conversationId: string,
+  message: {
+    role: string;
+    content: string;
+    citations?: Array<{ id: string; title: string }>;
+  },
+): Promise<void> {
+  await request<void>(`/chat/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify(message),
+  });
 }

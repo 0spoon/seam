@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { AnimatePresence, motion } from 'motion/react';
 import styles from './Toast.module.css';
 
 interface Toast {
@@ -37,13 +38,13 @@ export const useToastStore = create<ToastState>((set) => ({
 export function ToastContainer() {
   const toasts = useToastStore((s) => s.toasts);
 
-  if (toasts.length === 0) return null;
-
   return (
     <div className={styles.container} role="status" aria-live="polite">
-      {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} />
-      ))}
+      <AnimatePresence mode="popLayout">
+        {toasts.map((toast) => (
+          <ToastItem key={toast.id} toast={toast} />
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
@@ -52,11 +53,16 @@ function ToastItem({ toast }: { toast: Toast }) {
   const removeToast = useToastStore((s) => s.removeToast);
 
   return (
-    <div
+    <motion.div
+      layout
       className={`${styles.toast} ${styles[toast.type]}`}
       onClick={() => removeToast(toast.id)}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
     >
       {toast.message}
-    </div>
+    </motion.div>
   );
 }

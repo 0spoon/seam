@@ -19,13 +19,28 @@
   height: fit-content;
 }
 
+.inputRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 var(--space-4);
+}
+
+.modeLabel {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--accent-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .input {
   width: 100%;
   height: 48px;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3) 0;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--border-subtle);
   font-family: var(--font-ui);
   font-size: var(--font-size-base);
   color: var(--text-primary);
@@ -40,9 +55,23 @@
 }
 
 .results {
-  max-height: 300px;
+  max-height: 360px;
   overflow-y: auto;
-  padding: var(--space-2);
+  padding: var(--space-1);
+}
+
+.sectionHeader {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-1);
+}
+
+.sectionHeader:first-child {
+  margin-top: 0;
 }
 
 .item {
@@ -67,13 +96,37 @@
 .icon {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   color: var(--text-tertiary);
+}
+
+.selected .icon {
+  color: var(--accent-primary);
 }
 
 .label {
   flex: 1;
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.highlight {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.meta {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
 }
 
 .shortcut {
@@ -83,6 +136,7 @@
   padding: 2px 6px;
   background: var(--bg-base);
   border-radius: var(--radius-sm);
+  flex-shrink: 0;
 }
 
 .empty {

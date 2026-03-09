@@ -1,5 +1,5 @@
 import { useMemo, useEffect, useState, useRef } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { Menu } from 'lucide-react';
 import { Sidebar } from '../Sidebar/Sidebar';
@@ -8,10 +8,17 @@ import { CaptureModal } from '../Modal/CaptureModal';
 import { ToastContainer } from '../Toast/ToastContainer';
 import { useUIStore } from '../../stores/uiStore';
 import { useKeyboard } from '../../hooks/useKeyboard';
+import { setNavigate } from '../../lib/navigation';
 import styles from './Layout.module.css';
 
 export function Layout() {
   const location = useLocation();
+  const nav = useNavigate();
+
+  // Wire navigation helper so command registry actions can route.
+  useEffect(() => {
+    setNavigate(nav);
+  }, [nav]);
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);

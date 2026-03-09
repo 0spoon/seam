@@ -106,14 +106,17 @@ export function TimelinePage() {
 
   const dateGroups = groupNotesByDate(notes, sortMode);
 
-  // Scroll to date when jump date changes.
+  // Scroll to date when jump date changes. If the target date is not
+  // in the currently loaded notes, show a toast informing the user.
   useEffect(() => {
     if (!jumpDate) return;
     const el = document.getElementById(`date-${jumpDate}`);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (!loading && notes.length > 0) {
+      addToast('No notes found for this date in the loaded range. Try loading more notes.', 'info');
     }
-  }, [jumpDate]);
+  }, [jumpDate, loading, notes.length, addToast]);
 
   if (loading) {
     return (

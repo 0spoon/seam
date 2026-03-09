@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,14 +12,22 @@ import (
 	"github.com/katata/seam/internal/reqctx"
 )
 
+// ServiceInterface defines the business logic methods for settings.
+// It is satisfied by *Service and enables unit testing with mocks.
+type ServiceInterface interface {
+	GetAll(ctx context.Context, userID string) (map[string]string, error)
+	Update(ctx context.Context, userID string, settings map[string]string) error
+	Delete(ctx context.Context, userID, key string) error
+}
+
 // Handler handles HTTP requests for settings endpoints.
 type Handler struct {
-	service *Service
+	service ServiceInterface
 	logger  *slog.Logger
 }
 
 // NewHandler creates a new settings Handler.
-func NewHandler(service *Service, logger *slog.Logger) *Handler {
+func NewHandler(service ServiceInterface, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -43,7 +52,7 @@ func (h *Handler) getAll(w http.ResponseWriter, r *http.Request) {
 
 	settings, err := h.service.GetAll(r.Context(), userID)
 	if err != nil {
-		h.logger.Error("get settings failed", "error", err)
+		h.logger.Error("get settings failed", "error", err, "request_id", reqctx.RequestIDFromContext(r.Context()))
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -85,7 +94,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid setting value")
 			return
 		}
-		h.logger.Error("update settings failed", "error", err)
+		h.logger.Error("update settings failed", "error", err, "request_id", reqctx.RequestIDFromContext(r.Context()))
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -112,7 +121,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "unknown setting key")
 			return
 		}
-		h.logger.Error("delete setting failed", "error", err)
+		h.logger.Error("delete setting failed", "error", err, "request_id", reqctx.RequestIDFromContext(r.Context()))
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}

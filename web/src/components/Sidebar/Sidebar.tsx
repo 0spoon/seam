@@ -384,14 +384,14 @@ export function Sidebar() {
 
         {/* Projects */}
         <div className={styles.section}>
-          {!collapsed && (
-            <div className={styles.sectionHeaderRow}>
-              <button
-                className={styles.sectionHeader}
-                onClick={() => setProjectsExpanded(!projectsExpanded)}
-              >
-                Projects
-              </button>
+          <div className={`${styles.sectionHeaderRow} ${styles.fadeLabel}`}>
+            <button
+              className={styles.sectionHeader}
+              onClick={() => setProjectsExpanded(!projectsExpanded)}
+            >
+              Projects
+            </button>
+            {!collapsed && (
               <button
                 className={styles.sectionAction}
                 onClick={() => setShowNewProject(!showNewProject)}
@@ -400,8 +400,8 @@ export function Sidebar() {
               >
                 <Plus size={12} />
               </button>
-            </div>
-          )}
+            )}
+          </div>
           {!collapsed && showNewProject && (
             <div className={styles.newProjectRow}>
               <input
@@ -518,29 +518,27 @@ export function Sidebar() {
         </div>
 
         {/* Tags */}
-        {!collapsed && (
-          <div className={styles.section}>
-            <button
-              className={styles.sectionHeader}
-              onClick={() => setTagsExpanded(!tagsExpanded)}
-            >
-              Tags
-            </button>
-            {tagsExpanded &&
-              tags.slice(0, 10).map((tag) => (
-                <button
-                  key={tag.name}
-                  className={styles.navItem}
-                  onClick={() => navTo(`/?tag=${encodeURIComponent(tag.name)}`)}
-                  title={`${tag.name} (${tag.count})`}
-                >
-                  <Tag size={14} />
-                  <span className={styles.navLabel}>#{tag.name}</span>
-                  <span className={styles.count}>{tag.count}</span>
-                </button>
-              ))}
-          </div>
-        )}
+        <div className={`${styles.section} ${collapsed ? styles.sectionHidden : ''}`}>
+          <button
+            className={`${styles.sectionHeader} ${styles.fadeLabel}`}
+            onClick={() => setTagsExpanded(!tagsExpanded)}
+          >
+            Tags
+          </button>
+          {!collapsed && tagsExpanded &&
+            tags.slice(0, 10).map((tag) => (
+              <button
+                key={tag.name}
+                className={styles.navItem}
+                onClick={() => navTo(`/?tag=${encodeURIComponent(tag.name)}`)}
+                title={`${tag.name} (${tag.count})`}
+              >
+                <Tag size={14} />
+                <span className={styles.navLabel}>#{tag.name}</span>
+                <span className={styles.count}>{tag.count}</span>
+              </button>
+            ))}
+        </div>
       </div>
 
       <div className={styles.bottom}>
@@ -605,32 +603,16 @@ export function Sidebar() {
       onConfirm={handleDeleteProject}
       onCancel={() => setDeleteConfirm({ open: false, projectId: '', projectName: '' })}
     >
-      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+      <div className={styles.cascadeToggle}>
         <button
+          className={`${styles.cascadeButton} ${deleteCascade === 'inbox' ? styles.cascadeButtonActive : ''}`}
           onClick={() => setDeleteCascade('inbox')}
-          style={{
-            padding: '4px 10px',
-            borderRadius: 'var(--radius-sm)',
-            fontSize: 'var(--font-size-xs)',
-            fontFamily: 'var(--font-ui)',
-            border: `1px solid ${deleteCascade === 'inbox' ? 'var(--accent-primary)' : 'var(--border-default)'}`,
-            color: deleteCascade === 'inbox' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-            background: deleteCascade === 'inbox' ? 'var(--accent-muted)' : 'transparent',
-          }}
         >
           Keep notes
         </button>
         <button
+          className={`${styles.cascadeButton} ${deleteCascade === 'delete' ? styles.cascadeButtonDanger : ''}`}
           onClick={() => setDeleteCascade('delete')}
-          style={{
-            padding: '4px 10px',
-            borderRadius: 'var(--radius-sm)',
-            fontSize: 'var(--font-size-xs)',
-            fontFamily: 'var(--font-ui)',
-            border: `1px solid ${deleteCascade === 'delete' ? 'var(--status-error)' : 'var(--border-default)'}`,
-            color: deleteCascade === 'delete' ? 'var(--status-error)' : 'var(--text-secondary)',
-            background: deleteCascade === 'delete' ? 'rgba(196,107,107,0.1)' : 'transparent',
-          }}
         >
           Delete everything
         </button>

@@ -142,7 +142,7 @@
 }
 
 .dangerButton:hover {
-  background: rgba(196, 107, 107, 0.1);
+  background: color-mix(in srgb, var(--status-error) 10%, transparent);
 }
 
 .shortcutsTable {
@@ -198,6 +198,24 @@
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   line-height: var(--line-height-normal);
+}
+
+.aboutVersion {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-top: var(--space-2);
+}
+
+.aboutLink {
+  color: var(--accent-primary);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.aboutLink:hover {
+  color: var(--accent-hover);
 }
 
 /* Responsive: <640px tighter padding, room for hamburger */

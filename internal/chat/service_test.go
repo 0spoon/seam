@@ -170,7 +170,7 @@ func TestService_AddMessage_InvalidRole(t *testing.T) {
 		Content:        "bad",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid role")
+	require.ErrorIs(t, err, ErrInvalidRole)
 }
 
 func TestService_AddMessage_AutoTitle(t *testing.T) {

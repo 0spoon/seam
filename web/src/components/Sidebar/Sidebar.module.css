@@ -217,6 +217,12 @@
   margin-top: var(--space-2);
 }
 
+.sectionHidden {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
 .sectionHeaderRow {
   display: flex;
   align-items: center;
@@ -448,10 +454,13 @@
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg-deep) 60%, transparent);
   min-width: 160px;
   z-index: var(--z-dropdown);
   padding: var(--space-1);
+  /* Prevent overflow beyond viewport bottom */
+  max-height: calc(100vh - var(--space-8));
+  overflow-y: auto;
 }
 
 .contextMenuItem {
@@ -505,6 +514,38 @@
   outline: none;
 }
 
+.cascadeToggle {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.cascadeButton {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-ui);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.cascadeButtonActive {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: var(--accent-muted);
+}
+
+.cascadeButtonDanger {
+  border-color: var(--status-error);
+  color: var(--status-error);
+  background: color-mix(in srgb, var(--status-error) 10%, transparent);
+}
+
 /* 640-1024px: collapsed sidebar (icons only, 52px) */
 @media (max-width: 1024px) {
   .sidebar {
@@ -528,6 +569,6 @@
 
   .sidebar.mobileOpen {
     transform: translateX(0);
-    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.3);
+    box-shadow: 8px 0 24px color-mix(in srgb, var(--bg-deep) 60%, transparent);
   }
 }

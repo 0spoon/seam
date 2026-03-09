@@ -1,7 +1,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 9, 13, 0.75);
+  background: color-mix(in srgb, var(--bg-deep) 75%, transparent);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -80,5 +80,5 @@
 }
 
 .destructiveButton:hover {
-  background: #d47a7a;
+  background: color-mix(in srgb, var(--status-error) 80%, white 20%);
 }

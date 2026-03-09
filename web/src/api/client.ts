@@ -127,7 +127,7 @@ async function requestRaw(
     }
   }
 
-  if (res.status === 401 && retry && refreshToken) {
+  if (res.status === 401 && retry && getRefreshToken()) {
     const refreshed = await tryRefresh();
     if (refreshed) {
       return requestRaw(path, options, false);

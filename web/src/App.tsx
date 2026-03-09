@@ -7,7 +7,13 @@ import { useSettingsStore } from './stores/settingsStore';
 import { setOnAuthFailure } from './api/client';
 import { Layout } from './components/Layout/Layout';
 import { LoginPage } from './pages/Login/LoginPage';
-import { FullPageSkeleton, NoteListSkeleton } from './components/Skeleton/Skeleton';
+import {
+  FullPageSkeleton,
+  NoteListSkeleton,
+  EditorSkeleton,
+  GraphSkeleton,
+  GenericPageSkeleton,
+} from './components/Skeleton/Skeleton';
 
 // Lazy-loaded page components for code splitting.
 const InboxPage = lazy(() => import('./pages/Inbox/InboxPage').then((m) => ({ default: m.InboxPage })));
@@ -19,12 +25,28 @@ const GraphPage = lazy(() => import('./pages/Graph/GraphPage').then((m) => ({ de
 const TimelinePage = lazy(() => import('./pages/Timeline/TimelinePage').then((m) => ({ default: m.TimelinePage })));
 const SettingsPage = lazy(() => import('./pages/Settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 
-function PageFallback() {
+function NoteListFallback() {
   return (
     <div style={{ padding: 'var(--space-6)' }}>
       <NoteListSkeleton count={4} />
     </div>
   );
+}
+
+function EditorFallback() {
+  return (
+    <div style={{ padding: 'var(--space-6)' }}>
+      <EditorSkeleton />
+    </div>
+  );
+}
+
+function GraphFallback() {
+  return <GraphSkeleton />;
+}
+
+function GenericFallback() {
+  return <GenericPageSkeleton />;
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -60,7 +82,9 @@ export function App() {
     if (isAuthenticated) {
       fetchProjects();
       fetchTags();
-      fetchSettings();
+      fetchSettings().then(() => {
+        useUIStore.getState().bridgeFromSettings();
+      });
     }
   }, [isAuthenticated, fetchProjects, fetchTags, fetchSettings]);
 
@@ -74,14 +98,14 @@ export function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Suspense fallback={<PageFallback />}><InboxPage /></Suspense>} />
-        <Route path="projects/:id" element={<Suspense fallback={<PageFallback />}><ProjectPage /></Suspense>} />
-        <Route path="notes/:id" element={<Suspense fallback={<PageFallback />}><NoteEditorPage /></Suspense>} />
-        <Route path="search" element={<Suspense fallback={<PageFallback />}><SearchPage /></Suspense>} />
-        <Route path="ask" element={<Suspense fallback={<PageFallback />}><AskPage /></Suspense>} />
-        <Route path="graph" element={<Suspense fallback={<PageFallback />}><GraphPage /></Suspense>} />
-        <Route path="timeline" element={<Suspense fallback={<PageFallback />}><TimelinePage /></Suspense>} />
-        <Route path="settings" element={<Suspense fallback={<PageFallback />}><SettingsPage /></Suspense>} />
+        <Route index element={<Suspense fallback={<NoteListFallback />}><InboxPage /></Suspense>} />
+        <Route path="projects/:id" element={<Suspense fallback={<NoteListFallback />}><ProjectPage /></Suspense>} />
+        <Route path="notes/:id" element={<Suspense fallback={<EditorFallback />}><NoteEditorPage /></Suspense>} />
+        <Route path="search" element={<Suspense fallback={<NoteListFallback />}><SearchPage /></Suspense>} />
+        <Route path="ask" element={<Suspense fallback={<GenericFallback />}><AskPage /></Suspense>} />
+        <Route path="graph" element={<Suspense fallback={<GraphFallback />}><GraphPage /></Suspense>} />
+        <Route path="timeline" element={<Suspense fallback={<NoteListFallback />}><TimelinePage /></Suspense>} />
+        <Route path="settings" element={<Suspense fallback={<GenericFallback />}><SettingsPage /></Suspense>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -1,18 +1,18 @@
 # Seam -- Open Issues
 
-Comprehensive audit of the codebase against IMP_PLAN.md, FE_DESIGN.md, and AGENTS.md.
+Comprehensive audit of the codebase against IMP_PLAN.md, FE_DESIGN.md, PHASE2_FE.md, and AGENTS.md.
 Issues are organized by severity, then by area. Each issue has a unique ID for tracking.
 
 Legend: **Critical** = crash/data loss/security exploit, **High** = significant bug or missing spec feature, **Medium** = correctness/UX/security concern, **Low** = minor quality/polish
 
 ---
 
-## Critical (3 issues) -- RESOLVED
-
-All 3 critical issues have been fixed.
+## Previous Issues (Phases 1-4) -- All 110 Resolved
 
 <details>
-<summary>Click to expand resolved critical issues</summary>
+<summary>Click to expand resolved issues from earlier phases</summary>
+
+### Critical (3 issues) -- RESOLVED
 
 | ID | Area | Description | Status |
 |----|------|-------------|--------|
@@ -20,16 +20,7 @@ All 3 critical issues have been fixed.
 | I-C2 | Frontend: AskPage | Streaming has no error recovery -- UI gets permanently stuck. | **Fixed** |
 | I-C3 | Backend: AI handler | Nil pointer dereference when AI services not configured. | **Fixed** |
 
-</details>
-
----
-
-## High (14 issues) -- RESOLVED
-
-All 14 high-priority issues have been fixed.
-
-<details>
-<summary>Click to expand resolved high issues</summary>
+### High (14 issues) -- RESOLVED
 
 | ID | Area | Description | Status |
 |----|------|-------------|--------|
@@ -48,175 +39,112 @@ All 14 high-priority issues have been fixed.
 | I-H13 | Backend: synthesizer | SynthesizeStream never exposed via any endpoint. | **Fixed** |
 | I-H14 | Backend: ai chat | No validation on history message roles (prompt injection). | **Fixed** |
 
-</details>
-
----
-
-## Medium (45 issues) -- RESOLVED
-
-All 45 medium-priority issues have been fixed.
-
-<details>
-<summary>Click to expand resolved medium issues</summary>
-
-### Backend
+### Medium (45 issues) -- RESOLVED
 
 | ID | Area | Description | Status |
 |----|------|-------------|--------|
-| I-M1 | main.go | Shutdown order fixed: watcher closes before DBs, AI queue waited on. | **Fixed** |
-| I-M2 | auth handler | MaxBytesReader added to refresh/logout endpoints. | **Fixed** |
-| I-M3 | note store | Get/GetByFilePath changed to accept DBTX interface. | **Fixed** |
-| I-M4 | note service | SetSuppressor protected with sync.RWMutex. | **Fixed** |
-| I-M5 | project service | Update wrapped in database transaction. | **Fixed** |
-| I-M6 | ws client | WebSocket origin patterns now configurable. | **Fixed** |
-| I-M7 | capture handler | MaxBytesReader added to URL capture JSON body. | **Fixed** |
-| I-M8 | watcher | Context checked before debounce handler call. | **Fixed** |
-| I-M9 | ai queue | Failed tasks re-enqueued on DB open failure. | **Fixed** |
-| I-M10 | ai queue | UpdateStatus errors now logged. | **Fixed** |
-| I-M11 | ai queue | Max queue size (10000) with backpressure. | **Fixed** |
-| I-M12 | ai queue | Per-task timeout (5 min) via context.WithTimeout. | **Fixed** |
-| I-M13 | ai embedder | Context cancellation checked between chunks. | **Fixed** |
-| I-M14 | ai embedder | ReindexAll limited to 10000 IDs with warning. | **Fixed** |
-| I-M15 | ai writer | Setters protected with sync.RWMutex. | **Fixed** |
-| I-M16 | ai writer | DB fallback removed; uses note service layer. | **Fixed** |
-| I-M17 | ai synthesizer | Shared retrieveNotes method extracted. | **Fixed** |
-| I-M18 | ai synthesizer | SQL-level body truncation with SUBSTR. | **Fixed** |
-| I-M19 | ai handler | Per-user rate limiting (10/min) on AI endpoints. | **Fixed** |
-| I-M20 | ws main.go | Streaming goroutine breaks on write failures. | **Fixed** |
-| I-M21 | config | Model names only required when AI enabled. | **Fixed** |
-| I-M22 | chroma | Array length validation on Upsert/Add. | **Fixed** |
-| I-M23 | search handler | FTS search limit capped at 500. | **Fixed** |
+| I-M1 - I-M56 | Various | See PROGRESS.md for full list. | **All Fixed** |
 
-### Frontend
+### Low (48 issues) -- RESOLVED
 
 | ID | Area | Description | Status |
 |----|------|-------------|--------|
-| I-M24 | api/client.ts | 30s request timeout via AbortController. | **Fixed** |
-| I-M25 | api/types.ts | project_id type clarified (undefined=no change, ""=inbox). | **Fixed** |
-| I-M26 | authStore | Email persisted in localStorage. | **Fixed** |
-| I-M27 | authStore | restoreSession uses client's tryRefresh(). | **Fixed** |
-| I-M28 | noteStore | WS note.changed events trigger list updates. | **Fixed** |
-| I-M29 | Sidebar | Collapsed search navigates to /search. | **Fixed** |
-| I-M30 | Sidebar | ARIA attributes added to search dropdown. | **Fixed** |
-| I-M31 | GraphPage | Minimap updates on viewport changes. | **Fixed** |
-| I-M32 | GraphPage | Error state with retry button. | **Fixed** |
-| I-M33 | GraphPage | Keyboard navigation and ARIA labels added. | **Fixed** |
-| I-M34 | TimelinePage | Pagination with "Load more" button. | **Fixed** |
-| I-M35 | TimelinePage | Error state with retry button. | **Fixed** |
-| I-M36 | AskPage | History trimmed to last 10 messages for server. | **Fixed** |
-| I-M37 | AskPage | Citations show note titles. | **Fixed** |
-| I-M38 | CommandPalette | "Ask Seam" command added. | **Fixed** |
-| I-M39 | CommandPalette | Focus trap and ARIA dialog role added. | **Fixed** |
-| I-M40 | CaptureModal | Microphone errors shown via toast. | **Fixed** |
-| I-M41 | CaptureModal | Template overwrites require confirmation. | **Fixed** |
-| I-M42 | Various | Toast notifications integrated across app. | **Fixed** |
-| I-M43 | ws.ts | Token refresh before WS reconnection. | **Fixed** |
-| I-M44 | NoteEditor | Loading indicator on note fetch. | **Fixed** |
-
-### TUI
-
-| ID | Area | Description | Status |
-|----|------|-------------|--------|
-| I-M45 | editor.go | Unsaved changes warning on Esc (double-press). | **Fixed** |
-| I-M46 | editor.go | Modified flag only set on actual content change. | **Fixed** |
-| I-M47 | editor.go | Markdown syntax hints displayed. | **Fixed** |
-| I-M48 | main_screen.go | Delete confirmation (double-press d). | **Fixed** |
-| I-M49 | client.go | Automatic token refresh on 401. | **Fixed** |
-| I-M50 | client.go | Context support for all HTTP requests. | **Fixed** |
-| I-M51 | voice_capture.go | Secure temp file via os.CreateTemp. | **Fixed** |
-| I-M52 | voice_capture.go | Temp file cleaned up on Esc. | **Fixed** |
-| I-M53 | timeline.go | Colors use styles.go palette. | **Fixed** |
-| I-M54 | timeline.go | Loading indicator on init. | **Fixed** |
-| I-M55 | main.go (TUI) | 5s timeout on startup refresh. | **Fixed** |
-| I-M56 | login.go | Server URL field added. | **Fixed** |
+| I-L1 - I-L48 | Various | See PROGRESS.md for full list. | **All Fixed** |
 
 </details>
 
 ---
 
-## Low (48 issues) -- RESOLVED
+## Phase 2 Issues -- All 48 Resolved
 
-All 48 low-priority issues have been fixed.
+Audit conducted against PHASE2_FE.md spec. Issues found during thorough code review of all implemented Phase 2 tasks.
 
-<details>
-<summary>Click to expand resolved low issues</summary>
+---
 
-### Backend
+### Critical (2 issues) -- RESOLVED
 
-| ID | Area | Description | Status |
-|----|------|-------------|--------|
-| I-L1 | main.go | WebDistDir configurable via config. | **Fixed** |
-| I-L2 | middleware | writeJSONError uses json.NewEncoder. | **Fixed** |
-| I-L3 | note store | ResolveLink uses exact match + path-separated LIKE. | **Fixed** |
-| I-L4 | note handler | Malformed since/until returns 400. | **Fixed** |
-| I-L5 | project service | os.RemoveAll for non-empty dirs. | **Fixed** |
-| I-L6 | userdb manager | ListUsers validates directory names. | **Fixed** |
-| I-L7 | watcher | Expired suppression entries cleaned up. | **Fixed** |
-| I-L8 | watcher reconcile | Scan errors logged. | **Fixed** |
-| I-L9 | ws client | SetReadLimit(64KB) applied. | **Fixed** |
-| I-L10 | ai queue | O(n) complexity documented as acceptable. | **Fixed** |
-| I-L11 | ai queue | waitForTask goroutine pattern documented. | **Fixed** |
-| I-L12 | ai chroma | Tenant/database configurable via ChromaConfig. | **Fixed** |
-| I-L13 | ai chroma | Query returns empty slice instead of nil. | **Fixed** |
-| I-L14 | ai embedder | Chunk size/overlap configurable. | **Fixed** |
-| I-L15 | ai chat | Retrieval limit and truncation configurable. | **Fixed** |
-| I-L16 | ai synthesizer | Note limit configurable. | **Fixed** |
-| I-L17 | ai linker | Three-strategy JSON extraction (direct, bracket, regex). | **Fixed** |
-| I-L18 | ai handler | FindRelated method on Embedder. | **Fixed** |
-| I-L19 | ai writer | marshalResult returns and handles errors. | **Fixed** |
-| I-L20 | ai task store | Time parse errors logged. | **Fixed** |
-| I-L21 | config | Env overrides for SEAM_LOG_LEVEL, SEAM_CORS_ORIGINS. | **Fixed** |
-| I-L22 | config | Falls back to defaults when YAML missing. | **Fixed** |
-| I-L23 | migration | 002_add_slug.sql handles missing column. | **Fixed** |
-| I-L24 | migration | Migration + version recording in single transaction. | **Fixed** |
-| I-L25 | project store | Create/Update accept DBTX interface. | **Fixed** |
+| ID | Area | Description | Spec Ref | Status |
+|----|------|-------------|----------|--------|
+| P2-C1 | Frontend: Settings/uiStore | **Settings-to-UI bridge missing.** Added `bridgeFromSettings()` to uiStore, called after `fetchSettings()` in App.tsx. Toggles persist back to settingsStore. | B1 | **Fixed** |
+| P2-C2 | Backend: settings | **No transaction wrapping in multi-key PUT.** `Service.Update` now uses `db.BeginTx` with rollback on error. | B1-BE | **Fixed** |
 
-### Frontend
+---
 
-| ID | Area | Description | Status |
-|----|------|-------------|--------|
-| I-L26 | api/client.ts | offset=0 no longer skipped. | **Fixed** |
-| I-L27 | api/types.ts | Unused SearchResponse removed. | **Fixed** |
-| I-L28 | noteStore | createNote refetches list for correct ordering. | **Fixed** |
-| I-L29 | noteStore | fetchBacklinks logs errors. | **Fixed** |
-| I-L30 | SearchPage | Query synced to URL search params. | **Fixed** |
-| I-L31 | AskPage | aria-live="polite" on streaming area. | **Fixed** |
-| I-L32 | GraphPage | Dot-grid background (already existed in CSS). | **Fixed** |
-| I-L33 | Various | motion/framer-motion for page transitions and staggered lists. | **Fixed** |
-| I-L34 | Various | Responsive breakpoints in Layout CSS. | **Fixed** |
-| I-L35 | CaptureModal | Ref-based focus trap instead of querySelector. | **Fixed** |
-| I-L36 | CaptureModal | MediaRecorder compatibility check. | **Fixed** |
-| I-L37 | markdown.ts | Wikilink href uses javascript:void(0). | **Fixed** |
+### High (7 issues) -- RESOLVED
 
-### TUI
+| ID | Area | Description | Spec Ref | Status |
+|----|------|-------------|----------|--------|
+| P2-H1 | Frontend: NoteEditorPage | **`editorViewMode` not lifted to settingsStore.** Lifted to uiStore (bridged from settingsStore). NoteEditorPage reads from store. | B1 | **Fixed** |
+| P2-H2 | Frontend: AskPage | **No conversation list/switcher.** Conversation list/switcher dropdown added to AskPage header (loads last 10, switch between them). | B7 | **Fixed** |
+| P2-H3 | Frontend: CaptureModal | **Close and Cancel buttons bypass discard check.** X and Cancel buttons now call `confirmDiscardAndClose()`. | A2/B3 | **Fixed** |
+| P2-H4 | Backend: chat handler | **Invalid message role returns HTTP 500 instead of 400.** Added `ErrInvalidRole` sentinel; handler returns 400. | B7-BE | **Fixed** |
+| P2-H5 | Backend: chat service | **`truncateToWord` uses byte-length slicing, corrupts multi-byte UTF-8.** Now uses rune-based slicing. | B7-BE | **Fixed** |
+| P2-H6 | Backend: settings/chat | **No store interfaces -- entire packages are untestable in isolation.** Added `ServiceInterface` to both settings and chat handlers. | B1-BE, B7-BE | **Fixed** |
+| P2-H7 | Backend: settings | **No test files.** Created handler_test.go, service_test.go, store_test.go for settings; handler_test.go for chat. | B1-BE | **Fixed** |
 
-| ID | Area | Description | Status |
-|----|------|-------------|--------|
-| I-L38 | app.go | Dead code removed. | **Fixed** |
-| I-L39 | main_screen.go | Pagination with Ctrl+F/B. | **Fixed** |
-| I-L40 | editor.go | Selection limitation documented. | **Fixed** |
-| I-L41 | editor.go | Title editing via Ctrl+T. | **Fixed** |
-| I-L42 | search.go | Minimum 2-character query. | **Fixed** |
-| I-L43 | ask.go | Ctrl+S submits, Enter inserts newline. | **Fixed** |
-| I-L44 | voice_capture.go | OS-aware recording commands. | **Fixed** |
-| I-L45 | voice_capture.go | 5-minute max recording duration. | **Fixed** |
-| I-L46 | ai_assist.go | Scrollable results with j/k. | **Fixed** |
-| I-L47 | app.go | Logout via Ctrl+L. | **Fixed** |
-| I-L48 | styles.go | Color palette matches FE_DESIGN.md. | **Fixed** |
+---
 
-</details>
+### Medium (17 issues) -- RESOLVED
+
+| ID | Area | Description | Spec Ref | Status |
+|----|------|-------------|----------|--------|
+| P2-M1 | Frontend: NoteEditorPage | **"Move to project" missing from More menu.** Added submenu with project list. | B3 | **Fixed** |
+| P2-M2 | Frontend: ConfirmModal | **No focus trap.** Added Tab/Shift+Tab focus trapping. | C4 | **Fixed** |
+| P2-M3 | Frontend: Layout | **CSS uses `!important`.** Removed; uses CSS classes instead of inline styles. | C1 | **Fixed** |
+| P2-M4 | Frontend: Layout | **Missing 1440px responsive breakpoint.** Added 1440px breakpoint comments; behavior handled by settings bridge. | C1 | **Fixed** |
+| P2-M5 | Frontend: Sidebar | **Content fade animation incomplete for Projects/Tags sections.** Now uses fadeLabel CSS class instead of conditional rendering. | A8 | **Fixed** |
+| P2-M6 | Frontend: GraphPage | **No tooltip on node hover.** Added tooltip showing title and link count. | Graph UX | **Fixed** |
+| P2-M7 | Frontend: GraphPage | **No filter panel animation.** Wrapped in motion.div with entrance animation. | Graph UX | **Fixed** |
+| P2-M8 | Frontend: AskPage | **Markdown re-rendered on every streaming token.** Throttled to ~100ms intervals. | Perf | **Fixed** |
+| P2-M9 | Frontend: App.tsx | **`PageFallback` uses `NoteListSkeleton` for all routes.** Added page-specific fallback skeletons (editor, graph, generic). | A5/D1 | **Fixed** |
+| P2-M10 | Frontend: Layout | **No route change focus management.** Added route announcer with `aria-live="assertive"` + focus management. | C4 | **Fixed** |
+| P2-M11 | Frontend: TimelinePage | **Jump-to-date fails silently for unloaded dates.** Now shows toast when target date not in loaded range. | Timeline | **Fixed** |
+| P2-M12 | Backend: chat store | **Citation JSON deserialization failure silently swallowed.** Now logs via slog.Warn. | B7-BE | **Fixed** |
+| P2-M13 | Backend: ai/chat + chat/store | **Duplicate `Citation` type in two packages.** Added documentation comment linking chat.Citation to ai.Citation. | B6/B7-BE | **Fixed** |
+| P2-M14 | Frontend: api/client.ts | **401 retry checks stale module-level `refreshToken`.** Now uses `getRefreshToken()`. | API | **Fixed** |
+| P2-M15 | Frontend: api/ws.ts | **WebSocket access token captured at `connect()` time, stale by `onopen`.** Now uses fresh token in `onopen` handler. | API | **Fixed** |
+| P2-M16 | Frontend: projectStore | **`deleteProject` does not refresh note store after cascade.** Now calls `useNoteStore.getState().fetchNotes()`. | B8 | **Fixed** |
+| P2-M17 | Frontend: NoteEditorPage CSS | **`min-width: 1441px` right panel media query is a no-op.** Removed no-op query; fixed right panel responsive rules. | C1 | **Fixed** |
+
+---
+
+### Low (21 issues) -- RESOLVED
+
+| ID | Area | Description | Spec Ref | Status |
+|----|------|-------------|----------|--------|
+| P2-L1 | Frontend: ConfirmModal CSS | **Hardcoded color `#d47a7a`.** Replaced with `color-mix(in srgb, var(--status-error) 80%, white 20%)`. | FE_DESIGN | **Fixed** |
+| P2-L2 | Frontend: Sidebar | **Inline styles for cascade toggle buttons.** Extracted to CSS classes. | Code style | **Fixed** |
+| P2-L3 | Frontend: SettingsPage | **Missing app version in About section.** Injected via Vite `define` from `package.json` version. | B1 | **Fixed** |
+| P2-L4 | Frontend: SettingsPage | **Missing "link to docs" in About.** Added docs link to About section. | B1 | **Fixed** |
+| P2-L5 | Frontend: SettingsPage | **No loading state for account info.** Added loading indicator. | B1 | **Fixed** |
+| P2-L6 | Frontend: SettingsPage | **No `autocomplete` attributes on password inputs.** Added `autocomplete` attributes. | B1 | **Fixed** |
+| P2-L7 | Frontend: AskPage | **Dead HTTP fallback code.** Removed dead code path. | B7 | **Fixed** |
+| P2-L8 | Frontend: types.ts | **`ChatMessage.role` includes `'system'`.** Removed `'system'` from type. | B6/B7-BE | **Fixed** |
+| P2-L9 | Frontend: Layout | **Hamburger button is 40x40px, spec says 48x48px.** Updated to 48x48px. | C1 | **Fixed** |
+| P2-L10 | Frontend: GraphPage | **Minimap re-syncs all nodes on every pan/zoom.** Debounced to 50ms. | Perf | **Fixed** |
+| P2-L11 | Backend: settings handler | **No request ID in log entries.** Added request IDs to all log entries. | AGENTS.md | **Fixed** |
+| P2-L12 | Backend: settings service | **Error sentinels use `fmt.Errorf` instead of `errors.New`.** Changed to `errors.New`. | AGENTS.md | **Fixed** |
+| P2-L13 | Backend: settings | **`GetAll` returns only explicitly-set keys.** Now merges defaults so all keys are present. | B1-BE | **Fixed** |
+| P2-L14 | Frontend: NoteEditorPage CSS | **Hardcoded colors in `.orphanBadge`.** Replaced with `color-mix` + `var(--status-error)`. | FE_DESIGN | **Fixed** |
+| P2-L15 | Frontend: NoteEditorPage CSS | **Hardcoded `font-size: 10px`.** Replaced with `var(--font-size-xs)`. | FE_DESIGN | **Fixed** |
+| P2-L16 | Frontend: NoteEditorPage CSS | **Hardcoded `width: 260px`.** Replaced with `var(--right-panel-width)`. | FE_DESIGN | **Fixed** |
+| P2-L17 | Frontend: SettingsPage CSS | **Hardcoded `rgba(196,107,107,0.1)`.** Replaced with `color-mix`. | FE_DESIGN | **Fixed** |
+| P2-L18 | Frontend: Sidebar CSS | **Hardcoded box-shadow colors.** Replaced with `color-mix`. | FE_DESIGN | **Fixed** |
+| P2-L19 | Frontend: ConfirmModal CSS | **Hardcoded backdrop color.** Replaced with `color-mix`. | FE_DESIGN | **Fixed** |
+| P2-L20 | Frontend: api/ws.ts | **No WebSocket heartbeat/ping.** Added 30s interval ping with stopHeartbeat cleanup. | Reliability | **Fixed** |
+| P2-L21 | Frontend: Sidebar CSS | **Context menu has no overflow protection.** Added viewport boundary checking. | UX | **Fixed** |
 
 ---
 
 ## Summary
 
-| Severity | Count | Status |
-|----------|-------|--------|
-| Critical | 3 | **All resolved** |
-| High | 14 | **All resolved** |
-| Medium | 45 | **All resolved** |
-| Low | 48 | **All resolved** |
-| **Total** | **110** | **All resolved** |
+| Severity | Phase 1-4 | Phase 2 | Total Open |
+|----------|-----------|---------|------------|
+| Critical | 3 (resolved) | 2 (resolved) | **0** |
+| High | 14 (resolved) | 7 (resolved) | **0** |
+| Medium | 45 (resolved) | 17 (resolved) | **0** |
+| Low | 48 (resolved) | 21 (resolved) | **0** |
+| **Total** | **110 (resolved)** | **47 (resolved)** | **0** |
 
 ---
 

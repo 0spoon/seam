@@ -73,6 +73,17 @@ export function GraphSkeleton() {
   );
 }
 
+export function GenericPageSkeleton() {
+  return (
+    <div className={styles.genericPage} role="status" aria-label="Loading">
+      <Skeleton width="40%" height={24} />
+      <Skeleton width="60%" height={14} />
+      <Skeleton width="100%" height={14} />
+      <Skeleton width="80%" height={14} />
+    </div>
+  );
+}
+
 export function SearchResultSkeleton({ count = 4 }: { count?: number }) {
   return (
     <div role="status" aria-label="Loading results">

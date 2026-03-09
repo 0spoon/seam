@@ -42,6 +42,51 @@
   color: var(--text-primary);
 }
 
+.convSwitcher {
+  position: relative;
+}
+
+.convDropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: var(--space-1);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: var(--z-dropdown);
+  padding: var(--space-1);
+}
+
+.convDropdownItem {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  text-align: left;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.convDropdownItem:hover {
+  background: var(--bg-elevated);
+}
+
+.convDropdownItemActive {
+  color: var(--accent-primary);
+  background: var(--accent-muted);
+}
+
 .title {
   font-family: var(--font-display);
   font-weight: 600;

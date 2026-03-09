@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect, useState, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { Menu } from 'lucide-react';
@@ -39,6 +39,27 @@ export function Layout() {
 
   useKeyboard(keyBindings);
 
+  // Route change announcer for screen readers.
+  const [routeAnnouncement, setRouteAnnouncement] = useState('');
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const pathToName: Record<string, string> = {
+      '/': 'Inbox',
+      '/search': 'Search',
+      '/ask': 'Ask Seam',
+      '/graph': 'Knowledge Graph',
+      '/timeline': 'Timeline',
+      '/settings': 'Settings',
+    };
+    const name =
+      pathToName[location.pathname] ||
+      (location.pathname.startsWith('/notes/') ? 'Note Editor' :
+       location.pathname.startsWith('/projects/') ? 'Project' : 'Page');
+    setRouteAnnouncement(`Navigated to ${name}`);
+    // Move focus to main content on navigation.
+    mainRef.current?.focus();
+  }, [location.pathname]);
+
   return (
     <div className={styles.layout}>
       <a href="#main-content" className="skipToContent">
@@ -63,15 +84,17 @@ export function Layout() {
         />
       )}
 
+      {/* Screen reader route announcer */}
+      <div aria-live="assertive" aria-atomic="true" className="sr-only">
+        {routeAnnouncement}
+      </div>
+
       <Sidebar />
       <main
+        ref={mainRef}
         id="main-content"
-        className={styles.main}
-        style={{
-          marginLeft: sidebarCollapsed
-            ? 'var(--sidebar-collapsed)'
-            : 'var(--sidebar-width)',
-        }}
+        className={`${styles.main} ${sidebarCollapsed ? styles.mainCollapsed : ''}`}
+        tabIndex={-1}
       >
         <AnimatePresence mode="wait">
           <motion.div

@@ -293,7 +293,7 @@ export function CaptureModal() {
           <h2 className={styles.modalTitle}>Quick Capture</h2>
           <button
             className={styles.closeButton}
-            onClick={() => setOpen(false)}
+            onClick={confirmDiscardAndClose}
             aria-label="Close"
           >
             <X size={16} />
@@ -399,7 +399,7 @@ export function CaptureModal() {
           <div className={styles.footerRight}>
             <button
               className={styles.ghostButton}
-              onClick={() => setOpen(false)}
+              onClick={confirmDiscardAndClose}
             >
               Cancel
             </button>

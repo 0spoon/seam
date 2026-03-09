@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { AnimatePresence, motion } from 'motion/react';
-import {
+  import {
   Bold,
   Italic,
   Heading,
@@ -25,6 +25,7 @@ import {
   ExternalLink,
   Files,
   Download,
+  FolderInput,
 } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -47,8 +48,6 @@ import { ConfirmModal } from '../../components/ConfirmModal/ConfirmModal';
 import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
-type ViewMode = 'editor' | 'split' | 'preview';
-
 export function NoteEditorPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -62,8 +61,8 @@ export function NoteEditorPage() {
   const projects = useProjectStore((s) => s.projects);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
   const toggleRightPanel = useUIStore((s) => s.toggleRightPanel);
-
-  const [viewMode, setViewMode] = useState<ViewMode>('split');
+  const viewMode = useUIStore((s) => s.editorViewMode);
+  const setViewMode = useUIStore((s) => s.setEditorViewMode);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [noteLoading, setNoteLoading] = useState(true);
@@ -727,6 +726,30 @@ export function NoteEditorPage() {
                   <ExternalLink size={14} />
                   Open in new tab
                 </button>
+                <div className={styles.menuDivider} />
+                <div className={styles.menuSubmenu}>
+                  <div className={styles.menuSubmenuLabel}>
+                    <FolderInput size={14} />
+                    Move to project
+                  </div>
+                  <button
+                    className={styles.menuItemDefault}
+                    role="menuitem"
+                    onClick={() => { handleProjectChange(''); setShowMenu(false); }}
+                  >
+                    Inbox
+                  </button>
+                  {projects.map((p) => (
+                    <button
+                      key={p.id}
+                      className={`${styles.menuItemDefault} ${currentNote?.project_id === p.id ? styles.menuItemActive : ''}`}
+                      role="menuitem"
+                      onClick={() => { handleProjectChange(p.id); setShowMenu(false); }}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
                 <div className={styles.menuDivider} />
                 <button className={styles.menuItem} role="menuitem" onClick={handleDeleteClick}>
                   <Trash2 size={14} />

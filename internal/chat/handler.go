@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -12,14 +13,24 @@ import (
 	"github.com/katata/seam/internal/reqctx"
 )
 
+// ServiceInterface defines the business logic methods for chat history.
+// It is satisfied by *Service and enables unit testing with mocks.
+type ServiceInterface interface {
+	CreateConversation(ctx context.Context, userID string) (*Conversation, error)
+	ListConversations(ctx context.Context, userID string, limit, offset int) ([]Conversation, int, error)
+	GetConversation(ctx context.Context, userID, conversationID string) (*Conversation, []Message, error)
+	DeleteConversation(ctx context.Context, userID, conversationID string) error
+	AddMessage(ctx context.Context, userID string, msg Message) error
+}
+
 // Handler handles HTTP requests for chat history endpoints.
 type Handler struct {
-	service *Service
+	service ServiceInterface
 	logger  *slog.Logger
 }
 
 // NewHandler creates a new chat Handler.
-func NewHandler(service *Service, logger *slog.Logger) *Handler {
+func NewHandler(service ServiceInterface, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -186,6 +197,10 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.AddMessage(r.Context(), userID, msg); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeError(w, http.StatusNotFound, "conversation not found")
+			return
+		}
+		if errors.Is(err, ErrInvalidRole) {
+			writeError(w, http.StatusBadRequest, "invalid message role: must be 'user' or 'assistant'")
 			return
 		}
 		h.logger.Error("add message failed", "error", err)

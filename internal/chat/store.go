@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -25,6 +26,9 @@ type Conversation struct {
 }
 
 // Citation represents a cited note in a message.
+// NOTE: This type is structurally identical to ai.Citation. They are kept
+// separate to avoid an import cycle (chat <-> ai), but any field changes
+// must be mirrored in both packages.
 type Citation struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -129,7 +133,9 @@ func (s *Store) GetConversation(ctx context.Context, db DBTX, id string) (*Conve
 		}
 		if citationsJSON.Valid && citationsJSON.String != "" {
 			if err := json.Unmarshal([]byte(citationsJSON.String), &m.Citations); err != nil {
-				// Log and continue rather than failing.
+				// Log the corrupt citation data and continue.
+				slog.Warn("chat.Store.GetConversation: failed to unmarshal citations",
+					"message_id", m.ID, "error", err)
 				m.Citations = nil
 			}
 		}

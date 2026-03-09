@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Project, CreateProjectReq, UpdateProjectReq } from '../api/types';
 import * as api from '../api/client';
 import { useToastStore } from '../components/Toast/ToastContainer';
+import { useNoteStore } from './noteStore';
 
 interface ProjectState {
   projects: Project[];
@@ -85,6 +86,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
         currentProject: state.currentProject?.id === id ? null : state.currentProject,
       }));
       useToastStore.getState().addToast('Project deleted', 'success');
+      // Refresh note list since cascade may have moved or deleted notes.
+      useNoteStore.getState().fetchNotes();
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to delete project';
       set({ error: message });

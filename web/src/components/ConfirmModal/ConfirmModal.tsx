@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import styles from './ConfirmModal.module.css';
 
@@ -26,6 +26,7 @@ export function ConfirmModal({
   children,
 }: ConfirmModalProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -35,11 +36,30 @@ export function ConfirmModal({
     }
   }, [open]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  // Focus trap: keep Tab cycling within the modal.
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       onCancel();
+      return;
     }
-  };
+    if (e.key === 'Tab') {
+      const container = modalRef.current;
+      if (!container) return;
+      const focusable = container.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }, [onCancel]);
 
   return (
     <AnimatePresence onExitComplete={() => {
@@ -57,6 +77,7 @@ export function ConfirmModal({
           transition={{ duration: 0.25, ease: [0.4, 0, 1, 1] }}
         >
           <motion.div
+            ref={modalRef}
             className={styles.modal}
             role="alertdialog"
             aria-modal="true"

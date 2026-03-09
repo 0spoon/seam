@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -18,11 +19,21 @@ var allowedKeys = map[string][]string{
 	"sidebar_tags_expanded":     {"true", "false"},
 }
 
+// defaultValues maps setting keys to their default values. These are
+// returned by GetAll when a key has never been explicitly set.
+var defaultValues = map[string]string{
+	"editor_view_mode":          "split",
+	"right_panel_open":          "true",
+	"sidebar_collapsed":         "false",
+	"sidebar_projects_expanded": "true",
+	"sidebar_tags_expanded":     "true",
+}
+
 // ErrInvalidKey is returned when a setting key is not in the allowlist.
-var ErrInvalidKey = fmt.Errorf("invalid setting key")
+var ErrInvalidKey = errors.New("invalid setting key")
 
 // ErrInvalidValue is returned when a setting value is not valid for the key.
-var ErrInvalidValue = fmt.Errorf("invalid setting value")
+var ErrInvalidValue = errors.New("invalid setting value")
 
 // Service handles settings business logic.
 type Service struct {
@@ -43,22 +54,33 @@ func NewService(store *Store, userDBManager userdb.Manager, logger *slog.Logger)
 	}
 }
 
-// GetAll retrieves all settings for a user.
+// GetAll retrieves all settings for a user, merged with defaults so
+// that every known key is present in the response.
 func (s *Service) GetAll(ctx context.Context, userID string) (map[string]string, error) {
 	db, err := s.userDBManager.Open(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("settings.Service.GetAll: open db: %w", err)
 	}
 
-	settings, err := s.store.GetAll(ctx, db)
+	stored, err := s.store.GetAll(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("settings.Service.GetAll: %w", err)
 	}
-	return settings, nil
+
+	// Start with defaults and overlay stored values.
+	merged := make(map[string]string, len(defaultValues))
+	for k, v := range defaultValues {
+		merged[k] = v
+	}
+	for k, v := range stored {
+		merged[k] = v
+	}
+	return merged, nil
 }
 
-// Update upserts one or more settings. Each key is validated against the
-// allowlist before writing. Returns the first validation error encountered.
+// Update upserts one or more settings inside a single transaction.
+// Each key is validated against the allowlist before writing. Returns
+// the first validation error encountered.
 func (s *Service) Update(ctx context.Context, userID string, settings map[string]string) error {
 	// Validate all keys and values before writing.
 	for key, value := range settings {
@@ -72,10 +94,24 @@ func (s *Service) Update(ctx context.Context, userID string, settings map[string
 		return fmt.Errorf("settings.Service.Update: open db: %w", err)
 	}
 
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("settings.Service.Update: begin tx: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
 	for key, value := range settings {
-		if err := s.store.Set(ctx, db, key, value); err != nil {
+		if err = s.store.Set(ctx, tx, key, value); err != nil {
 			return fmt.Errorf("settings.Service.Update: %w", err)
 		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("settings.Service.Update: commit: %w", err)
 	}
 
 	s.logger.Debug("settings updated", "user_id", userID, "count", len(settings))

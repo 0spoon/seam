@@ -33,6 +33,7 @@ export function SettingsPage() {
   const [email, setEmail] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [showEmailForm, setShowEmailForm] = useState(false);
+  const [accountLoading, setAccountLoading] = useState(true);
 
   // Password change
   const [currentPassword, setCurrentPassword] = useState('');
@@ -47,6 +48,8 @@ export function SettingsPage() {
       setNewEmail(user.email);
     }).catch(() => {
       addToast('Failed to load account info', 'error');
+    }).finally(() => {
+      setAccountLoading(false);
     });
   }, [addToast]);
 
@@ -106,7 +109,11 @@ export function SettingsPage() {
           <div>
             <div className={styles.rowLabel}>Username</div>
           </div>
-          <span className={styles.rowValue}>{username}</span>
+          {accountLoading ? (
+            <span className={styles.rowValue}>Loading...</span>
+          ) : (
+            <span className={styles.rowValue}>{username}</span>
+          )}
         </div>
         <div className={styles.row}>
           <div>
@@ -151,6 +158,7 @@ export function SettingsPage() {
               placeholder="Current password"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
             />
           </div>
           <div className={styles.formGroup}>
@@ -160,6 +168,7 @@ export function SettingsPage() {
               placeholder="New password (min 8 chars)"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
             />
           </div>
           <div className={styles.formGroup}>
@@ -170,6 +179,7 @@ export function SettingsPage() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleChangePassword(); }}
+              autoComplete="new-password"
             />
           </div>
           <div className={styles.buttonRow}>
@@ -271,6 +281,19 @@ export function SettingsPage() {
         <h2 className={styles.sectionTitle}>About</h2>
         <p className={styles.aboutText}>
           Seam -- a local-first, AI-powered knowledge system.
+        </p>
+        <p className={styles.aboutVersion}>
+          Version {(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0')}
+        </p>
+        <p className={styles.aboutText}>
+          <a
+            href="https://github.com/katata/seam"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.aboutLink}
+          >
+            Documentation
+          </a>
         </p>
       </section>
     </div>

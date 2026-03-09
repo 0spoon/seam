@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'motion/react';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import { getGraph } from '../../api/client';
@@ -49,6 +50,7 @@ export function GraphPage() {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(
     new Set(),
   );
@@ -220,7 +222,7 @@ export function GraphPage() {
       navigate(`/notes/${nodeId}`);
     });
 
-    // Hover: highlight connected edges.
+    // Hover: highlight connected edges and show tooltip.
     cy.on('mouseover', 'node', (evt) => {
       const node = evt.target;
       node.style({
@@ -234,6 +236,14 @@ export function GraphPage() {
         width: 2,
         opacity: 1,
       } as cytoscape.Css.Edge);
+      // Show tooltip with note title and link count.
+      const pos = node.renderedPosition();
+      const linkCount = node.connectedEdges().length;
+      setTooltip({
+        text: `${node.data('label')} (${linkCount} ${linkCount === 1 ? 'link' : 'links'})`,
+        x: pos.x,
+        y: pos.y - 30,
+      });
     });
 
     cy.on('mouseout', 'node', (evt) => {
@@ -249,6 +259,7 @@ export function GraphPage() {
         width: 1,
         opacity: 0.4,
       } as cytoscape.Css.Edge);
+      setTooltip(null);
     });
 
     cyRef.current = cy;
@@ -289,7 +300,9 @@ export function GraphPage() {
       minimapCyRef.current = minimapCy;
 
       // Update minimap viewport rectangle on pan/zoom/position changes.
-      const updateMinimap = () => {
+      // Debounced to avoid jank on large graphs (runs at most every 50ms).
+      let minimapTimer: ReturnType<typeof setTimeout> | undefined;
+      const updateMinimapImmediate = () => {
         if (!minimapCyRef.current || !cyRef.current) return;
         const mc = minimapCyRef.current;
 
@@ -339,6 +352,13 @@ export function GraphPage() {
           });
         }
       };
+      const updateMinimap = () => {
+        if (minimapTimer !== undefined) return;
+        minimapTimer = setTimeout(() => {
+          minimapTimer = undefined;
+          updateMinimapImmediate();
+        }, 50);
+      };
 
       // Listen for viewport-changing events on the main graph.
       cy.on('pan zoom', updateMinimap);
@@ -346,8 +366,8 @@ export function GraphPage() {
       cy.on('add remove', updateMinimap);
       cy.on('layoutstop', updateMinimap);
 
-      // Initial draw.
-      updateMinimap();
+      // Initial draw (immediate, no debounce).
+      updateMinimapImmediate();
     }
 
     return () => {
@@ -552,10 +572,25 @@ export function GraphPage() {
         onKeyDown={handleGraphKeyDown}
       />
 
+      {/* Node tooltip */}
+      {tooltip && (
+        <div
+          className={styles.tooltip}
+          style={{ left: tooltip.x, top: tooltip.y }}
+        >
+          {tooltip.text}
+        </div>
+      )}
+
       {/* Minimap */}
       <div ref={minimapRef} className={styles.minimap} />
 
-      <div className={styles.filterPanel}>
+      <motion.div
+        className={styles.filterPanel}
+        initial={{ opacity: 0, x: -12 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+      >
         <div className={styles.filterTitle}>Filters</div>
 
         {projects.length > 0 && (
@@ -620,7 +655,7 @@ export function GraphPage() {
         <button className={styles.resetButton} onClick={handleReset}>
           Reset filters
         </button>
-      </div>
+      </motion.div>
     </div>
   );
 }

@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { sanitizeHtml } from '../../lib/sanitize';
 import { useNavigate } from 'react-router-dom';
-import { Send, Loader2, FileText, Plus, Trash2 } from 'lucide-react';
+import { Send, Loader2, FileText, Plus, Trash2, ChevronDown } from 'lucide-react';
 import {
-  askSeam,
   createConversation,
   listConversations,
   getConversation,
@@ -14,7 +13,7 @@ import { useWebSocket } from '../../hooks/useWebSocket';
 import { send as wsSend, isConnected } from '../../api/ws';
 import { renderMarkdown } from '../../lib/markdown';
 import { useToastStore } from '../../components/Toast/ToastContainer';
-import type { ChatCitation, ChatMessage, WSMessage } from '../../api/types';
+import type { ChatCitation, ChatMessage, Conversation, WSMessage } from '../../api/types';
 import styles from './AskPage.module.css';
 
 const STREAM_TIMEOUT_MS = 60_000;
@@ -43,31 +42,55 @@ export function AskPage() {
   const [streamingContent, setStreamingContent] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const useStreaming = true;
+  const [recentConversations, setRecentConversations] = useState<Conversation[]>([]);
+  const [showConvDropdown, setShowConvDropdown] = useState(false);
+  const convDropdownRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamingRef = useRef('');
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isStreamingRef = useRef(false);
   const conversationIdRef = useRef<string | null>(null);
+  const [renderedStreaming, setRenderedStreaming] = useState('');
+  const renderThrottleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Keep ref in sync for use in callbacks.
   useEffect(() => {
     conversationIdRef.current = conversationId;
   }, [conversationId]);
 
+  // Throttle markdown rendering of streaming content (~100ms).
+  useEffect(() => {
+    if (!streamingContent) {
+      setRenderedStreaming('');
+      return;
+    }
+    if (renderThrottleRef.current !== undefined) return;
+    renderThrottleRef.current = setTimeout(() => {
+      renderThrottleRef.current = undefined;
+      setRenderedStreaming(sanitizeHtml(renderMarkdown(streamingRef.current)));
+    }, 100);
+    return () => {
+      if (renderThrottleRef.current !== undefined) {
+        clearTimeout(renderThrottleRef.current);
+        renderThrottleRef.current = undefined;
+      }
+    };
+  }, [streamingContent]);
+
   // Auto-scroll to bottom when messages change.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Load most recent conversation on mount.
+  // Load most recent conversation on mount and populate conversation list.
   useEffect(() => {
     let cancelled = false;
     async function loadRecentConversation() {
       try {
-        const { conversations } = await listConversations(1, 0);
+        const { conversations } = await listConversations(10, 0);
         if (cancelled) return;
+        setRecentConversations(conversations);
         if (conversations.length > 0) {
           const recent = conversations[0];
           const { conversation, messages: msgs } = await getConversation(recent.id);
@@ -90,6 +113,35 @@ export function AskPage() {
     loadRecentConversation();
     return () => { cancelled = true; };
   }, []);
+
+  // Close dropdown on outside click.
+  useEffect(() => {
+    if (!showConvDropdown) return;
+    const handleClick = (e: MouseEvent) => {
+      if (convDropdownRef.current && !convDropdownRef.current.contains(e.target as Node)) {
+        setShowConvDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showConvDropdown]);
+
+  const handleSwitchConversation = useCallback(async (convId: string) => {
+    setShowConvDropdown(false);
+    try {
+      const { conversation, messages: msgs } = await getConversation(convId);
+      setConversationId(conversation.id);
+      setMessages(
+        msgs.map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          citations: m.citations,
+        })),
+      );
+    } catch {
+      addToast('Failed to load conversation', 'error');
+    }
+  }, [addToast]);
 
   // Focus input once loading is complete.
   useEffect(() => {
@@ -258,35 +310,10 @@ export function AskPage() {
     }));
     const history = allHistory.slice(-MAX_HISTORY_MESSAGES);
 
-    if (useStreaming) {
-      wsSend('chat.ask', { query, history });
-      streamingRef.current = '';
-      setStreamingContent('');
-      resetStreamTimeout();
-    } else {
-      try {
-        const result = await askSeam(query, history);
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: result.response,
-            citations: result.citations,
-          },
-        ]);
-        persistMessage(convId, 'assistant', result.response, result.citations);
-      } catch {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: 'Failed to get a response. Please try again.',
-          },
-        ]);
-      }
-      setIsStreaming(false);
-      isStreamingRef.current = false;
-    }
+    wsSend('chat.ask', { query, history });
+    streamingRef.current = '';
+    setStreamingContent('');
+    resetStreamTimeout();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -302,6 +329,7 @@ export function AskPage() {
       setConversationId(conv.id);
       setMessages([]);
       setInput('');
+      setRecentConversations((prev) => [conv, ...prev].slice(0, 10));
       inputRef.current?.focus();
     } catch {
       addToast('Failed to create conversation', 'error');
@@ -353,6 +381,35 @@ export function AskPage() {
             </p>
           </div>
           <div className={styles.headerActions}>
+            {recentConversations.length > 1 && (
+              <div className={styles.convSwitcher} ref={convDropdownRef}>
+                <button
+                  className={styles.headerButton}
+                  onClick={() => setShowConvDropdown(!showConvDropdown)}
+                  title="Recent conversations"
+                  aria-label="Recent conversations"
+                  aria-expanded={showConvDropdown}
+                  aria-haspopup="listbox"
+                >
+                  <ChevronDown size={14} />
+                </button>
+                {showConvDropdown && (
+                  <div className={styles.convDropdown} role="listbox">
+                    {recentConversations.map((conv) => (
+                      <button
+                        key={conv.id}
+                        className={`${styles.convDropdownItem} ${conv.id === conversationId ? styles.convDropdownItemActive : ''}`}
+                        onClick={() => handleSwitchConversation(conv.id)}
+                        role="option"
+                        aria-selected={conv.id === conversationId}
+                      >
+                        {conv.title || 'New conversation'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {messages.length > 0 && (
               <button
                 className={styles.headerButton}
@@ -435,7 +492,7 @@ export function AskPage() {
               <div
                 className={styles.messageContent}
                 dangerouslySetInnerHTML={{
-                  __html: sanitizeHtml(renderMarkdown(streamingContent)),
+                  __html: renderedStreaming,
                 }}
               />
             </div>

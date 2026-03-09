@@ -3,10 +3,12 @@ package chat
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/oklog/ulid/v2"
 
@@ -17,7 +19,10 @@ import (
 const maxTitleLen = 80
 
 // ErrNotFound is returned when a conversation is not found.
-var ErrNotFound = fmt.Errorf("conversation not found")
+var ErrNotFound = errors.New("conversation not found")
+
+// ErrInvalidRole is returned when a message role is not 'user' or 'assistant'.
+var ErrInvalidRole = errors.New("invalid message role")
 
 // Service handles chat history business logic.
 type Service struct {
@@ -123,7 +128,7 @@ func (s *Service) DeleteConversation(ctx context.Context, userID, conversationID
 // user message (truncated to maxTitleLen at a word boundary).
 func (s *Service) AddMessage(ctx context.Context, userID string, msg Message) error {
 	if msg.Role != "user" && msg.Role != "assistant" {
-		return fmt.Errorf("chat.Service.AddMessage: invalid role %q", msg.Role)
+		return fmt.Errorf("chat.Service.AddMessage: role %q: %w", msg.Role, ErrInvalidRole)
 	}
 
 	db, err := s.userDBManager.Open(ctx, userID)
@@ -161,14 +166,17 @@ func (s *Service) AddMessage(ctx context.Context, userID string, msg Message) er
 	return nil
 }
 
-// truncateToWord truncates s to at most maxLen characters, trimming to the
-// last word boundary. If the string is short enough, returns it as-is.
+// truncateToWord truncates s to at most maxLen runes (not bytes),
+// trimming to the last word boundary. If the string is short enough,
+// returns it as-is. This is safe for multi-byte UTF-8 (CJK, emoji).
 func truncateToWord(s string, maxLen int) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= maxLen {
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
-	truncated := s[:maxLen]
+	// Convert to runes to slice on character boundaries.
+	runes := []rune(s)
+	truncated := string(runes[:maxLen])
 	// Find the last space to avoid cutting mid-word.
 	lastSpace := strings.LastIndex(truncated, " ")
 	if lastSpace > maxLen/2 {

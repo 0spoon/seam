@@ -6,7 +6,12 @@
 .main {
   flex: 1;
   min-width: 0;
+  margin-left: var(--sidebar-width);
   transition: margin-left var(--duration-normal) var(--ease-out);
+}
+
+.mainCollapsed {
+  margin-left: var(--sidebar-collapsed);
 }
 
 .pageTransition {
@@ -20,8 +25,8 @@
   top: var(--space-2);
   left: var(--space-2);
   z-index: calc(var(--z-sidebar) + 1);
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
@@ -40,19 +45,31 @@
   display: none;
 }
 
+/* >1440px: full sidebar + right panel visible by default */
+
+/* 1024-1440px: full sidebar, right panel hidden (toggle available) */
+
 /* >1024px: full sidebar (260px) -- default styles apply */
 
 /* 640-1024px: collapsed sidebar (icons only, 52px) */
 @media (max-width: 1024px) {
   .main {
-    margin-left: var(--sidebar-collapsed) !important;
+    margin-left: var(--sidebar-collapsed);
+  }
+
+  .mainCollapsed {
+    margin-left: var(--sidebar-collapsed);
   }
 }
 
 /* <640px: sidebar hidden by default, hamburger visible, sidebar as overlay */
 @media (max-width: 640px) {
   .main {
-    margin-left: 0 !important;
+    margin-left: 0;
+  }
+
+  .mainCollapsed {
+    margin-left: 0;
   }
 
   .hamburger {
@@ -64,6 +81,6 @@
     position: fixed;
     inset: 0;
     z-index: calc(var(--z-sidebar) - 1);
-    background: rgba(0, 0, 0, 0.5);
+    background: color-mix(in srgb, var(--bg-deep) 50%, transparent);
   }
 }

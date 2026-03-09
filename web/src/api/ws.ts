@@ -5,8 +5,10 @@ type MessageHandler = (msg: WSMessage) => void;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 30000;
+const HEARTBEAT_INTERVAL_MS = 30000;
 const handlers: Set<MessageHandler> = new Set();
 
 function getWsUrl(): string {
@@ -25,8 +27,19 @@ export function connect() {
 
     socket.onopen = () => {
       reconnectAttempts = 0;
-      // Send auth message as first message
-      socket?.send(JSON.stringify({ type: 'auth', payload: { token } }));
+      // Fetch a fresh token at open time in case a refresh occurred
+      // between connect() and the WebSocket handshake completing.
+      const freshToken = getAccessToken() || token;
+      socket?.send(JSON.stringify({ type: 'auth', payload: { token: freshToken } }));
+
+      // Start periodic heartbeat to detect dead connections behind NAT
+      // or load balancers with idle timeouts.
+      stopHeartbeat();
+      heartbeatTimer = setInterval(() => {
+        if (socket?.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, HEARTBEAT_INTERVAL_MS);
     };
 
     socket.onmessage = (event) => {
@@ -40,6 +53,7 @@ export function connect() {
 
     socket.onclose = () => {
       socket = null;
+      stopHeartbeat();
       scheduleReconnect();
     };
 
@@ -48,6 +62,13 @@ export function connect() {
     };
   } catch {
     scheduleReconnect();
+  }
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
   }
 }
 
@@ -79,6 +100,7 @@ async function scheduleReconnect() {
 }
 
 export function disconnect() {
+  stopHeartbeat();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;

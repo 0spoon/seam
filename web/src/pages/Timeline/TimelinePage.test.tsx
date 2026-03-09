@@ -6,6 +6,7 @@ import { TimelinePage } from './TimelinePage';
 // Mock the API client.
 vi.mock('../../api/client', () => ({
   listNotes: vi.fn(),
+  getDailyNote: vi.fn(),
 }));
 
 import { listNotes } from '../../api/client';
@@ -54,7 +55,7 @@ describe('TimelinePage', () => {
         <TimelinePage />
       </MemoryRouter>,
     );
-    expect(screen.getByText('Loading timeline...')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading notes' })).toBeInTheDocument();
   });
 
   it('renders empty state when no notes', async () => {
@@ -136,9 +137,11 @@ describe('TimelinePage', () => {
 
     fireEvent.click(screen.getByText('Created'));
 
-    // Should re-fetch with created sort.
+    // Should re-fetch with created sort after clicking the toggle.
     await waitFor(() => {
-      expect(listNotes).toHaveBeenCalledTimes(2);
+      expect(listNotes).toHaveBeenCalledWith(
+        expect.objectContaining({ sort: 'created' }),
+      );
     });
   });
 

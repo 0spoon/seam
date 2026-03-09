@@ -73,12 +73,23 @@ describe('noteStore', () => {
   it('createNote adds note to array', async () => {
     const mockNote = makeNote();
 
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify(mockNote), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(mockNote), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      // createNote now refetches the list via listNotes after creation.
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([mockNote]), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Total-Count': '1',
+          },
+        }),
+      );
 
     const result = await useNoteStore.getState().createNote({
       title: 'Test Note',

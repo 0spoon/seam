@@ -15,10 +15,10 @@ vi.mock('react-router-dom', async () => {
 });
 
 // Mock stores
-const mockFetchNote = vi.fn();
-const mockUpdateNote = vi.fn();
-const mockDeleteNote = vi.fn();
-const mockFetchBacklinks = vi.fn();
+const mockFetchNote = vi.fn().mockResolvedValue(undefined);
+const mockUpdateNote = vi.fn().mockResolvedValue(undefined);
+const mockDeleteNote = vi.fn().mockResolvedValue(undefined);
+const mockFetchBacklinks = vi.fn().mockResolvedValue(undefined);
 const mockClearCurrentNote = vi.fn();
 
 let mockCurrentNote: Note | null = {
@@ -51,6 +51,30 @@ vi.mock('../../stores/uiStore', () => ({
     const state: Record<string, unknown> = {
       rightPanelOpen: false,
       toggleRightPanel: vi.fn(),
+      editorViewMode: 'editor',
+      setEditorViewMode: vi.fn(),
+      zenMode: false,
+      toggleZenMode: vi.fn(),
+      setZenMode: vi.fn(),
+    };
+    return selector(state);
+  }),
+}));
+
+vi.mock('../../stores/settingsStore', () => ({
+  useSettingsStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) => {
+    const state: Record<string, unknown> = {
+      get: vi.fn(() => 'false'),
+      updateSetting: vi.fn(),
+    };
+    return selector(state);
+  }),
+}));
+
+vi.mock('../../stores/projectStore', () => ({
+  useProjectStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) => {
+    const state: Record<string, unknown> = {
+      projects: [],
     };
     return selector(state);
   }),
@@ -65,6 +89,8 @@ vi.mock('../../api/client', () => ({
   getTwoHopBacklinks: vi.fn().mockResolvedValue([]),
   getOrphanNotes: vi.fn().mockResolvedValue([]),
   aiAssist: vi.fn().mockResolvedValue({ result: 'AI generated text' }),
+  resolveWikilink: vi.fn().mockResolvedValue({ dangling: true }),
+  createNote: vi.fn().mockResolvedValue({ id: 'new1', title: 'New', body: '', file_path: 'new.md', tags: [], created_at: '', updated_at: '' }),
 }));
 
 vi.mock('../../lib/markdown', () => ({
@@ -103,9 +129,50 @@ vi.mock('./wikilinkExtension', () => ({
   wikilinkAutocomplete: vi.fn(() => []),
 }));
 
+vi.mock('./slashExtension', () => ({
+  createSlashExtension: vi.fn(() => []),
+  dismissSlashMenu: vi.fn(),
+}));
+
+vi.mock('./SlashMenu', () => ({
+  SlashMenu: () => null,
+}));
+
+vi.mock('./typewriterExtension', () => ({
+  typewriterScrolling: [],
+}));
+
 // Mock the markdown language extension
 vi.mock('@codemirror/lang-markdown', () => ({
   markdown: vi.fn(() => []),
+}));
+
+vi.mock('../../lib/drafts', () => ({
+  saveDraft: vi.fn(),
+  getDraft: vi.fn(() => null),
+  clearDraft: vi.fn(),
+}));
+
+vi.mock('../../lib/wikilinkCache', () => ({
+  getCached: vi.fn(() => undefined),
+  setCache: vi.fn(),
+  invalidateCache: vi.fn(),
+}));
+
+vi.mock('../../components/LinkPreviewCard/LinkPreviewCard', () => ({
+  LinkPreviewCard: () => null,
+}));
+
+vi.mock('../../components/VersionHistory/VersionHistory', () => ({
+  VersionHistory: () => null,
+}));
+
+vi.mock('../../components/ZenModeExit/ZenModeExit', () => ({
+  ZenModeExit: () => null,
+}));
+
+vi.mock('../../hooks/useRecentNotes', () => ({
+  useRecentNote: vi.fn(),
 }));
 
 import { useNoteStore } from '../../stores/noteStore';

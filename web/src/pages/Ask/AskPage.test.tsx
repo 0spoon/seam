@@ -12,10 +12,16 @@ vi.mock('react-router-dom', async () => {
 
 vi.mock('../../api/client', () => ({
   askSeam: vi.fn(),
+  createConversation: vi.fn(),
+  listConversations: vi.fn(),
+  getConversation: vi.fn(),
+  addChatMessage: vi.fn(),
+  deleteConversation: vi.fn(),
 }));
 
 vi.mock('../../api/ws', () => ({
   send: vi.fn(),
+  isConnected: vi.fn(() => true),
 }));
 
 vi.mock('../../hooks/useWebSocket', () => ({
@@ -26,19 +32,49 @@ vi.mock('../../lib/markdown', () => ({
   renderMarkdown: (s: string) => `<p>${s}</p>`,
 }));
 
-import { askSeam } from '../../api/client';
+vi.mock('../../lib/sanitize', () => ({
+  sanitizeHtml: (s: string) => s,
+}));
 
-function renderAskPage() {
-  return render(
+import {
+  createConversation,
+  listConversations,
+  addChatMessage,
+} from '../../api/client';
+
+/**
+ * Renders the AskPage and waits for the initial conversation loading to
+ * finish (listConversations resolves, isLoading becomes false).
+ */
+async function renderAskPage() {
+  render(
     <MemoryRouter>
       <AskPage />
     </MemoryRouter>,
   );
+  // The component starts with isLoading=true and fetches conversations on
+  // mount. Wait for loading to complete so the full UI is available.
+  await waitFor(() => {
+    expect(screen.queryByText('Loading conversation...')).not.toBeInTheDocument();
+  });
 }
 
 describe('AskPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Re-establish mock return values after clearAllMocks wipes them.
+    vi.mocked(listConversations).mockResolvedValue({
+      conversations: [],
+      total: 0,
+    } as never);
+    vi.mocked(createConversation).mockResolvedValue({
+      id: 'conv1',
+      title: '',
+      created_at: '',
+      updated_at: '',
+    } as never);
+    vi.mocked(addChatMessage).mockResolvedValue(undefined as never);
+
     // jsdom does not implement scrollIntoView.
     Element.prototype.scrollIntoView = vi.fn();
   });
@@ -47,63 +83,62 @@ describe('AskPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders title and subtitle', () => {
-    renderAskPage();
+  it('renders title and subtitle', async () => {
+    await renderAskPage();
     expect(screen.getByText('Ask Seam')).toBeInTheDocument();
     expect(
       screen.getByText(/Ask questions about your notes/),
     ).toBeInTheDocument();
   });
 
-  it('shows empty state when no messages', () => {
-    renderAskPage();
+  it('shows empty state when no messages', async () => {
+    await renderAskPage();
     expect(
       screen.getByText(/Ask a question and Seam will search your notes/),
     ).toBeInTheDocument();
   });
 
-  it('has a text input with correct placeholder', () => {
-    renderAskPage();
+  it('has a text input with correct placeholder', async () => {
+    await renderAskPage();
     expect(
       screen.getByPlaceholderText('Ask about your notes...'),
     ).toBeInTheDocument();
   });
 
-  it('send button is disabled when input is empty', () => {
-    renderAskPage();
+  it('send button is disabled when input is empty', async () => {
+    await renderAskPage();
     const sendButton = screen.getByLabelText('Send');
     expect(sendButton).toBeDisabled();
   });
 
-  it('send button is enabled when input has text', () => {
-    renderAskPage();
+  it('send button is enabled when input has text', async () => {
+    await renderAskPage();
     const input = screen.getByLabelText('Ask a question');
     fireEvent.change(input, { target: { value: 'What is caching?' } });
     expect(screen.getByLabelText('Send')).not.toBeDisabled();
   });
 
   it('adds user message on submit', async () => {
-    renderAskPage();
+    await renderAskPage();
 
     const input = screen.getByLabelText('Ask a question');
     fireEvent.change(input, { target: { value: 'What is caching?' } });
-
-    const form = input.closest('form')!;
-    fireEvent.submit(form);
+    fireEvent.submit(input.closest('form')!);
 
     await waitFor(() => {
-      expect(screen.getByText('What is caching?')).toBeInTheDocument();
+      // The user message should appear in a message div (not the textarea).
+      const matches = screen.getAllByText('What is caching?');
+      const messageEl = matches.find((el) => el.closest('[class*="message"]'));
+      expect(messageEl).toBeTruthy();
     });
   });
 
   it('shows thinking state during streaming', async () => {
-    renderAskPage();
+    await renderAskPage();
 
     const input = screen.getByLabelText('Ask a question');
     fireEvent.change(input, { target: { value: 'test question' } });
-
-    const form = input.closest('form')!;
-    fireEvent.submit(form);
+    fireEvent.submit(input.closest('form')!);
 
     await waitFor(() => {
       expect(screen.getByText('Thinking...')).toBeInTheDocument();
@@ -111,13 +146,11 @@ describe('AskPage', () => {
   });
 
   it('disables input while streaming', async () => {
-    renderAskPage();
+    await renderAskPage();
 
     const input = screen.getByLabelText('Ask a question');
     fireEvent.change(input, { target: { value: 'test' } });
-
-    const form = input.closest('form')!;
-    fireEvent.submit(form);
+    fireEvent.submit(input.closest('form')!);
 
     await waitFor(() => {
       expect(screen.getByLabelText('Ask a question')).toBeDisabled();
@@ -125,21 +158,19 @@ describe('AskPage', () => {
   });
 
   it('clears input after submit', async () => {
-    renderAskPage();
+    await renderAskPage();
 
     const input = screen.getByLabelText('Ask a question') as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: 'my question' } });
-
-    const form = input.closest('form')!;
-    fireEvent.submit(form);
+    fireEvent.submit(input.closest('form')!);
 
     await waitFor(() => {
       expect(input.value).toBe('');
     });
   });
 
-  it('does not submit on Shift+Enter', () => {
-    renderAskPage();
+  it('does not submit on Shift+Enter', async () => {
+    await renderAskPage();
 
     const input = screen.getByLabelText('Ask a question');
     fireEvent.change(input, { target: { value: 'test' } });
@@ -151,8 +182,8 @@ describe('AskPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('does not submit empty input', () => {
-    renderAskPage();
+  it('does not submit empty input', async () => {
+    await renderAskPage();
 
     const input = screen.getByLabelText('Ask a question');
     const form = input.closest('form')!;
@@ -165,7 +196,7 @@ describe('AskPage', () => {
   });
 
   it('hides empty state after first message', async () => {
-    renderAskPage();
+    await renderAskPage();
 
     const input = screen.getByLabelText('Ask a question');
     fireEvent.change(input, { target: { value: 'hello' } });

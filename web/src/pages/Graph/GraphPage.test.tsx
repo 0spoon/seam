@@ -82,7 +82,7 @@ describe('GraphPage', () => {
         <GraphPage />
       </MemoryRouter>,
     );
-    expect(screen.getByText('Loading graph...')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading graph' })).toBeInTheDocument();
   });
 
   it('renders empty state when no nodes', async () => {

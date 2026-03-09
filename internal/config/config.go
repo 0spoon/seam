@@ -190,6 +190,8 @@ func validate(cfg *Config) error {
 	}
 	if cfg.JWTSecret == "" {
 		errs = append(errs, errors.New("jwt_secret is required (set in config or SEAM_JWT_SECRET env var)"))
+	} else if len(cfg.JWTSecret) < 32 {
+		errs = append(errs, errors.New("jwt_secret must be at least 32 characters"))
 	}
 	if cfg.OllamaBaseURL == "" {
 		errs = append(errs, errors.New("ollama_base_url is required"))
@@ -202,6 +204,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Models.Chat == "" {
 		errs = append(errs, errors.New("models.chat is required"))
+	}
+	if cfg.Auth.BcryptCost < 4 || cfg.Auth.BcryptCost > 14 {
+		errs = append(errs, fmt.Errorf("auth.bcrypt_cost must be between 4 and 14 (got %d)", cfg.Auth.BcryptCost))
 	}
 
 	// Warn about optional fields needed for later phases.

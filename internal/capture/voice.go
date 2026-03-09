@@ -78,9 +78,15 @@ func (t *VoiceTranscriber) Transcribe(ctx context.Context, audio io.Reader, file
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmpFile, audio); err != nil {
+	const maxAudioSize = 100 * 1024 * 1024 // 100 MB
+	written, err := io.Copy(tmpFile, io.LimitReader(audio, maxAudioSize+1))
+	if err != nil {
 		tmpFile.Close()
 		return nil, fmt.Errorf("capture.VoiceTranscriber.Transcribe: write temp file: %w", err)
+	}
+	if written > maxAudioSize {
+		tmpFile.Close()
+		return nil, fmt.Errorf("capture.VoiceTranscriber.Transcribe: audio exceeds maximum size of %d bytes", maxAudioSize)
 	}
 	if err := tmpFile.Close(); err != nil {
 		return nil, fmt.Errorf("capture.VoiceTranscriber.Transcribe: close temp file: %w", err)

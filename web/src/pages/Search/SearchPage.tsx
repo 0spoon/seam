@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { searchFTS, searchSemantic } from '../../api/client';
 import type { FTSResult, SemanticResult } from '../../api/types';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
+import { sanitizeHtml } from '../../lib/sanitize';
 import styles from './SearchPage.module.css';
 
 type SearchMode = 'fulltext' | 'semantic';
@@ -143,7 +144,7 @@ export function SearchPage() {
               </div>
               <p
                 className={styles.resultSnippet}
-                dangerouslySetInnerHTML={{ __html: result.snippet }}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(result.snippet) }}
               />
             </button>
           ))}

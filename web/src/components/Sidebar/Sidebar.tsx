@@ -18,6 +18,7 @@ import { useKeyboard } from '../../hooks/useKeyboard';
 import { getProjectColor } from '../../lib/tagColor';
 import { searchFTS } from '../../api/client';
 import type { FTSResult } from '../../api/types';
+import { sanitizeHtml } from '../../lib/sanitize';
 import styles from './Sidebar.module.css';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Check } from 'lucide-react';
@@ -215,7 +216,7 @@ export function Sidebar() {
                     <span className={styles.searchResultTitle}>{result.title}</span>
                     <span
                       className={styles.searchResultSnippet}
-                      dangerouslySetInnerHTML={{ __html: result.snippet }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(result.snippet) }}
                     />
                   </button>
                 ))}

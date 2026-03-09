@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { sanitizeHtml } from '../../lib/sanitize';
 import { useNavigate } from 'react-router-dom';
 import { Send, Loader2, FileText } from 'lucide-react';
 import { askSeam } from '../../api/client';
@@ -23,6 +24,7 @@ export function AskPage() {
   const [useStreaming, setUseStreaming] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const streamingRef = useRef('');
 
   // Auto-scroll to bottom when messages change.
   useEffect(() => {
@@ -39,13 +41,16 @@ export function AskPage() {
     (msg: WSMessage) => {
       if (msg.type === 'chat.stream') {
         const payload = msg.payload as { token: string };
+        streamingRef.current += payload.token;
         setStreamingContent((prev) => prev + payload.token);
       } else if (msg.type === 'chat.done') {
         const payload = msg.payload as { citations?: string[] };
+        const completedContent = streamingRef.current;
+        streamingRef.current = '';
         setMessages((prev) => {
           const completed: DisplayMessage = {
             role: 'assistant',
-            content: streamingContent,
+            content: completedContent,
             citations: payload.citations,
           };
           return [...prev, completed];
@@ -54,7 +59,7 @@ export function AskPage() {
         setIsStreaming(false);
       }
     },
-    [streamingContent],
+    [],
   );
 
   useWebSocket(handleWSMessage);
@@ -79,6 +84,7 @@ export function AskPage() {
     if (useStreaming) {
       // Send via WebSocket for streaming response.
       wsSend('chat.ask', { query, history });
+      streamingRef.current = '';
       setStreamingContent('');
     } else {
       // Use HTTP endpoint (non-streaming).
@@ -140,7 +146,7 @@ export function AskPage() {
               <div
                 className={styles.messageContent}
                 dangerouslySetInnerHTML={{
-                  __html: renderMarkdown(msg.content),
+                  __html: sanitizeHtml(renderMarkdown(msg.content)),
                 }}
               />
             ) : (
@@ -169,7 +175,7 @@ export function AskPage() {
             <div
               className={styles.messageContent}
               dangerouslySetInnerHTML={{
-                __html: renderMarkdown(streamingContent),
+                __html: sanitizeHtml(renderMarkdown(streamingContent)),
               }}
             />
           </div>

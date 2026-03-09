@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 
 	"github.com/katata/seam/internal/userdb"
 )
+
+// usernameRe validates usernames: 3-64 characters, alphanumeric, underscore, and hyphen only.
+var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,64}$`)
 
 // Request/response types for the auth API.
 type RegisterReq struct {
@@ -84,6 +88,9 @@ func (s *Service) Register(ctx context.Context, req RegisterReq) (*AuthResponse,
 	if req.Username == "" {
 		return nil, fmt.Errorf("auth.Service.Register: username is required: %w", ErrInvalidCredentials)
 	}
+	if !usernameRe.MatchString(req.Username) {
+		return nil, fmt.Errorf("auth.Service.Register: username must be 3-64 characters, alphanumeric/underscore/hyphen only: %w", ErrInvalidCredentials)
+	}
 	if req.Email == "" {
 		return nil, fmt.Errorf("auth.Service.Register: email is required: %w", ErrInvalidCredentials)
 	}
@@ -95,6 +102,9 @@ func (s *Service) Register(ctx context.Context, req RegisterReq) (*AuthResponse,
 	}
 	if len(req.Password) < 8 {
 		return nil, fmt.Errorf("auth.Service.Register: password must be at least 8 characters: %w", ErrInvalidCredentials)
+	}
+	if len(req.Password) > 1024 {
+		return nil, fmt.Errorf("auth.Service.Register: password must not exceed 1024 characters: %w", ErrInvalidCredentials)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), s.bcryptCost)
@@ -235,6 +245,14 @@ func (s *Service) generateTokenPair(ctx context.Context, user *User) (*TokenPair
 	expiresAt := time.Now().UTC().Add(s.refreshTokenTTL)
 	if err := s.store.CreateRefreshToken(ctx, user.ID, tokenHash, expiresAt); err != nil {
 		return nil, err
+	}
+
+	// Cap the number of active refresh tokens per user to prevent
+	// unbounded accumulation from repeated logins.
+	const maxRefreshTokens = 10
+	if err := s.store.DeleteOldestTokensForUser(ctx, user.ID, maxRefreshTokens); err != nil {
+		s.logger.Warn("auth.Service.generateTokenPair: failed to prune old tokens",
+			"user_id", user.ID, "error", err)
 	}
 
 	return &TokenPair{

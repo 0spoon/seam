@@ -190,10 +190,10 @@ func (c *ChromaClient) Query(ctx context.Context, collectionID string, embedding
 	var queryResults []QueryResult
 	for i, id := range result.IDs[0] {
 		qr := QueryResult{ID: id}
-		if i < len(result.Distances[0]) {
+		if len(result.Distances) > 0 && i < len(result.Distances[0]) {
 			qr.Distance = result.Distances[0][i]
 		}
-		if i < len(result.Metadatas[0]) {
+		if len(result.Metadatas) > 0 && i < len(result.Metadatas[0]) {
 			qr.Metadata = result.Metadatas[0][i]
 		}
 		queryResults = append(queryResults, qr)

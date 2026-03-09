@@ -25,13 +25,15 @@ func TestIgnoreNext_SuppressesPath(t *testing.T) {
 	w.mu.Unlock()
 	require.True(t, exists, "path should be in suppressed map after IgnoreNext")
 
-	// First check should consume the suppression.
+	// First check within the time window should return true.
 	suppressed := w.checkAndClearSuppression(absPath)
 	require.True(t, suppressed, "first check should return true (suppressed)")
 
-	// Second check should return false (one-shot).
+	// Second check within the time window should also return true (time-based,
+	// not one-shot) so that multiple fsnotify events from a single write are
+	// all suppressed.
 	suppressed = w.checkAndClearSuppression(absPath)
-	require.False(t, suppressed, "second check should return false (consumed)")
+	require.True(t, suppressed, "second check within window should also return true")
 }
 
 func TestIgnoreNext_ExpiresAfterTTL(t *testing.T) {

@@ -78,7 +78,7 @@ func (h *Handler) handleURLCapture(w http.ResponseWriter, r *http.Request, userI
 	n, err := h.service.CaptureURL(r.Context(), userID, rawURL)
 	if err != nil {
 		if errors.Is(err, ErrInvalidURL) || errors.Is(err, ErrUnsafeScheme) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusBadRequest, "invalid or unsafe URL")
 			return
 		}
 		if errors.Is(err, ErrPrivateIP) {

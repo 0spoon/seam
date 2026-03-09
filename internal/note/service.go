@@ -15,6 +15,7 @@ import (
 
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/userdb"
+	"github.com/katata/seam/internal/validate"
 )
 
 // WriteSuppressor is used to tell the file watcher to ignore writes we
@@ -167,28 +168,43 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 		UpdatedAt:        now,
 	}
 
-	if err := s.store.Create(ctx, db, n); err != nil {
-		// Clean up file on DB error.
+	// A-7: Wrap all DB writes in a transaction for atomicity.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		os.Remove(absPath)
+		return nil, fmt.Errorf("note.Service.Create: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
+
+	if err := s.store.Create(ctx, tx, n); err != nil {
 		os.Remove(absPath)
 		return nil, fmt.Errorf("note.Service.Create: %w", err)
 	}
 
 	// Parse and save tags.
 	allTags := ParseTags(req.Body, req.Tags)
-	if err := s.store.UpdateTags(ctx, db, id, allTags); err != nil {
+	if err := s.store.UpdateTags(ctx, tx, id, allTags); err != nil {
+		os.Remove(absPath)
 		return nil, fmt.Errorf("note.Service.Create: update tags: %w", err)
 	}
 	n.Tags = allTags
 
 	// Parse and save wikilinks.
 	links := ParseWikilinks(req.Body)
-	if err := s.store.UpdateLinks(ctx, db, id, links); err != nil {
+	if err := s.store.UpdateLinks(ctx, tx, id, links); err != nil {
+		os.Remove(absPath)
 		return nil, fmt.Errorf("note.Service.Create: update links: %w", err)
 	}
 
 	// Resolve any dangling links pointing to this new note.
-	if err := s.store.ResolveDanglingLinks(ctx, db, id, req.Title, relPath); err != nil {
+	if err := s.store.ResolveDanglingLinks(ctx, tx, id, req.Title, relPath); err != nil {
+		os.Remove(absPath)
 		return nil, fmt.Errorf("note.Service.Create: resolve dangling links: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		os.Remove(absPath)
+		return nil, fmt.Errorf("note.Service.Create: commit: %w", err)
 	}
 
 	s.logger.Info("note created", "user_id", userID, "note_id", id, "file_path", relPath)
@@ -317,7 +333,19 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 
 	existing.UpdatedAt = time.Now().UTC()
 
-	// Rewrite .md file.
+	// A-8: Compute merged tags BEFORE building frontmatter so the file
+	// on disk always has the correct tags. Previously, existing.Tags (the OLD
+	// tags from store.Get) were written to frontmatter, causing reindex to
+	// revert tag changes.
+	if req.Body != nil || req.Tags != nil {
+		fmTags := existing.Tags
+		if req.Tags != nil {
+			fmTags = *req.Tags
+		}
+		existing.Tags = ParseTags(existing.Body, fmTags)
+	}
+
+	// Rewrite .md file with correct (merged) tags.
 	fm := &Frontmatter{
 		ID:               existing.ID,
 		Title:            existing.Title,
@@ -344,29 +372,34 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 
 	existing.ContentHash = computeHash(content)
 
-	if err := s.store.Update(ctx, db, existing); err != nil {
+	// A-7: Wrap all DB writes in a transaction for atomicity.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.Update: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
+
+	if err := s.store.Update(ctx, tx, existing); err != nil {
 		return nil, fmt.Errorf("note.Service.Update: %w", err)
 	}
 
-	// Re-parse tags if body or explicit tags changed.
+	// Write already-computed tags to DB (tags were merged above before file write).
 	if req.Body != nil || req.Tags != nil {
-		fmTags := existing.Tags
-		if req.Tags != nil {
-			fmTags = *req.Tags
-		}
-		allTags := ParseTags(existing.Body, fmTags)
-		if err := s.store.UpdateTags(ctx, db, noteID, allTags); err != nil {
+		if err := s.store.UpdateTags(ctx, tx, noteID, existing.Tags); err != nil {
 			return nil, fmt.Errorf("note.Service.Update: update tags: %w", err)
 		}
-		existing.Tags = allTags
 	}
 
 	// Re-parse wikilinks if body changed.
 	if req.Body != nil {
 		links := ParseWikilinks(existing.Body)
-		if err := s.store.UpdateLinks(ctx, db, noteID, links); err != nil {
+		if err := s.store.UpdateLinks(ctx, tx, noteID, links); err != nil {
 			return nil, fmt.Errorf("note.Service.Update: update links: %w", err)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("note.Service.Update: commit: %w", err)
 	}
 
 	s.logger.Info("note updated", "user_id", userID, "note_id", noteID)
@@ -406,12 +439,23 @@ func (s *Service) Delete(ctx context.Context, userID, noteID string) error {
 // Reindex is called by the file watcher when an external edit is detected.
 // It reads the file, parses frontmatter, and creates or updates the DB record.
 func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
+	// A-1: Validate filePath to prevent path traversal.
+	if err := validate.Path(filePath); err != nil {
+		return fmt.Errorf("note.Service.Reindex: %w", err)
+	}
+
 	db, err := s.userDBManager.Open(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("note.Service.Reindex: open db: %w", err)
 	}
 
 	notesDir := s.userDBManager.UserNotesDir(userID)
+
+	// A-1: Verify the resolved path stays within the notes directory.
+	if err := validate.PathWithinDir(filePath, notesDir); err != nil {
+		return fmt.Errorf("note.Service.Reindex: %w", err)
+	}
+
 	absPath := filepath.Join(notesDir, filePath)
 
 	content, readErr := os.ReadFile(absPath)
@@ -470,18 +514,29 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 			existing.ProjectID = ""
 		}
 
-		if err := s.store.Update(ctx, db, existing); err != nil {
+		// A-7: Wrap all DB writes in a transaction for atomicity.
+		tx, txErr := db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return fmt.Errorf("note.Service.Reindex: begin tx: %w", txErr)
+		}
+		defer tx.Rollback() //nolint:errcheck
+
+		if err := s.store.Update(ctx, tx, existing); err != nil {
 			return fmt.Errorf("note.Service.Reindex: update: %w", err)
 		}
 
 		allTags := ParseTags(body, fm.Tags)
-		if err := s.store.UpdateTags(ctx, db, existing.ID, allTags); err != nil {
+		if err := s.store.UpdateTags(ctx, tx, existing.ID, allTags); err != nil {
 			return fmt.Errorf("note.Service.Reindex: update tags: %w", err)
 		}
 
 		links := ParseWikilinks(body)
-		if err := s.store.UpdateLinks(ctx, db, existing.ID, links); err != nil {
+		if err := s.store.UpdateLinks(ctx, tx, existing.ID, links); err != nil {
 			return fmt.Errorf("note.Service.Reindex: update links: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("note.Service.Reindex: commit: %w", err)
 		}
 		return nil
 	}
@@ -534,12 +589,38 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 		}
 	}
 
-	if err := s.store.Create(ctx, db, n); err != nil {
+	// A-7: Wrap all DB writes in a transaction for atomicity.
+	tx, txErr := db.BeginTx(ctx, nil)
+	if txErr != nil {
+		return fmt.Errorf("note.Service.Reindex: begin tx: %w", txErr)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := s.store.Create(ctx, tx, n); err != nil {
 		return fmt.Errorf("note.Service.Reindex: create: %w", err)
+	}
+
+	allTags := ParseTags(body, fm.Tags)
+	if err := s.store.UpdateTags(ctx, tx, id, allTags); err != nil {
+		return fmt.Errorf("note.Service.Reindex: update tags: %w", err)
+	}
+
+	links := ParseWikilinks(body)
+	if err := s.store.UpdateLinks(ctx, tx, id, links); err != nil {
+		return fmt.Errorf("note.Service.Reindex: update links: %w", err)
+	}
+
+	if err := s.store.ResolveDanglingLinks(ctx, tx, id, title, filePath); err != nil {
+		return fmt.Errorf("note.Service.Reindex: resolve dangling links: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("note.Service.Reindex: commit: %w", err)
 	}
 
 	// Write ULID back to file if the frontmatter was missing an ID.
 	// This prevents duplicate DB entries on next restart.
+	// Done after commit since it is a best-effort operation.
 	if fm.ID == "" {
 		fm.ID = id
 		fm.Title = title
@@ -560,25 +641,12 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 		}
 	}
 
-	allTags := ParseTags(body, fm.Tags)
-	if err := s.store.UpdateTags(ctx, db, id, allTags); err != nil {
-		return fmt.Errorf("note.Service.Reindex: update tags: %w", err)
-	}
-
-	links := ParseWikilinks(body)
-	if err := s.store.UpdateLinks(ctx, db, id, links); err != nil {
-		return fmt.Errorf("note.Service.Reindex: update links: %w", err)
-	}
-
-	if err := s.store.ResolveDanglingLinks(ctx, db, id, title, filePath); err != nil {
-		return fmt.Errorf("note.Service.Reindex: resolve dangling links: %w", err)
-	}
-
 	return nil
 }
 
 // uniqueFilename generates a unique filename in the given directory, appending
-// a numeric suffix if a file with that name already exists.
+// a numeric suffix if a file with that name already exists. Falls back to a
+// ULID-based name if no unique name is found within 10000 attempts.
 func (s *Service) uniqueFilename(notesDir, subDir, slug string) string {
 	dir := notesDir
 	if subDir != "" {
@@ -589,15 +657,33 @@ func (s *Service) uniqueFilename(notesDir, subDir, slug string) string {
 	path := filepath.Join(dir, candidate)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return candidate
+	} else if err != nil && !os.IsNotExist(err) {
+		// Unexpected error (e.g. permission denied); fall back to ULID name.
+		fallback := ulid.MustNew(ulid.Now(), rand.Reader).String() + ".md"
+		s.logger.Warn("note.Service.uniqueFilename: stat error, using ULID fallback",
+			"path", path, "error", err)
+		return fallback
 	}
 
-	for i := 2; ; i++ {
+	const maxAttempts = 10000
+	for i := 2; i <= maxAttempts; i++ {
 		candidate = fmt.Sprintf("%s-%d.md", slug, i)
 		path = filepath.Join(dir, candidate)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			return candidate
+		} else if err != nil && !os.IsNotExist(err) {
+			fallback := ulid.MustNew(ulid.Now(), rand.Reader).String() + ".md"
+			s.logger.Warn("note.Service.uniqueFilename: stat error, using ULID fallback",
+				"path", path, "error", err)
+			return fallback
 		}
 	}
+
+	// Exhausted all attempts; use a ULID-based name.
+	fallback := ulid.MustNew(ulid.Now(), rand.Reader).String() + ".md"
+	s.logger.Warn("note.Service.uniqueFilename: exhausted attempts, using ULID fallback",
+		"slug", slug, "max_attempts", maxAttempts)
+	return fallback
 }
 
 // computeHash returns the hex-encoded SHA-256 hash of content.

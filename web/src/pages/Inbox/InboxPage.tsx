@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ArrowUpDown, Sparkles } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
@@ -6,6 +6,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { NoteCard } from '../../components/NoteCard/NoteCard';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { SynthesisModal } from '../../components/SynthesisModal/SynthesisModal';
+import type { Note } from '../../api/types';
 import styles from './InboxPage.module.css';
 
 export function InboxPage() {
@@ -19,6 +20,7 @@ export function InboxPage() {
   const tagFilter = searchParams.get('tag');
   const [sort, setSort] = useState<'modified' | 'created'>('modified');
   const [showSynthesis, setShowSynthesis] = useState(false);
+  const [loadedNotes, setLoadedNotes] = useState<Note[]>([]);
 
   useEffect(() => {
     fetchNotes({
@@ -29,6 +31,29 @@ export function InboxPage() {
     });
     fetchTags();
   }, [fetchNotes, fetchTags, tagFilter, sort]);
+
+  // Replace loadedNotes when the store notes change from a fresh fetch.
+  useEffect(() => {
+    setLoadedNotes(notes);
+  }, [notes]);
+
+  const handleLoadMore = useCallback(() => {
+    fetchNotes({
+      project: 'inbox',
+      tag: tagFilter ?? undefined,
+      sort,
+      limit: 100,
+      offset: loadedNotes.length,
+    }).then(() => {
+      // After fetch, the store has the new page of notes; append them.
+      const storeState = useNoteStore.getState();
+      setLoadedNotes((prev) => {
+        const existingIds = new Set(prev.map((n) => n.id));
+        const newNotes = storeState.notes.filter((n) => !existingIds.has(n.id));
+        return [...prev, ...newNotes];
+      });
+    });
+  }, [fetchNotes, tagFilter, sort, loadedNotes.length]);
 
   return (
     <div className={styles.page}>
@@ -68,7 +93,7 @@ export function InboxPage() {
 
       {isLoading ? (
         <div className={styles.loading}>Loading...</div>
-      ) : notes.length === 0 ? (
+      ) : loadedNotes.length === 0 ? (
         <EmptyState
           heading="Nothing in the inbox"
           subtext="Capture a thought to get started"
@@ -79,21 +104,13 @@ export function InboxPage() {
         />
       ) : (
         <div className={styles.noteList} role="list">
-          {notes.map((note) => (
+          {loadedNotes.map((note) => (
             <NoteCard key={note.id} note={note} />
           ))}
-          {notes.length < total && (
+          {loadedNotes.length < total && (
             <button
               className={styles.loadMore}
-              onClick={() =>
-                fetchNotes({
-                  project: 'inbox',
-                  tag: tagFilter ?? undefined,
-                  sort,
-                  limit: 100,
-                  offset: notes.length,
-                })
-              }
+              onClick={handleLoadMore}
             >
               Load more
             </button>

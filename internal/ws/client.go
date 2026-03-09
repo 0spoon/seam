@@ -33,8 +33,7 @@ func ServeWS(hub *Hub, jwtManager *auth.JWTManager, handler MessageHandler) http
 		logger := hub.logger.With("remote_addr", r.RemoteAddr)
 
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			// Allow all origins for development; tighten in production.
-			InsecureSkipVerify: true,
+			OriginPatterns: []string{"localhost:*", "127.0.0.1:*"},
 		})
 		if err != nil {
 			logger.Error("ws.ServeWS: accept failed", "error", err)
@@ -42,8 +41,10 @@ func ServeWS(hub *Hub, jwtManager *auth.JWTManager, handler MessageHandler) http
 		}
 		defer conn.CloseNow()
 
-		// Step 1: Read the auth message.
-		_, data, err := conn.Read(r.Context())
+		// Step 1: Read the auth message with a timeout.
+		authCtx, authCancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer authCancel()
+		_, data, err := conn.Read(authCtx)
 		if err != nil {
 			logger.Warn("ws.ServeWS: failed to read auth message", "error", err)
 			conn.Close(websocket.StatusPolicyViolation, "auth required")

@@ -8,4 +8,10 @@ import _ "embed"
 var ServerSQL string
 
 //go:embed user/001_initial.sql
-var UserSQL string
+var userInitialSQL string
+
+//go:embed user/002_add_slug.sql
+var userAddSlugSQL string
+
+// UserSQL contains all user-database migrations concatenated in order.
+var UserSQL = userInitialSQL + "\n" + userAddSlugSQL

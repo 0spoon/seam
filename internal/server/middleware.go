@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -48,19 +49,19 @@ func AuthMiddleware(jwtManager *auth.JWTManager) func(http.Handler) http.Handler
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "missing authorization header")
 				return
 			}
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-				http.Error(w, `{"error":"invalid authorization header format"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "invalid authorization header format")
 				return
 			}
 
 			claims, err := jwtManager.VerifyAccessToken(parts[1])
 			if err != nil {
-				http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
 
@@ -83,7 +84,7 @@ func RecoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 						"path", r.URL.Path,
 						"request_id", reqctx.RequestIDFromContext(r.Context()),
 					)
-					http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+					writeJSONError(w, http.StatusInternalServerError, "internal server error")
 				}
 			}()
 			next.ServeHTTP(w, r)
@@ -114,4 +115,11 @@ func generateRequestID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// writeJSONError writes a JSON-formatted error response with the correct Content-Type header.
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `{"error":%q}`, msg)
 }

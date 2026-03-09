@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
@@ -25,8 +25,9 @@ import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { getRelatedNotes, aiAssist, getTwoHopBacklinks, getOrphanNotes } from '../../api/client';
+import { getRelatedNotes, aiAssist, getTwoHopBacklinks } from '../../api/client';
 import { renderMarkdown } from '../../lib/markdown';
+import { sanitizeHtml } from '../../lib/sanitize';
 import { timeAgo, formatDateTime } from '../../lib/dates';
 import { getTagColor } from '../../lib/tagColor';
 import { seamEditorTheme } from './editorTheme';
@@ -76,10 +77,7 @@ export function NoteEditorPage() {
       getRelatedNotes(id).then(setRelatedNotes).catch(() => setRelatedNotes([]));
       // Fetch two-hop backlinks.
       getTwoHopBacklinks(id).then(setTwoHopBacklinks).catch(() => setTwoHopBacklinks([]));
-      // Check if this note is an orphan (no links in or out).
-      getOrphanNotes()
-        .then((orphans) => setIsOrphan(orphans.some((o) => o.id === id)))
-        .catch(() => setIsOrphan(false));
+      // Orphan status is computed from backlinks and content below.
     }
     return () => {
       clearCurrentNote();
@@ -89,6 +87,14 @@ export function NoteEditorPage() {
       setIsOrphan(false);
     };
   }, [id, fetchNote, fetchBacklinks, clearCurrentNote]);
+
+  // Check orphan status from already-available data.
+  // A note is an orphan if it has no backlinks and no outgoing wikilinks.
+  useEffect(() => {
+    const hasBacklinks = backlinks.length > 0;
+    const hasOutlinks = /\[\[.+?\]\]/.test(content);
+    setIsOrphan(!hasBacklinks && !hasOutlinks);
+  }, [backlinks, content]);
 
   // Listen for auto-link suggestions via WebSocket.
   const handleWSMessage = useCallback(
@@ -301,7 +307,10 @@ export function NoteEditorPage() {
     setAIResult(null);
   }, []);
 
-  const renderedHtml = renderMarkdown(content);
+  const renderedHtml = useMemo(
+    () => (viewMode === 'editor' ? '' : sanitizeHtml(renderMarkdown(content))),
+    [content, viewMode],
+  );
 
   return (
     <div className={styles.page} onKeyDown={handleKeyDown}>
@@ -534,7 +543,7 @@ export function NoteEditorPage() {
                     <div className={styles.aiResultContent}>
                       <div
                         className={styles.renderedMarkdownSmall}
-                        dangerouslySetInnerHTML={{ __html: renderMarkdown(aiResult.text) }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderMarkdown(aiResult.text)) }}
                       />
                     </div>
                     <div className={styles.aiResultActions}>

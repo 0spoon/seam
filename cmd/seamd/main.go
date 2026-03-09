@@ -35,19 +35,14 @@ func main() {
 	}
 }
 
-// noteBodyAdapter adapts note.SQLStore to the ai.NoteBodyLoader and
+// noteBodyAdapter adapts the note service to the ai.NoteBodyLoader and
 // ai.NoteBodyUpdater interfaces, respecting the layering rule.
 type noteBodyAdapter struct {
-	store     *note.SQLStore
-	dbManager userdb.Manager
+	noteSvc *note.Service
 }
 
 func (a *noteBodyAdapter) LoadNoteBody(ctx context.Context, userID, noteID string) (string, error) {
-	db, err := a.dbManager.Open(ctx, userID)
-	if err != nil {
-		return "", fmt.Errorf("noteBodyAdapter.LoadNoteBody: open db: %w", err)
-	}
-	n, err := a.store.Get(ctx, db, noteID)
+	n, err := a.noteSvc.Get(ctx, userID, noteID)
 	if err != nil {
 		return "", fmt.Errorf("noteBodyAdapter.LoadNoteBody: %w", err)
 	}
@@ -55,14 +50,7 @@ func (a *noteBodyAdapter) LoadNoteBody(ctx context.Context, userID, noteID strin
 }
 
 func (a *noteBodyAdapter) UpdateNoteBody(ctx context.Context, userID, noteID, body string) error {
-	db, err := a.dbManager.Open(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("noteBodyAdapter.UpdateNoteBody: open db: %w", err)
-	}
-	_, err = db.ExecContext(ctx,
-		`UPDATE notes SET body = ?, updated_at = ? WHERE id = ?`,
-		body, time.Now().UTC().Format(time.RFC3339), noteID,
-	)
+	_, err := a.noteSvc.Update(ctx, userID, noteID, note.UpdateNoteReq{Body: &body})
 	if err != nil {
 		return fmt.Errorf("noteBodyAdapter.UpdateNoteBody: %w", err)
 	}
@@ -122,6 +110,24 @@ func run() error {
 		cfg.Auth.BcryptCost, logger,
 	)
 	authHandler := auth.NewHandler(authSvc, logger)
+
+	// Start periodic cleanup of expired refresh tokens.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := authStore.DeleteExpiredTokens(ctx); err != nil {
+					logger.Warn("expired token cleanup failed", "error", err)
+				} else {
+					logger.Debug("expired refresh tokens cleaned up")
+				}
+			}
+		}
+	}()
 
 	// Create project components.
 	projectStore := project.NewStore()
@@ -197,7 +203,7 @@ func run() error {
 
 		// Create AI writer (uses chat model for writing assist).
 		aiWriter := ai.NewWriter(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
-		bodyAdapter := &noteBodyAdapter{store: noteStore, dbManager: userDBMgr}
+		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
 		aiQueue.RegisterHandler(ai.TaskTypeAssist, aiWriter.HandleAssistTask)
@@ -225,7 +231,7 @@ func run() error {
 	} else {
 		// Even without ChromaDB, writer can work with just Ollama.
 		aiWriter := ai.NewWriter(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
-		bodyAdapter := &noteBodyAdapter{store: noteStore, dbManager: userDBMgr}
+		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
 		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, aiWriter, userDBMgr, logger)
@@ -465,13 +471,13 @@ func run() error {
 
 	logger.Info("shutting down...")
 
-	// 1. Close all WebSocket connections with close frames.
-	hub.CloseAll()
-
-	// 2. Stop HTTP server.
+	// 1. Stop HTTP server (stop accepting new connections, drain in-flight).
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown error", "error", err)
 	}
+
+	// 2. Close all WebSocket connections with close frames.
+	hub.CloseAll()
 
 	// 3. Stop file watcher (deferred w.Close() handles this).
 	// 4. Close all user databases (deferred userDBMgr.CloseAll() handles this).

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -46,6 +47,16 @@ type TagCount struct {
 	Count int    `json:"count"`
 }
 
+// DBTX is an interface satisfied by both *sql.DB and *sql.Tx.
+// Store methods that participate in multi-step operations accept DBTX
+// so callers can pass a transaction for atomicity.
+type DBTX interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+}
+
 // SQLStore provides data access methods for notes against a per-user SQLite DB.
 type SQLStore struct{}
 
@@ -55,13 +66,15 @@ func NewSQLStore() *SQLStore {
 }
 
 // Create inserts a note and its tags into the database.
-func (s *SQLStore) Create(ctx context.Context, db *sql.DB, n *Note) error {
+// Accepts DBTX so it can participate in a transaction.
+func (s *SQLStore) Create(ctx context.Context, db DBTX, n *Note) error {
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO notes (id, title, project_id, file_path, body, content_hash,
-		 source_url, transcript_source, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 source_url, transcript_source, slug, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Title, nullString(n.ProjectID), n.FilePath, n.Body, n.ContentHash,
 		nullString(n.SourceURL), boolToInt(n.TranscriptSource),
+		slugify(n.Title),
 		n.CreatedAt.Format(time.RFC3339), n.UpdatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
@@ -130,12 +143,18 @@ func (s *SQLStore) List(ctx context.Context, db *sql.DB, filter NoteFilter) ([]*
 		where = append(where, "EXISTS (SELECT 1 FROM note_tags nt JOIN tags t ON t.id = nt.tag_id WHERE nt.note_id = n.id AND t.name = ?)")
 		args = append(args, filter.Tag)
 	}
+	// Use the same column for time filters as for sorting. Default sort
+	// column is updated_at; only "created" switches to created_at.
+	timeCol := "n.updated_at"
+	if filter.Sort == "created" {
+		timeCol = "n.created_at"
+	}
 	if !filter.Since.IsZero() {
-		where = append(where, "n.created_at >= ?")
+		where = append(where, timeCol+" >= ?")
 		args = append(args, filter.Since.Format(time.RFC3339))
 	}
 	if !filter.Until.IsZero() {
-		where = append(where, "n.created_at <= ?")
+		where = append(where, timeCol+" <= ?")
 		args = append(args, filter.Until.Format(time.RFC3339))
 	}
 
@@ -211,13 +230,16 @@ func (s *SQLStore) List(ctx context.Context, db *sql.DB, filter NoteFilter) ([]*
 }
 
 // Update modifies an existing note row.
-func (s *SQLStore) Update(ctx context.Context, db *sql.DB, n *Note) error {
+// Accepts DBTX so it can participate in a transaction.
+func (s *SQLStore) Update(ctx context.Context, db DBTX, n *Note) error {
 	result, err := db.ExecContext(ctx,
 		`UPDATE notes SET title = ?, project_id = ?, file_path = ?, body = ?,
-		 content_hash = ?, source_url = ?, transcript_source = ?, updated_at = ?
+		 content_hash = ?, source_url = ?, transcript_source = ?, slug = ?,
+		 updated_at = ?
 		 WHERE id = ?`,
 		n.Title, nullString(n.ProjectID), n.FilePath, n.Body,
 		n.ContentHash, nullString(n.SourceURL), boolToInt(n.TranscriptSource),
+		slugify(n.Title),
 		n.UpdatedAt.Format(time.RFC3339), n.ID,
 	)
 	if err != nil {
@@ -234,7 +256,8 @@ func (s *SQLStore) Update(ctx context.Context, db *sql.DB, n *Note) error {
 }
 
 // Delete removes a note by ID.
-func (s *SQLStore) Delete(ctx context.Context, db *sql.DB, id string) error {
+// Accepts DBTX so it can participate in a transaction.
+func (s *SQLStore) Delete(ctx context.Context, db DBTX, id string) error {
 	result, err := db.ExecContext(ctx, `DELETE FROM notes WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("note.SQLStore.Delete: %w", err)
@@ -279,7 +302,8 @@ func (s *SQLStore) GetBacklinks(ctx context.Context, db *sql.DB, noteID string) 
 
 // UpdateLinks replaces all outgoing links for a note, resolving targets by
 // title or filename match. Unresolved links are stored with a NULL target.
-func (s *SQLStore) UpdateLinks(ctx context.Context, db *sql.DB, noteID string, links []Link) error {
+// Accepts DBTX so it can participate in a transaction.
+func (s *SQLStore) UpdateLinks(ctx context.Context, db DBTX, noteID string, links []Link) error {
 	// Delete existing links for this note.
 	if _, err := db.ExecContext(ctx, `DELETE FROM links WHERE source_note_id = ?`, noteID); err != nil {
 		return fmt.Errorf("note.SQLStore.UpdateLinks: delete: %w", err)
@@ -306,12 +330,13 @@ func (s *SQLStore) UpdateLinks(ctx context.Context, db *sql.DB, noteID string, l
 }
 
 // ResolveLink finds a note by title, filename, or slug match.
+// Accepts DBTX so it can participate in a transaction.
 // Resolution order:
 //  1. Exact match on title (case-insensitive)
 //  2. Exact match on filename without .md extension (case-insensitive)
 //  3. Slug match: slugify the link text and compare to slugified titles
 //  4. No match -> returns empty string and ErrNotFound
-func (s *SQLStore) ResolveLink(ctx context.Context, db *sql.DB, linkText string) (string, error) {
+func (s *SQLStore) ResolveLink(ctx context.Context, db DBTX, linkText string) (string, error) {
 	var noteID string
 	// Step 1: exact title match (case-insensitive).
 	err := db.QueryRowContext(ctx,
@@ -325,9 +350,9 @@ func (s *SQLStore) ResolveLink(ctx context.Context, db *sql.DB, linkText string)
 	}
 
 	// Step 2: filename match (file_path ends with "/{linkText}.md").
-	pattern := "%" + linkText + ".md"
+	pattern := "%" + escapeLIKE(linkText) + ".md"
 	err = db.QueryRowContext(ctx,
-		`SELECT id FROM notes WHERE LOWER(file_path) LIKE LOWER(?) LIMIT 1`, pattern,
+		`SELECT id FROM notes WHERE LOWER(file_path) LIKE LOWER(?) ESCAPE '\' LIMIT 1`, pattern,
 	).Scan(&noteID)
 	if err == nil {
 		return noteID, nil
@@ -336,31 +361,31 @@ func (s *SQLStore) ResolveLink(ctx context.Context, db *sql.DB, linkText string)
 		return "", fmt.Errorf("note.SQLStore.ResolveLink: file_path: %w", err)
 	}
 
-	// Step 3: slug match. Slugify the link text and compare against slugified
-	// note titles. This allows [[api-design-patterns]] to resolve to a note
-	// titled "API Design Patterns".
+	// Step 3: slug match using the indexed slug column. This allows
+	// [[api-design-patterns]] to resolve to a note titled "API Design Patterns".
 	linkSlug := slugify(linkText)
 	if linkSlug != "" {
-		rows, qErr := db.QueryContext(ctx, `SELECT id, title FROM notes`)
-		if qErr != nil {
-			return "", fmt.Errorf("note.SQLStore.ResolveLink: slug query: %w", qErr)
+		err = db.QueryRowContext(ctx,
+			`SELECT id FROM notes WHERE slug = ? LIMIT 1`, linkSlug,
+		).Scan(&noteID)
+		if err == nil {
+			return noteID, nil
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var id, title string
-			if scanErr := rows.Scan(&id, &title); scanErr != nil {
-				continue
-			}
-			if slugify(title) == linkSlug {
-				return id, nil
-			}
-		}
-		if rowsErr := rows.Err(); rowsErr != nil {
-			return "", fmt.Errorf("note.SQLStore.ResolveLink: slug rows: %w", rowsErr)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("note.SQLStore.ResolveLink: slug: %w", err)
 		}
 	}
 
 	return "", ErrNotFound
+}
+
+// escapeLIKE escapes SQL LIKE wildcard characters so they are treated as
+// literals when used inside a LIKE pattern with ESCAPE '\'.
+func escapeLIKE(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }
 
 // slugify converts a string to a lowercase hyphenated slug for comparison.
@@ -387,7 +412,7 @@ func slugify(s string) string {
 // ResolveDanglingLinks finds links with NULL target_note_id whose link_text
 // matches the new note's title, filename, or slug, and sets their target
 // to noteID.
-func (s *SQLStore) ResolveDanglingLinks(ctx context.Context, db *sql.DB, noteID, title, filePath string) error {
+func (s *SQLStore) ResolveDanglingLinks(ctx context.Context, db DBTX, noteID, title, filePath string) error {
 	// Extract filename without extension from filePath for matching.
 	filename := filePath
 	if idx := strings.LastIndex(filePath, "/"); idx >= 0 {
@@ -406,8 +431,10 @@ func (s *SQLStore) ResolveDanglingLinks(ctx context.Context, db *sql.DB, noteID,
 		return fmt.Errorf("note.SQLStore.ResolveDanglingLinks: %w", err)
 	}
 
-	// Step 3: slug match. Check remaining dangling links whose slugified
-	// link_text matches the slugified title.
+	// Step 3: slug match. Use the note's slug to match dangling links whose
+	// slugified link_text matches. We still need to iterate dangling links
+	// because link_text is free-form, but we only compare against this note's
+	// known slug rather than loading all notes.
 	titleSlug := slugify(title)
 	if titleSlug == "" {
 		return nil
@@ -453,7 +480,8 @@ func (s *SQLStore) ResolveDanglingLinks(ctx context.Context, db *sql.DB, noteID,
 }
 
 // UpdateTags replaces all tags for a note. Creates new tag rows as needed.
-func (s *SQLStore) UpdateTags(ctx context.Context, db *sql.DB, noteID string, tags []string) error {
+// Accepts DBTX so it can participate in a transaction.
+func (s *SQLStore) UpdateTags(ctx context.Context, db DBTX, noteID string, tags []string) error {
 	// Remove existing tags for this note.
 	if _, err := db.ExecContext(ctx, `DELETE FROM note_tags WHERE note_id = ?`, noteID); err != nil {
 		return fmt.Errorf("note.SQLStore.UpdateTags: delete: %w", err)
@@ -528,8 +556,18 @@ func (s *SQLStore) scanNote(row *sql.Row) (*Note, error) {
 	n.ProjectID = projectID.String
 	n.SourceURL = sourceURL.String
 	n.TranscriptSource = transcriptSource != 0
-	n.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	n.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+
+	var parseErr error
+	n.CreatedAt, parseErr = time.Parse(time.RFC3339, createdAt)
+	if parseErr != nil {
+		slog.Warn("note.SQLStore.scanNote: malformed created_at, using zero time",
+			"note_id", n.ID, "raw", createdAt, "error", parseErr)
+	}
+	n.UpdatedAt, parseErr = time.Parse(time.RFC3339, updatedAt)
+	if parseErr != nil {
+		slog.Warn("note.SQLStore.scanNote: malformed updated_at, using zero time",
+			"note_id", n.ID, "raw", updatedAt, "error", parseErr)
+	}
 	return n, nil
 }
 
@@ -549,8 +587,18 @@ func (s *SQLStore) scanNoteRow(rows *sql.Rows) (*Note, error) {
 	n.ProjectID = projectID.String
 	n.SourceURL = sourceURL.String
 	n.TranscriptSource = transcriptSource != 0
-	n.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	n.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+
+	var parseErr error
+	n.CreatedAt, parseErr = time.Parse(time.RFC3339, createdAt)
+	if parseErr != nil {
+		slog.Warn("note.SQLStore.scanNoteRow: malformed created_at, using zero time",
+			"note_id", n.ID, "raw", createdAt, "error", parseErr)
+	}
+	n.UpdatedAt, parseErr = time.Parse(time.RFC3339, updatedAt)
+	if parseErr != nil {
+		slog.Warn("note.SQLStore.scanNoteRow: malformed updated_at, using zero time",
+			"note_id", n.ID, "raw", updatedAt, "error", parseErr)
+	}
 	return n, nil
 }
 

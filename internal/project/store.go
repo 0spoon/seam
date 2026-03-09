@@ -26,6 +26,13 @@ type Project struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// DBTX is an interface satisfied by both *sql.DB and *sql.Tx.
+type DBTX interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+}
+
 // Store defines data access methods for projects against a per-user SQLite DB.
 type Store struct{}
 
@@ -143,7 +150,7 @@ func (s *Store) Update(ctx context.Context, db *sql.DB, p *Project) error {
 }
 
 // Delete removes a project by ID. Returns ErrNotFound if the project does not exist.
-func (s *Store) Delete(ctx context.Context, db *sql.DB, id string) error {
+func (s *Store) Delete(ctx context.Context, db DBTX, id string) error {
 	result, err := db.ExecContext(ctx,
 		`DELETE FROM projects WHERE id = ?`, id,
 	)

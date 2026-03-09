@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/validate"
 )
 
 // Handler handles HTTP requests for project endpoints.
@@ -55,6 +56,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -63,6 +65,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	// A-6: Validate project name for filesystem safety (no /, \, .., null bytes).
+	if err := validate.Name(req.Name); err != nil {
+		writeError(w, http.StatusBadRequest, "name contains unsafe characters")
 		return
 	}
 
@@ -133,6 +141,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 	projectID := chi.URLParam(r, "id")
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req updateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -148,6 +157,14 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil && *req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name must not be empty")
 		return
+	}
+
+	// A-6: Validate project name for filesystem safety when updating.
+	if req.Name != nil {
+		if err := validate.Name(*req.Name); err != nil {
+			writeError(w, http.StatusBadRequest, "name contains unsafe characters")
+			return
+		}
 	}
 
 	p, err := h.service.Update(r.Context(), userID, projectID, req.Name, req.Description)

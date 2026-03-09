@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { synthesize } from '../../api/client';
 import { renderMarkdown } from '../../lib/markdown';
+import { sanitizeHtml } from '../../lib/sanitize';
 import styles from './SynthesisModal.module.css';
 
 interface SynthesisModalProps {
@@ -101,7 +102,7 @@ export function SynthesisModal({
           {response && (
             <div
               className={styles.response}
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(response) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderMarkdown(response)) }}
             />
           )}
 

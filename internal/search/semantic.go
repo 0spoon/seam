@@ -148,23 +148,33 @@ func (s *SemanticSearcher) getNoteSnippet(ctx context.Context, userID, noteID, q
 
 // extractSnippet returns a snippet of the body around the first occurrence
 // of any query word, or the beginning of the body if no match.
+// It operates on runes to avoid splitting multi-byte UTF-8 characters.
 func extractSnippet(body, query string, maxLen int) string {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return ""
 	}
 
+	runes := []rune(body)
+
 	lowerBody := strings.ToLower(body)
 	queryWords := strings.Fields(strings.ToLower(query))
 
-	// Find the first matching word position.
-	bestPos := -1
+	// Find the first matching word position (in byte offset), then convert
+	// to rune offset for slicing.
+	bestBytePos := -1
 	for _, word := range queryWords {
 		if pos := strings.Index(lowerBody, word); pos >= 0 {
-			if bestPos < 0 || pos < bestPos {
-				bestPos = pos
+			if bestBytePos < 0 || pos < bestBytePos {
+				bestBytePos = pos
 			}
 		}
+	}
+
+	// Convert byte position to rune position.
+	bestPos := -1
+	if bestBytePos >= 0 {
+		bestPos = len([]rune(body[:bestBytePos]))
 	}
 
 	start := 0
@@ -176,11 +186,11 @@ func extractSnippet(body, query string, maxLen int) string {
 	}
 
 	end := start + maxLen
-	if end > len(body) {
-		end = len(body)
+	if end > len(runes) {
+		end = len(runes)
 	}
 
-	snippet := body[start:end]
+	snippet := string(runes[start:end])
 
 	// Clean up: trim to word boundaries.
 	if start > 0 {
@@ -188,7 +198,7 @@ func extractSnippet(body, query string, maxLen int) string {
 			snippet = "..." + snippet[idx+1:]
 		}
 	}
-	if end < len(body) {
+	if end < len(runes) {
 		if idx := strings.LastIndexByte(snippet, ' '); idx >= 0 && idx > len(snippet)-20 {
 			snippet = snippet[:idx] + "..."
 		}

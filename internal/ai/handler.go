@@ -13,6 +13,10 @@ import (
 	"github.com/katata/seam/internal/userdb"
 )
 
+// maxInputLen is the maximum allowed length (in bytes) for user-provided
+// query, selection, and prompt fields in AI handler requests.
+const maxInputLen = 100 * 1024 // 100 KB
+
 // Handler handles HTTP requests for AI endpoints.
 type Handler struct {
 	queue       *Queue
@@ -70,12 +74,17 @@ func (h *Handler) ask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		Query   string        `json:"query"`
 		History []ChatMessage `json:"history,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Query) > maxInputLen {
+		writeError(w, http.StatusBadRequest, "query exceeds maximum length")
 		return
 	}
 	if req.Query == "" {
@@ -101,9 +110,14 @@ func (h *Handler) synthesize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload SynthesizePayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(payload.Prompt) > maxInputLen {
+		writeError(w, http.StatusBadRequest, "prompt exceeds maximum length")
 		return
 	}
 	if payload.Scope == "" || payload.Prompt == "" {
@@ -268,12 +282,17 @@ func (h *Handler) assist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		Action    string `json:"action"`
 		Selection string `json:"selection"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Selection) > maxInputLen {
+		writeError(w, http.StatusBadRequest, "selection exceeds maximum length")
 		return
 	}
 	if req.Action == "" {

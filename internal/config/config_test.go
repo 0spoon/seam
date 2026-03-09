@@ -92,7 +92,7 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 	// Minimal config with only required fields.
 	minimalConfig := `
 data_dir: "/var/seam"
-jwt_secret: "secret"
+jwt_secret: "test-secret-key-that-is-32-chars!"
 models:
   embeddings: "embed-model"
   background: "bg-model"
@@ -166,7 +166,7 @@ func TestLoad_EnvOverrides(t *testing.T) {
 
 	t.Setenv("SEAM_LISTEN", ":3000")
 	t.Setenv("SEAM_DATA_DIR", "/tmp/seam-data")
-	t.Setenv("SEAM_JWT_SECRET", "env-secret")
+	t.Setenv("SEAM_JWT_SECRET", "env-secret-that-is-at-least-32-c")
 	t.Setenv("SEAM_OLLAMA_URL", "http://gpu-host:11434")
 	t.Setenv("SEAM_CHROMADB_URL", "http://chroma-host:8000")
 
@@ -175,26 +175,26 @@ func TestLoad_EnvOverrides(t *testing.T) {
 
 	require.Equal(t, ":3000", cfg.Listen)
 	require.Equal(t, "/tmp/seam-data", cfg.DataDir)
-	require.Equal(t, "env-secret", cfg.JWTSecret)
+	require.Equal(t, "env-secret-that-is-at-least-32-c", cfg.JWTSecret)
 	require.Equal(t, "http://gpu-host:11434", cfg.OllamaBaseURL)
 	require.Equal(t, "http://chroma-host:8000", cfg.ChromaDBURL)
 }
 
 func TestLoad_EnvOverridePrecedence(t *testing.T) {
 	clearEnv(t)
-	// YAML sets jwt_secret to "yaml-secret", env sets to "env-secret".
+	// YAML sets jwt_secret to one value, env sets to another.
 	// env should win.
 	minConfig := `
 data_dir: "/d"
-jwt_secret: "yaml-secret"
+jwt_secret: "yaml-secret-must-be-32-chars-long"
 models: {embeddings: "e", background: "b", chat: "c"}
 `
 	path := writeConfig(t, minConfig)
-	t.Setenv("SEAM_JWT_SECRET", "env-secret")
+	t.Setenv("SEAM_JWT_SECRET", "env-secret-that-is-at-least-32-c")
 
 	cfg, err := Load(path)
 	require.NoError(t, err)
-	require.Equal(t, "env-secret", cfg.JWTSecret)
+	require.Equal(t, "env-secret-that-is-at-least-32-c", cfg.JWTSecret)
 }
 
 func TestLoad_EmptyEnvDoesNotOverride(t *testing.T) {
@@ -216,7 +216,7 @@ func TestLoad_PathNormalization(t *testing.T) {
 	clearEnv(t)
 	config := `
 data_dir: "/var/seam/"
-jwt_secret: "s"
+jwt_secret: "test-secret-key-that-is-32-chars!"
 ollama_base_url: "http://localhost:11434/"
 chromadb_url: "http://localhost:8000/"
 models: {embeddings: "e", background: "b", chat: "c"}

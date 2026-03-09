@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -43,6 +44,8 @@ type Store interface {
 	GetRefreshToken(ctx context.Context, tokenHash string) (userID string, expiresAt time.Time, err error)
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
 	DeleteRefreshTokensByUser(ctx context.Context, userID string) error
+	DeleteOldestTokensForUser(ctx context.Context, userID string, maxTokens int) error
+	DeleteExpiredTokens(ctx context.Context) error
 }
 
 // SQLStore implements Store against a SQLite database.
@@ -88,8 +91,17 @@ func (s *SQLStore) GetUserByUsername(ctx context.Context, username string) (*Use
 		}
 		return nil, fmt.Errorf("auth.Store.GetUserByUsername: %w", err)
 	}
-	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	u.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	var parseErr error
+	u.CreatedAt, parseErr = time.Parse(time.RFC3339, createdAt)
+	if parseErr != nil {
+		slog.Warn("auth.Store.GetUserByUsername: malformed created_at, using zero time",
+			"username", username, "raw", createdAt, "error", parseErr)
+	}
+	u.UpdatedAt, parseErr = time.Parse(time.RFC3339, updatedAt)
+	if parseErr != nil {
+		slog.Warn("auth.Store.GetUserByUsername: malformed updated_at, using zero time",
+			"username", username, "raw", updatedAt, "error", parseErr)
+	}
 	return u, nil
 }
 
@@ -107,8 +119,17 @@ func (s *SQLStore) GetUserByID(ctx context.Context, id string) (*User, error) {
 		}
 		return nil, fmt.Errorf("auth.Store.GetUserByID: %w", err)
 	}
-	u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	u.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	var parseErr error
+	u.CreatedAt, parseErr = time.Parse(time.RFC3339, createdAt)
+	if parseErr != nil {
+		slog.Warn("auth.Store.GetUserByID: malformed created_at, using zero time",
+			"user_id", id, "raw", createdAt, "error", parseErr)
+	}
+	u.UpdatedAt, parseErr = time.Parse(time.RFC3339, updatedAt)
+	if parseErr != nil {
+		slog.Warn("auth.Store.GetUserByID: malformed updated_at, using zero time",
+			"user_id", id, "raw", updatedAt, "error", parseErr)
+	}
 	return u, nil
 }
 
@@ -142,7 +163,11 @@ func (s *SQLStore) GetRefreshToken(ctx context.Context, tokenHash string) (strin
 		}
 		return "", time.Time{}, fmt.Errorf("auth.Store.GetRefreshToken: %w", err)
 	}
-	expiresAt, _ := time.Parse(time.RFC3339, expiresAtStr)
+	expiresAt, parseErr := time.Parse(time.RFC3339, expiresAtStr)
+	if parseErr != nil {
+		slog.Warn("auth.Store.GetRefreshToken: malformed expires_at, using zero time",
+			"raw", expiresAtStr, "error", parseErr)
+	}
 	return userID, expiresAt, nil
 }
 
@@ -153,6 +178,36 @@ func (s *SQLStore) DeleteRefreshToken(ctx context.Context, tokenHash string) err
 	)
 	if err != nil {
 		return fmt.Errorf("auth.Store.DeleteRefreshToken: %w", err)
+	}
+	return nil
+}
+
+// DeleteOldestTokensForUser removes the oldest refresh tokens for a user
+// when the total count exceeds maxTokens.
+func (s *SQLStore) DeleteOldestTokensForUser(ctx context.Context, userID string, maxTokens int) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM refresh_tokens WHERE id IN (
+			SELECT id FROM refresh_tokens
+			WHERE user_id = ?
+			ORDER BY created_at DESC
+			LIMIT -1 OFFSET ?
+		)`, userID, maxTokens,
+	)
+	if err != nil {
+		return fmt.Errorf("auth.Store.DeleteOldestTokensForUser: %w", err)
+	}
+	return nil
+}
+
+// DeleteExpiredTokens removes all refresh tokens that have passed their
+// expiration time.
+func (s *SQLStore) DeleteExpiredTokens(ctx context.Context) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM refresh_tokens WHERE expires_at < ?`, now,
+	)
+	if err != nil {
+		return fmt.Errorf("auth.Store.DeleteExpiredTokens: %w", err)
 	}
 	return nil
 }

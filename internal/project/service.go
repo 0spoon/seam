@@ -151,6 +151,20 @@ func (s *Service) Update(ctx context.Context, userID, projectID string, name, de
 				return nil, fmt.Errorf("project.Service.Update: rename dir: %w", err)
 			}
 		}
+
+		// A-9: Update file_path for all notes in this project to reflect
+		// the new slug. Without this, note.Get would fail with file-not-found
+		// because the DB still has the old slug prefix.
+		oldPrefix := oldSlug + "/"
+		newPrefix := existing.Slug + "/"
+		_, updateErr := db.ExecContext(ctx,
+			`UPDATE notes SET file_path = ? || SUBSTR(file_path, ?)
+			 WHERE project_id = ? AND file_path LIKE ?`,
+			newPrefix, len(oldPrefix)+1, projectID, oldPrefix+"%",
+		)
+		if updateErr != nil {
+			return nil, fmt.Errorf("project.Service.Update: update note paths: %w", updateErr)
+		}
 	}
 
 	if err := s.store.Update(ctx, db, existing); err != nil {
@@ -210,6 +224,13 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 		return fmt.Errorf("project.Service.Delete: rows error: %w", rowsErr)
 	}
 
+	// A-7: Wrap all DB writes in a transaction for atomicity.
+	tx, txErr := db.BeginTx(ctx, nil)
+	if txErr != nil {
+		return fmt.Errorf("project.Service.Delete: begin tx: %w", txErr)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
+
 	switch cascade {
 	case "inbox":
 		// Move notes to inbox: move files to root notes dir, update DB paths.
@@ -228,7 +249,7 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 			}
 
 			// Update DB: clear project_id and set new file_path.
-			_, updateErr := db.ExecContext(ctx,
+			_, updateErr := tx.ExecContext(ctx,
 				`UPDATE notes SET project_id = NULL, file_path = ? WHERE id = ?`,
 				newRelPath, n.id)
 			if updateErr != nil {
@@ -244,18 +265,19 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 				s.logger.Warn("project.Service.Delete: failed to remove note file",
 					"note_id", n.id, "path", absPath, "error", rmErr)
 			}
-			// Cascading delete on the project row handles note rows via
-			// ON DELETE SET NULL, but we need to explicitly delete the note
-			// rows since the FK action only NULLs project_id.
-			if _, delErr := db.ExecContext(ctx,
+			if _, delErr := tx.ExecContext(ctx,
 				`DELETE FROM notes WHERE id = ?`, n.id); delErr != nil {
 				return fmt.Errorf("project.Service.Delete: delete note %s: %w", n.id, delErr)
 			}
 		}
 	}
 
-	if err := s.store.Delete(ctx, db, projectID); err != nil {
+	if err := s.store.Delete(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("project.Service.Delete: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("project.Service.Delete: commit: %w", err)
 	}
 
 	// Remove project directory (should now be empty).

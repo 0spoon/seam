@@ -30,6 +30,12 @@ type URLFetcher struct {
 	client *http.Client
 }
 
+// allowedRedirectSchemes are the only URL schemes allowed in redirect targets.
+var allowedRedirectSchemes = map[string]bool{
+	"http":  true,
+	"https": true,
+}
+
 // NewURLFetcher creates a new URLFetcher with SSRF protections.
 func NewURLFetcher() *URLFetcher {
 	transport := &http.Transport{
@@ -39,10 +45,15 @@ func NewURLFetcher() *URLFetcher {
 		client: &http.Client{
 			Timeout:   15 * time.Second,
 			Transport: transport,
-			// Follow redirects but limit to 10.
+			// B-8: Follow redirects but limit to 10 and validate redirect scheme.
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 10 {
 					return fmt.Errorf("too many redirects")
+				}
+				// Reject redirects to non-HTTP(S) schemes (e.g., file://, ftp://).
+				scheme := strings.ToLower(req.URL.Scheme)
+				if !allowedRedirectSchemes[scheme] {
+					return fmt.Errorf("%w: redirect to %s", ErrUnsafeScheme, scheme)
 				}
 				return nil
 			},
@@ -51,8 +62,9 @@ func NewURLFetcher() *URLFetcher {
 }
 
 // ssrfSafeDialer rejects connections to private/loopback addresses.
+// A-3: Connects to the validated IP directly to prevent DNS rebinding (TOCTOU).
 func ssrfSafeDialer(ctx context.Context, network, addr string) (net.Conn, error) {
-	host, _, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("capture.ssrfSafeDialer: %w", err)
 	}
@@ -62,19 +74,28 @@ func ssrfSafeDialer(ctx context.Context, network, addr string) (net.Conn, error)
 		return nil, fmt.Errorf("capture.ssrfSafeDialer: resolve: %w", err)
 	}
 
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("capture.ssrfSafeDialer: no addresses found for %s", host)
+	}
+
 	for _, ip := range ips {
 		if isPrivateIP(ip.IP) {
 			return nil, ErrPrivateIP
 		}
 	}
 
+	// A-3: Connect directly to the validated IP address instead of
+	// re-resolving the hostname, preventing DNS rebinding attacks.
+	validatedAddr := net.JoinHostPort(ips[0].IP.String(), port)
 	var dialer net.Dialer
-	return dialer.DialContext(ctx, network, addr)
+	return dialer.DialContext(ctx, network, validatedAddr)
 }
 
-// isPrivateIP checks if an IP is private, loopback, or link-local.
+// isPrivateIP checks if an IP is private, loopback, link-local, or unspecified.
+// A-4: Added IsUnspecified() to block 0.0.0.0 which routes to localhost on many OSes.
 func isPrivateIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
 }
 
 // URLContent holds the extracted content from a fetched URL.

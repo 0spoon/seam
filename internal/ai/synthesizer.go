@@ -68,6 +68,9 @@ func (s *Synthesizer) Synthesize(ctx context.Context, userID string, payload Syn
 			}
 			rows = append(rows, r)
 		}
+		if err := dbRows.Err(); err != nil {
+			return nil, fmt.Errorf("ai.Synthesizer.Synthesize: rows iteration: %w", err)
+		}
 
 	case "tag":
 		if payload.Tag == "" {
@@ -90,6 +93,9 @@ func (s *Synthesizer) Synthesize(ctx context.Context, userID string, payload Syn
 				return nil, fmt.Errorf("ai.Synthesizer.Synthesize: scan: %w", err)
 			}
 			rows = append(rows, r)
+		}
+		if err := dbRows.Err(); err != nil {
+			return nil, fmt.Errorf("ai.Synthesizer.Synthesize: rows iteration: %w", err)
 		}
 
 	default:
@@ -152,6 +158,10 @@ func (s *Synthesizer) SynthesizeStream(ctx context.Context, userID string, paylo
 				}
 				rows = append(rows, r)
 			}
+			if rErr := dbRows.Err(); rErr != nil {
+				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: rows iteration: %w", rErr)
+				return
+			}
 		case "tag":
 			if payload.Tag == "" {
 				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: tag required")
@@ -176,6 +186,10 @@ func (s *Synthesizer) SynthesizeStream(ctx context.Context, userID string, paylo
 					return
 				}
 				rows = append(rows, r)
+			}
+			if rErr := dbRows.Err(); rErr != nil {
+				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: rows iteration: %w", rErr)
+				return
 			}
 		default:
 			errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: invalid scope %q", payload.Scope)

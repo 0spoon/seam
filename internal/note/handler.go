@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/validate"
 )
 
 // TemplateApplier applies a template by name, returning the rendered body.
@@ -64,6 +65,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req CreateNoteReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -72,6 +74,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+
+	// A-5: Validate title for filesystem safety (no /, \, .., null bytes).
+	if err := validate.Name(req.Title); err != nil {
+		writeError(w, http.StatusBadRequest, "title contains unsafe characters")
 		return
 	}
 
@@ -202,6 +210,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 	noteID := chi.URLParam(r, "id")
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req UpdateNoteReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -216,6 +225,14 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if req.Title != nil && *req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title must not be empty")
 		return
+	}
+
+	// A-5: Validate title for filesystem safety when updating.
+	if req.Title != nil {
+		if err := validate.Name(*req.Title); err != nil {
+			writeError(w, http.StatusBadRequest, "title contains unsafe characters")
+			return
+		}
 	}
 
 	n, err := h.service.Update(r.Context(), userID, noteID, req)

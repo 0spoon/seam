@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowUpDown, Plus, Sparkles } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
@@ -8,6 +8,7 @@ import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { SynthesisModal } from '../../components/SynthesisModal/SynthesisModal';
 import { getProjectColor } from '../../lib/tagColor';
 import { useUIStore } from '../../stores/uiStore';
+import type { Note } from '../../api/types';
 import styles from './ProjectPage.module.css';
 
 export function ProjectPage() {
@@ -23,6 +24,7 @@ export function ProjectPage() {
   const setCaptureModalOpen = useUIStore((s) => s.setCaptureModalOpen);
   const [sort, setSort] = useState<'modified' | 'created'>('modified');
   const [showSynthesis, setShowSynthesis] = useState(false);
+  const [loadedNotes, setLoadedNotes] = useState<Note[]>([]);
 
   const projectIndex = projects.findIndex((p) => p.id === id);
   const projectColor = getProjectColor(
@@ -35,6 +37,28 @@ export function ProjectPage() {
       fetchNotes({ project: id, sort, limit: 100 });
     }
   }, [id, fetchProject, fetchNotes, sort]);
+
+  // Replace loadedNotes when the store notes change from a fresh fetch.
+  useEffect(() => {
+    setLoadedNotes(notes);
+  }, [notes]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!id) return;
+    fetchNotes({
+      project: id,
+      sort,
+      limit: 100,
+      offset: loadedNotes.length,
+    }).then(() => {
+      const storeState = useNoteStore.getState();
+      setLoadedNotes((prev) => {
+        const existingIds = new Set(prev.map((n) => n.id));
+        const newNotes = storeState.notes.filter((n) => !existingIds.has(n.id));
+        return [...prev, ...newNotes];
+      });
+    });
+  }, [id, fetchNotes, sort, loadedNotes.length]);
 
   if (!currentProject && !isLoading) {
     return (
@@ -86,7 +110,7 @@ export function ProjectPage() {
 
       {isLoading ? (
         <div className={styles.loading}>Loading...</div>
-      ) : notes.length === 0 ? (
+      ) : loadedNotes.length === 0 ? (
         <EmptyState
           heading="No notes yet"
           subtext="Create the first note in this project"
@@ -97,7 +121,7 @@ export function ProjectPage() {
         />
       ) : (
         <div className={styles.noteList} role="list">
-          {notes.map((note) => (
+          {loadedNotes.map((note) => (
             <NoteCard
               key={note.id}
               note={note}
@@ -105,17 +129,10 @@ export function ProjectPage() {
               projectColor={projectColor}
             />
           ))}
-          {notes.length < total && (
+          {loadedNotes.length < total && (
             <button
               className={styles.loadMore}
-              onClick={() =>
-                fetchNotes({
-                  project: id,
-                  sort,
-                  limit: 100,
-                  offset: notes.length,
-                })
-              }
+              onClick={handleLoadMore}
             >
               Load more
             </button>

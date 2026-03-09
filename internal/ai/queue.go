@@ -24,8 +24,9 @@ type TaskHandler func(ctx context.Context, task *Task) (json.RawMessage, error)
 // so one user with many tasks cannot starve other users.
 type Queue struct {
 	mu           sync.Mutex
+	cond         *sync.Cond
 	pq           priorityQueue
-	notify       chan struct{}
+	notify       chan struct{} // kept for backward compatibility with tests that send on it
 	handlers     map[string]TaskHandler
 	store        *TaskStore
 	dbManager    userdb.Manager
@@ -43,7 +44,7 @@ func NewQueue(store *TaskStore, dbManager userdb.Manager, hub *ws.Hub, workers i
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Queue{
+	q := &Queue{
 		pq:           make(priorityQueue, 0),
 		notify:       make(chan struct{}, 1),
 		handlers:     make(map[string]TaskHandler),
@@ -54,6 +55,8 @@ func NewQueue(store *TaskStore, dbManager userdb.Manager, hub *ws.Hub, workers i
 		logger:       logger,
 		lastUserByPr: make(map[int]string),
 	}
+	q.cond = sync.NewCond(&q.mu)
+	return q
 }
 
 // RegisterHandler registers a handler for a task type.
@@ -89,9 +92,10 @@ func (q *Queue) Enqueue(ctx context.Context, task *Task) error {
 		task:     task,
 		priority: task.Priority,
 	})
+	q.cond.Broadcast()
 	q.mu.Unlock()
 
-	// Signal workers.
+	// Also signal via channel for backward compatibility with tests.
 	select {
 	case q.notify <- struct{}{}:
 	default:
@@ -147,6 +151,19 @@ func (q *Queue) LoadPending(ctx context.Context) error {
 
 // Run starts the queue workers. This blocks until the context is cancelled.
 func (q *Queue) Run(ctx context.Context) error {
+	// Bridge: convert legacy notify channel signals into cond broadcasts
+	// so tests that send on q.notify still wake workers.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-q.notify:
+				q.cond.Broadcast()
+			}
+		}
+	}()
+
 	var wg sync.WaitGroup
 	for i := 0; i < q.workers; i++ {
 		wg.Add(1)
@@ -159,40 +176,56 @@ func (q *Queue) Run(ctx context.Context) error {
 	return nil
 }
 
-// worker processes tasks from the queue.
+// worker processes tasks from the queue, one at a time. Each worker blocks
+// on the condition variable until a task is available, then dequeues and
+// processes exactly one task before looping. This ensures multiple workers
+// provide real parallelism.
 func (q *Queue) worker(ctx context.Context, workerID int) {
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-q.notify:
-			q.processAll(ctx)
-		}
-	}
-}
-
-// processAll drains the queue, processing tasks one at a time.
-func (q *Queue) processAll(ctx context.Context) {
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-
-		task := q.dequeue()
+		task := q.waitForTask(ctx)
 		if task == nil {
-			return
+			return // context cancelled
 		}
-
 		q.processTask(ctx, task)
 	}
 }
 
-// dequeue removes and returns the highest-priority task, applying fair
-// round-robin scheduling across users within the same priority level.
-func (q *Queue) dequeue() *Task {
+// waitForTask blocks until a task is available or the context is cancelled.
+// Returns nil when the context is done.
+func (q *Queue) waitForTask(ctx context.Context) *Task {
+	// Spawn a goroutine that broadcasts on the cond when the context is
+	// cancelled, so the cond.Wait unblocks.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			q.cond.Broadcast()
+		case <-done:
+		}
+	}()
+
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
+	for q.pq.Len() == 0 {
+		if ctx.Err() != nil {
+			return nil
+		}
+		q.cond.Wait()
+	}
+
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	return q.dequeueLocked()
+}
+
+// dequeueLocked removes and returns the highest-priority task, applying fair
+// round-robin scheduling across users within the same priority level.
+// The caller must hold q.mu.
+func (q *Queue) dequeueLocked() *Task {
 	if q.pq.Len() == 0 {
 		return nil
 	}
@@ -201,14 +234,15 @@ func (q *Queue) dequeue() *Task {
 	topPriority := q.pq[0].priority
 	lastUser := q.lastUserByPr[topPriority]
 
-	// If there is a last-served user for this priority level, find the next
-	// task from a different user at the same priority level. This ensures
-	// round-robin fairness: if user A was served last, we prefer user B.
+	// If there is a last-served user for this priority level, scan ALL
+	// elements at the top priority (not just up to the first non-matching
+	// one) because a heap does not sort siblings. We look for a task from
+	// a different user to enforce round-robin fairness.
 	if lastUser != "" {
 		bestIdx := -1
 		for i, item := range q.pq {
 			if item.priority != topPriority {
-				break // items are heap-ordered, higher priority numbers come later
+				continue // skip non-top-priority items; heap order is not sorted
 			}
 			if item.task.UserID != lastUser {
 				bestIdx = i

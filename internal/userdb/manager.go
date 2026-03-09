@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/katata/seam/internal/validate"
 	"github.com/katata/seam/migrations"
 	_ "modernc.org/sqlite"
 )
@@ -58,7 +59,7 @@ type SQLManager struct {
 }
 
 // NewSQLManager creates a new SQLManager.
-// Call Run() in a goroutine to start the eviction loop.
+// Call Run() in a goroutine to block until shutdown.
 func NewSQLManager(dataDir string, evictionTimeout time.Duration, logger *slog.Logger) *SQLManager {
 	if logger == nil {
 		logger = slog.Default()
@@ -73,7 +74,12 @@ func NewSQLManager(dataDir string, evictionTimeout time.Duration, logger *slog.L
 }
 
 // Open returns a cached or newly created *sql.DB for the given user.
+// A-2: Validates userID to prevent path traversal via crafted IDs.
 func (m *SQLManager) Open(ctx context.Context, userID string) (*sql.DB, error) {
+	if err := validate.UserID(userID); err != nil {
+		return nil, fmt.Errorf("userdb.Manager.Open: %w", err)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -128,11 +134,15 @@ func (m *SQLManager) CloseAll() error {
 }
 
 // UserNotesDir returns the absolute path to a user's notes/ directory.
+// Callers must validate userID before calling this method, or use
+// ValidatedUserNotesDir which returns an error.
 func (m *SQLManager) UserNotesDir(userID string) string {
 	return filepath.Join(m.dataDir, "users", userID, "notes")
 }
 
 // UserDataDir returns the absolute path to a user's data directory.
+// Callers must validate userID before calling this method, or use
+// ValidatedUserDataDir which returns an error.
 func (m *SQLManager) UserDataDir(userID string) string {
 	return filepath.Join(m.dataDir, "users", userID)
 }
@@ -158,7 +168,12 @@ func (m *SQLManager) ListUsers(ctx context.Context) ([]string, error) {
 }
 
 // EnsureUserDirs creates the directory tree for a user if it does not exist.
+// A-2: Validates userID to prevent path traversal via crafted IDs.
 func (m *SQLManager) EnsureUserDirs(userID string) error {
+	if err := validate.UserID(userID); err != nil {
+		return fmt.Errorf("userdb.Manager.EnsureUserDirs: %w", err)
+	}
+
 	notesDir := m.UserNotesDir(userID)
 	if err := os.MkdirAll(notesDir, 0o755); err != nil {
 		return fmt.Errorf("userdb.Manager.EnsureUserDirs: %w", err)
@@ -166,39 +181,14 @@ func (m *SQLManager) EnsureUserDirs(userID string) error {
 	return nil
 }
 
-// Run starts the eviction loop. Call this in a goroutine.
-// The loop checks for idle databases every minute and closes those
-// that have been idle longer than evictionTimeout.
+// Run blocks until the context is cancelled or CloseAll is called.
+// Previously this ran an eviction loop, but eviction was removed to avoid
+// closing a *sql.DB handle while other goroutines still hold references.
+// Databases are now only closed on shutdown via CloseAll.
 func (m *SQLManager) Run(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.closeCh:
-			return
-		case <-ticker.C:
-			m.evict()
-		}
-	}
-}
-
-func (m *SQLManager) evict() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := time.Now()
-	for userID, entry := range m.dbs {
-		if now.Sub(entry.lastUsed) > m.evictionTimeout {
-			m.logger.Info("evicting idle user database", "user_id", userID,
-				"idle_duration", now.Sub(entry.lastUsed).String())
-			if err := entry.db.Close(); err != nil {
-				m.logger.Error("failed to close evicted database", "user_id", userID, "error", err)
-			}
-			delete(m.dbs, userID)
-		}
+	select {
+	case <-ctx.Done():
+	case <-m.closeCh:
 	}
 }
 

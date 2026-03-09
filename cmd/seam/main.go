@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -36,7 +38,11 @@ func run() error {
 		}
 
 		// Try to refresh the token to verify it is still valid.
-		tokens, refreshErr := client.Refresh()
+		// Use a timeout to avoid blocking the terminal on a slow or
+		// unreachable server.
+		refreshCtx, refreshCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		tokens, refreshErr := client.RefreshCtx(refreshCtx)
+		refreshCancel()
 		if refreshErr == nil {
 			client.AccessToken = tokens.AccessToken
 			client.RefreshToken = tokens.RefreshToken
@@ -47,7 +53,7 @@ func run() error {
 			auth.RefreshToken = tokens.RefreshToken
 			_ = SaveAuth(auth)
 		}
-		// If refresh fails, fall through to login screen.
+		// If refresh fails or times out, fall through to login screen.
 	}
 
 	model := newAppModel(client, authenticated, username)

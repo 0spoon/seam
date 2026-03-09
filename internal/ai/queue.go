@@ -19,6 +19,15 @@ import (
 // TaskHandler processes a single AI task.
 type TaskHandler func(ctx context.Context, task *Task) (json.RawMessage, error)
 
+// DefaultMaxQueueSize is the default maximum number of tasks the in-memory queue will hold.
+const DefaultMaxQueueSize = 10000
+
+// DefaultTaskTimeout is the default per-task execution timeout.
+const DefaultTaskTimeout = 5 * time.Minute
+
+// ErrQueueFull is returned when the queue has reached its maximum capacity.
+var ErrQueueFull = fmt.Errorf("ai task queue is full")
+
 // Queue manages AI task execution with priority ordering and fair scheduling.
 // Fair scheduling ensures round-robin across users within each priority level,
 // so one user with many tasks cannot starve other users.
@@ -34,10 +43,13 @@ type Queue struct {
 	workers      int
 	logger       *slog.Logger
 	lastUserByPr map[int]string // tracks last-served user per priority level for round-robin
+	maxQueueSize int            // maximum number of tasks in the in-memory queue
+	taskTimeout  time.Duration  // per-task execution timeout
 }
 
-// NewQueue creates a new AI task queue.
-func NewQueue(store *TaskStore, dbManager userdb.Manager, hub *ws.Hub, workers int, logger *slog.Logger) *Queue {
+// NewQueue creates a new AI task queue. Optional maxQueueSize and taskTimeout
+// can be passed; zero values use defaults (10000 and 5 minutes respectively).
+func NewQueue(store *TaskStore, dbManager userdb.Manager, hub *ws.Hub, workers int, logger *slog.Logger, opts ...func(*Queue)) *Queue {
 	if workers <= 0 {
 		workers = 1
 	}
@@ -54,13 +66,39 @@ func NewQueue(store *TaskStore, dbManager userdb.Manager, hub *ws.Hub, workers i
 		workers:      workers,
 		logger:       logger,
 		lastUserByPr: make(map[int]string),
+		maxQueueSize: DefaultMaxQueueSize,
+		taskTimeout:  DefaultTaskTimeout,
+	}
+	for _, opt := range opts {
+		opt(q)
 	}
 	q.cond = sync.NewCond(&q.mu)
 	return q
 }
 
-// RegisterHandler registers a handler for a task type.
+// WithMaxQueueSize returns an option that sets the maximum queue size.
+func WithMaxQueueSize(size int) func(*Queue) {
+	return func(q *Queue) {
+		if size > 0 {
+			q.maxQueueSize = size
+		}
+	}
+}
+
+// WithTaskTimeout returns an option that sets the per-task execution timeout.
+func WithTaskTimeout(d time.Duration) func(*Queue) {
+	return func(q *Queue) {
+		if d > 0 {
+			q.taskTimeout = d
+		}
+	}
+}
+
+// RegisterHandler registers a handler for a task type. Must be called before
+// Run() starts processing tasks (i.e., during initialization only).
 func (q *Queue) RegisterHandler(taskType string, handler TaskHandler) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.handlers[taskType] = handler
 }
 
@@ -86,8 +124,12 @@ func (q *Queue) Enqueue(ctx context.Context, task *Task) error {
 		return fmt.Errorf("ai.Queue.Enqueue: create task: %w", err)
 	}
 
-	// Add to in-memory queue.
+	// Add to in-memory queue with backpressure check.
 	q.mu.Lock()
+	if q.pq.Len() >= q.maxQueueSize {
+		q.mu.Unlock()
+		return fmt.Errorf("ai.Queue.Enqueue: %w (max %d)", ErrQueueFull, q.maxQueueSize)
+	}
 	heap.Push(&q.pq, &pqItem{
 		task:     task,
 		priority: task.Priority,
@@ -192,6 +234,11 @@ func (q *Queue) worker(ctx context.Context, workerID int) {
 
 // waitForTask blocks until a task is available or the context is cancelled.
 // Returns nil when the context is done.
+//
+// NOTE: This spawns a goroutine per wait to bridge context cancellation with
+// sync.Cond. This is acceptable because the number of concurrent waiters
+// equals the number of workers (typically 1-4), and the goroutine exits
+// promptly when the wait completes or context is cancelled.
 func (q *Queue) waitForTask(ctx context.Context) *Task {
 	// Spawn a goroutine that broadcasts on the cond when the context is
 	// cancelled, so the cond.Wait unblocks.
@@ -238,6 +285,11 @@ func (q *Queue) dequeueLocked() *Task {
 	// elements at the top priority (not just up to the first non-matching
 	// one) because a heap does not sort siblings. We look for a task from
 	// a different user to enforce round-robin fairness.
+	//
+	// NOTE: This does an O(n) scan of the entire heap. This is acceptable
+	// for expected queue sizes (typically hundreds to low thousands of tasks).
+	// A more efficient approach would require a secondary index by user,
+	// but the added complexity is not warranted at current scale.
 	if lastUser != "" {
 		bestIdx := -1
 		for i, item := range q.pq {
@@ -269,7 +321,9 @@ func (q *Queue) dequeueLocked() *Task {
 
 // processTask executes a single task.
 func (q *Queue) processTask(ctx context.Context, task *Task) {
+	q.mu.Lock()
 	handler, ok := q.handlers[task.Type]
+	q.mu.Unlock()
 	if !ok {
 		q.logger.Error("ai.Queue: no handler for task type", "type", task.Type, "task_id", task.ID)
 		q.failTask(ctx, task, "no handler registered for task type: "+task.Type)
@@ -282,10 +336,21 @@ func (q *Queue) processTask(ctx context.Context, task *Task) {
 	// Mark as running.
 	db, err := q.dbManager.Open(ctx, task.UserID)
 	if err != nil {
-		q.logger.Error("ai.Queue: failed to open db for task", "task_id", task.ID, "error", err)
+		q.logger.Error("ai.Queue: failed to open db for task, re-enqueuing",
+			"task_id", task.ID, "error", err)
+		q.mu.Lock()
+		heap.Push(&q.pq, &pqItem{
+			task:     task,
+			priority: task.Priority,
+		})
+		q.cond.Broadcast()
+		q.mu.Unlock()
 		return
 	}
-	q.store.UpdateStatus(ctx, db, task.ID, TaskStatusRunning, nil, "")
+	if err := q.store.UpdateStatus(ctx, db, task.ID, TaskStatusRunning, nil, ""); err != nil {
+		q.logger.Error("ai.Queue.processTask: failed to update status to running",
+			"task_id", task.ID, "error", err)
+	}
 
 	// Send progress event.
 	q.sendEvent(task.UserID, TaskEvent{
@@ -294,15 +359,21 @@ func (q *Queue) processTask(ctx context.Context, task *Task) {
 		Type:   "progress",
 	})
 
-	// Execute handler.
-	result, err := handler(ctx, task)
+	// Execute handler with a per-task timeout.
+	taskCtx, taskCancel := context.WithTimeout(ctx, q.taskTimeout)
+	defer taskCancel()
+
+	result, err := handler(taskCtx, task)
 	if err != nil {
 		q.failTask(ctx, task, err.Error())
 		return
 	}
 
 	// Mark as done.
-	q.store.UpdateStatus(ctx, db, task.ID, TaskStatusDone, result, "")
+	if err := q.store.UpdateStatus(ctx, db, task.ID, TaskStatusDone, result, ""); err != nil {
+		q.logger.Error("ai.Queue.processTask: failed to update status to done",
+			"task_id", task.ID, "error", err)
+	}
 	q.logger.Info("ai.Queue: task completed", "task_id", task.ID, "type", task.Type)
 
 	// Send complete event.
@@ -321,9 +392,14 @@ func (q *Queue) failTask(ctx context.Context, task *Task, errMsg string) {
 
 	db, err := q.dbManager.Open(ctx, task.UserID)
 	if err != nil {
+		q.logger.Error("ai.Queue.failTask: failed to open db",
+			"task_id", task.ID, "error", err)
 		return
 	}
-	q.store.UpdateStatus(ctx, db, task.ID, TaskStatusFailed, nil, errMsg)
+	if err := q.store.UpdateStatus(ctx, db, task.ID, TaskStatusFailed, nil, errMsg); err != nil {
+		q.logger.Error("ai.Queue.failTask: failed to update status to failed",
+			"task_id", task.ID, "error", err)
+	}
 
 	q.sendEvent(task.UserID, TaskEvent{
 		TaskID:  task.ID,

@@ -110,7 +110,9 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("template.writeJSON: encode error", "error", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

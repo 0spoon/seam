@@ -189,3 +189,59 @@
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
 }
+
+.errorState {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+}
+
+.errorTitle {
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  color: var(--status-error);
+  margin-bottom: var(--space-2);
+}
+
+.errorDescription {
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-4);
+}
+
+.retryButton {
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.retryButton:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.canvas:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}

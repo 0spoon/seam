@@ -94,6 +94,13 @@ func (s *SemanticSearcher) Search(ctx context.Context, userID, query string, lim
 		}
 	}
 
+	// C-24: Batch-load note bodies in a single query instead of N+1.
+	noteIDs := make([]string, 0, len(seen))
+	for noteID := range seen {
+		noteIDs = append(noteIDs, noteID)
+	}
+	bodyMap := s.batchGetNoteBodies(ctx, userID, noteIDs)
+
 	// Convert to SemanticResult and sort by score (lower distance = better).
 	// Distance is converted to a similarity score for the API.
 	var results []SemanticResult
@@ -108,8 +115,8 @@ func (s *SemanticSearcher) Search(ctx context.Context, userID, query string, lim
 			score = 1
 		}
 
-		// Fetch a snippet from the note body.
-		snippet := s.getNoteSnippet(ctx, userID, br.noteID, query)
+		// Extract snippet from the batch-loaded body.
+		snippet := extractSnippet(bodyMap[br.noteID], query, 200)
 
 		results = append(results, SemanticResult{
 			NoteID:  br.noteID,
@@ -130,20 +137,56 @@ func (s *SemanticSearcher) Search(ctx context.Context, userID, query string, lim
 	return results, nil
 }
 
-// getNoteSnippet returns a short snippet from a note's body.
-func (s *SemanticSearcher) getNoteSnippet(ctx context.Context, userID, noteID, query string) string {
+// batchGetNoteBodies loads note bodies for all given note IDs in a single query,
+// replacing the N+1 per-note getNoteSnippet pattern (C-24, C-25).
+func (s *SemanticSearcher) batchGetNoteBodies(ctx context.Context, userID string, noteIDs []string) map[string]string {
+	result := make(map[string]string, len(noteIDs))
+	if len(noteIDs) == 0 {
+		return result
+	}
+
 	db, err := s.dbManager.Open(ctx, userID)
 	if err != nil {
-		return ""
+		s.logger.Warn("search.SemanticSearcher.batchGetNoteBodies: open db failed",
+			"user_id", userID, "error", err)
+		return result
 	}
 
-	var body string
-	err = db.QueryRowContext(ctx, `SELECT body FROM notes WHERE id = ?`, noteID).Scan(&body)
+	placeholders := make([]string, len(noteIDs))
+	args := make([]interface{}, len(noteIDs))
+	for i, id := range noteIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, body FROM notes WHERE id IN (%s)`,
+		strings.Join(placeholders, ","),
+	)
+
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return ""
+		s.logger.Warn("search.SemanticSearcher.batchGetNoteBodies: query failed",
+			"error", err)
+		return result
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
+			s.logger.Warn("search.SemanticSearcher.batchGetNoteBodies: scan failed",
+				"error", err)
+			continue
+		}
+		result[id] = body
+	}
+	if err := rows.Err(); err != nil {
+		s.logger.Warn("search.SemanticSearcher.batchGetNoteBodies: rows error",
+			"error", err)
 	}
 
-	return extractSnippet(body, query, 200)
+	return result
 }
 
 // extractSnippet returns a snippet of the body around the first occurrence

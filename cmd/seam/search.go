@@ -189,6 +189,12 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 
 	if rawQuery != m.lastQuery {
 		m.lastQuery = rawQuery
+		// Only trigger search for queries with 2+ characters.
+		if len(rawQuery) < 2 {
+			m.results = nil
+			m.resultIdx = 0
+			return m, cmd
+		}
 		m.timerID++
 		currentID := m.timerID
 		currentQuery := rawQuery
@@ -237,7 +243,10 @@ func (m searchModel) View() string {
 
 	b.WriteString("\n")
 
-	if len(m.results) == 0 && m.lastQuery != "" && !m.loading {
+	if m.lastQuery != "" && len(m.lastQuery) < 2 {
+		b.WriteString(styleMuted.Render("  Type 2+ characters to search"))
+		b.WriteString("\n")
+	} else if len(m.results) == 0 && m.lastQuery != "" && !m.loading {
 		b.WriteString(styleMuted.Render("  No results found"))
 		b.WriteString("\n")
 	}

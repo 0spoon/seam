@@ -38,7 +38,7 @@ md.renderer.rules['wikilink'] = (tokens, idx) => {
   const escaped = target
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;');
-  return `<a class="wikilink" data-target="${escaped}" href="#">${md.utils.escapeHtml(display)}</a>`;
+  return `<a class="wikilink" data-wikilink="${escaped}" href="javascript:void(0)">${md.utils.escapeHtml(display)}</a>`;
 };
 
 export function renderMarkdown(source: string): string {

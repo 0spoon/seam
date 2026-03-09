@@ -106,6 +106,11 @@
   --duration-fast: 150ms;
   --duration-normal: 250ms;
   --duration-slow: 350ms;
+
+  /* Breakpoints (for reference; used in media queries) */
+  --bp-sm: 640px;
+  --bp-md: 1024px;
+  --bp-lg: 1440px;
 }
 
 @media (prefers-reduced-motion: reduce) {

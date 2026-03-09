@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Note, NoteFilter, CreateNoteReq, UpdateNoteReq } from '../api/types';
 import * as api from '../api/client';
+import { useToastStore } from '../components/Toast/ToastContainer';
 
 interface NoteState {
   notes: Note[];
@@ -9,6 +10,9 @@ interface NoteState {
   backlinks: Note[];
   isLoading: boolean;
   error: string | null;
+  // The last filter used by fetchNotes, kept so WS handlers can refetch
+  // the list with the same parameters after a remote change.
+  lastFilter: NoteFilter | undefined;
 
   fetchNotes: (filter?: NoteFilter) => Promise<void>;
   fetchNote: (id: string) => Promise<void>;
@@ -16,20 +20,22 @@ interface NoteState {
   updateNote: (id: string, req: UpdateNoteReq) => Promise<Note>;
   deleteNote: (id: string) => Promise<void>;
   fetchBacklinks: (noteId: string) => Promise<void>;
+  handleNoteChanged: (noteId: string) => Promise<void>;
   clearCurrentNote: () => void;
   clearError: () => void;
 }
 
-export const useNoteStore = create<NoteState>((set) => ({
+export const useNoteStore = create<NoteState>((set, get) => ({
   notes: [],
   total: 0,
   currentNote: null,
   backlinks: [],
   isLoading: false,
   error: null,
+  lastFilter: undefined,
 
   fetchNotes: async (filter?: NoteFilter) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, lastFilter: filter });
     try {
       const { notes, total } = await api.listNotes(filter);
       set({ notes, total, isLoading: false });
@@ -51,35 +57,86 @@ export const useNoteStore = create<NoteState>((set) => ({
   },
 
   createNote: async (req: CreateNoteReq) => {
-    const note = await api.createNote(req);
-    set((state) => ({ notes: [note, ...state.notes], total: state.total + 1 }));
-    return note;
+    try {
+      const note = await api.createNote(req);
+      // Refetch the list to respect the current sort order instead of
+      // blindly prepending, which would be wrong for non-default sorts.
+      const { lastFilter } = get();
+      const { notes, total } = await api.listNotes(lastFilter);
+      set({ notes, total });
+      useToastStore.getState().addToast('Note created', 'success');
+      return note;
+    } catch (err) {
+      const message = err instanceof api.ApiError ? err.message : 'Failed to create note';
+      set({ error: message });
+      useToastStore.getState().addToast(message, 'error');
+      throw err;
+    }
   },
 
   updateNote: async (id: string, req: UpdateNoteReq) => {
-    const updated = await api.updateNote(id, req);
-    set((state) => ({
-      notes: state.notes.map((n) => (n.id === id ? updated : n)),
-      currentNote: state.currentNote?.id === id ? updated : state.currentNote,
-    }));
-    return updated;
+    try {
+      const updated = await api.updateNote(id, req);
+      set((state) => ({
+        notes: state.notes.map((n) => (n.id === id ? updated : n)),
+        currentNote: state.currentNote?.id === id ? updated : state.currentNote,
+      }));
+      return updated;
+    } catch (err) {
+      const message = err instanceof api.ApiError ? err.message : 'Failed to update note';
+      set({ error: message });
+      useToastStore.getState().addToast(message, 'error');
+      throw err;
+    }
   },
 
   deleteNote: async (id: string) => {
-    await api.deleteNote(id);
-    set((state) => ({
-      notes: state.notes.filter((n) => n.id !== id),
-      total: state.total - 1,
-      currentNote: state.currentNote?.id === id ? null : state.currentNote,
-    }));
+    try {
+      await api.deleteNote(id);
+      set((state) => ({
+        notes: state.notes.filter((n) => n.id !== id),
+        total: state.total - 1,
+        currentNote: state.currentNote?.id === id ? null : state.currentNote,
+      }));
+      useToastStore.getState().addToast('Note deleted', 'success');
+    } catch (err) {
+      const message = err instanceof api.ApiError ? err.message : 'Failed to delete note';
+      set({ error: message });
+      useToastStore.getState().addToast(message, 'error');
+      throw err;
+    }
   },
 
   fetchBacklinks: async (noteId: string) => {
     try {
       const backlinks = await api.getBacklinks(noteId);
       set({ backlinks });
-    } catch {
+    } catch (err) {
+      const message = err instanceof api.ApiError ? err.message : 'Failed to fetch backlinks';
+      console.error('fetchBacklinks:', message, err);
       set({ backlinks: [] });
+    }
+  },
+
+  // Called when a WebSocket `note.changed` event is received.
+  // Updates the affected note in the list and refreshes currentNote if it
+  // matches.
+  handleNoteChanged: async (noteId: string) => {
+    try {
+      const updated = await api.getNote(noteId);
+      set((state) => ({
+        notes: state.notes.map((n) => (n.id === noteId ? updated : n)),
+        currentNote: state.currentNote?.id === noteId ? updated : state.currentNote,
+      }));
+    } catch {
+      // Note may have been deleted; refetch the full list.
+      const { lastFilter } = get();
+      try {
+        const { notes, total } = await api.listNotes(lastFilter);
+        set({ notes, total });
+      } catch {
+        // Silently ignore -- the next user action will retry.
+      }
     }
   },
 

@@ -59,6 +59,7 @@ type askModel struct {
 	// Streaming state.
 	streaming        bool
 	streamingContent string
+	streamCh         <-chan tea.Msg
 }
 
 func newAskModel(client *APIClient, width, height int) askModel {
@@ -93,14 +94,27 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 		m.input.SetWidth(msg.Width - 4)
 		return m, nil
 
+	case askStreamStartMsg:
+		// The WebSocket goroutine has started; process the first message
+		// and begin waiting for more from the channel.
+		m.streamCh = msg.ch
+		updated, cmd := m.Update(msg.first)
+		// Chain with a command to read the next streaming message.
+		return updated, tea.Batch(cmd, waitForStreamMsg(msg.ch))
+
 	case askStreamTokenMsg:
 		m.streamingContent += msg.token
 		m.scrollY = m.maxScroll()
+		// Keep reading from the channel.
+		if m.streamCh != nil {
+			return m, waitForStreamMsg(m.streamCh)
+		}
 		return m, nil
 
 	case askStreamDoneMsg:
 		m.loading = false
 		m.streaming = false
+		m.streamCh = nil
 		content := m.streamingContent
 		m.streamingContent = ""
 		// Add citation info if present.
@@ -122,6 +136,7 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 	case askStreamErrMsg:
 		m.loading = false
 		m.streaming = false
+		m.streamCh = nil
 		m.streamingContent = ""
 		m.err = msg.err.Error()
 		return m, nil
@@ -169,7 +184,8 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "enter":
+		case "ctrl+s":
+			// Submit the question with Ctrl+S (Enter inserts newlines).
 			if m.loading {
 				return m, nil
 			}
@@ -207,13 +223,14 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 }
 
 // askViaWebSocket connects to the WS endpoint and streams the response
-// back as Bubble Tea messages.
+// back as Bubble Tea messages. It uses a goroutine and a channel to emit
+// individual streaming tokens as they arrive from the server, so the
+// user sees incremental output instead of waiting for the full response.
 func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea.Cmd {
 	return func() tea.Msg {
 		// Build WS URL from the REST base URL.
 		u, err := url.Parse(client.BaseURL)
 		if err != nil {
-			// Fall back to sync HTTP on URL parse failure.
 			return askFallbackHTTP(client, query, history)
 		}
 
@@ -226,17 +243,16 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 		ctx := context.Background()
 		conn, _, err := websocket.Dial(ctx, wsURL, nil)
 		if err != nil {
-			// Fall back to sync HTTP if WS connection fails.
 			return askFallbackHTTP(client, query, history)
 		}
-		defer conn.CloseNow()
 
 		// Authenticate.
-		authMsg, _ := json.Marshal(map[string]interface{}{
+		authPayload, _ := json.Marshal(map[string]interface{}{
 			"type":    "auth",
 			"payload": map[string]string{"token": client.AccessToken},
 		})
-		if err := conn.Write(ctx, websocket.MessageText, authMsg); err != nil {
+		if err := conn.Write(ctx, websocket.MessageText, authPayload); err != nil {
+			conn.CloseNow()
 			return askFallbackHTTP(client, query, history)
 		}
 
@@ -247,65 +263,84 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 		if len(history) > 0 {
 			askPayload["history"] = history
 		}
-		chatMsg, _ := json.Marshal(map[string]interface{}{
+		chatPayload, _ := json.Marshal(map[string]interface{}{
 			"type":    "chat.ask",
 			"payload": askPayload,
 		})
-		if err := conn.Write(ctx, websocket.MessageText, chatMsg); err != nil {
+		if err := conn.Write(ctx, websocket.MessageText, chatPayload); err != nil {
+			conn.CloseNow()
 			return askFallbackHTTP(client, query, history)
 		}
 
-		// Read streaming responses. We accumulate the response here since
-		// we cannot send multiple tea.Msg from a single Cmd. Instead, we
-		// collect the full response and send it once (same latency as before
-		// for initial display, but uses the streaming infrastructure).
-		var fullContent strings.Builder
-		var citations []string
+		// Stream responses via a channel so we can emit individual tokens
+		// as separate tea.Msg values. The initial Cmd returns the first
+		// message; subsequent messages are read by waitForStreamMsg.
+		ch := make(chan tea.Msg, 64)
+		go func() {
+			defer conn.CloseNow()
+			defer close(ch)
 
-		for {
-			_, data, err := conn.Read(ctx)
-			if err != nil {
-				if fullContent.Len() > 0 {
-					// We got some content before error; return what we have.
-					break
+			for {
+				_, data, err := conn.Read(ctx)
+				if err != nil {
+					ch <- askStreamErrMsg{err: fmt.Errorf("websocket read: %w", err)}
+					return
 				}
-				return askFallbackHTTP(client, query, history)
-			}
 
-			var msg struct {
-				Type    string          `json:"type"`
-				Payload json.RawMessage `json:"payload"`
-			}
-			if err := json.Unmarshal(data, &msg); err != nil {
-				continue
-			}
-
-			switch msg.Type {
-			case "chat.stream":
-				var streamPayload struct {
-					Token string `json:"token"`
+				var wsMsg struct {
+					Type    string          `json:"type"`
+					Payload json.RawMessage `json:"payload"`
 				}
-				json.Unmarshal(msg.Payload, &streamPayload)
-				fullContent.WriteString(streamPayload.Token)
-
-			case "chat.done":
-				var donePayload struct {
-					Citations []string `json:"citations"`
+				if err := json.Unmarshal(data, &wsMsg); err != nil {
+					continue
 				}
-				json.Unmarshal(msg.Payload, &donePayload)
-				citations = donePayload.Citations
-				conn.Close(websocket.StatusNormalClosure, "done")
-				return askResultMsg{
-					response:  fullContent.String(),
-					citations: citations,
+
+				switch wsMsg.Type {
+				case "chat.stream":
+					var sp struct {
+						Token string `json:"token"`
+					}
+					json.Unmarshal(wsMsg.Payload, &sp)
+					ch <- askStreamTokenMsg{token: sp.Token}
+
+				case "chat.done":
+					var dp struct {
+						Citations []string `json:"citations"`
+					}
+					json.Unmarshal(wsMsg.Payload, &dp)
+					conn.Close(websocket.StatusNormalClosure, "done")
+					ch <- askStreamDoneMsg{citations: dp.Citations}
+					return
 				}
 			}
+		}()
+
+		// Return the first message from the channel. The Update handler
+		// will call waitForStreamMsg to get subsequent messages.
+		firstMsg, ok := <-ch
+		if !ok {
+			return askStreamDoneMsg{}
 		}
+		// Stash the channel in a wrapper so Update can keep reading.
+		return askStreamStartMsg{first: firstMsg, ch: ch}
+	}
+}
 
-		return askResultMsg{
-			response:  fullContent.String(),
-			citations: citations,
+// askStreamStartMsg carries the channel and the first streamed message.
+type askStreamStartMsg struct {
+	first tea.Msg
+	ch    <-chan tea.Msg
+}
+
+// waitForStreamMsg returns a tea.Cmd that waits for the next message
+// on the streaming channel.
+func waitForStreamMsg(ch <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return askStreamDoneMsg{}
 		}
+		return msg
 	}
 }
 
@@ -447,7 +482,7 @@ func (m askModel) View() string {
 
 	// Status bar.
 	statusBar := styleStatusBar.Width(m.width).Render(
-		"Enter: send | Ctrl+Up/Down: scroll | Esc: back",
+		"Ctrl+S: send | Enter: newline | Ctrl+Up/Down: scroll | Esc: back",
 	)
 
 	return lipgloss.JoinVertical(lipgloss.Left,

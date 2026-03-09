@@ -2,18 +2,20 @@ package main
 
 import "github.com/charmbracelet/lipgloss"
 
-// Color palette for the dark theme.
+// Color palette for the dark theme, aligned with FE_DESIGN.md.
+// Primary accent: amber/copper. Text: warm off-white. Background: dark.
 var (
-	colorPrimary   = lipgloss.Color("#7aa2f7")
-	colorSecondary = lipgloss.Color("#bb9af7")
-	colorMuted     = lipgloss.Color("#565f89")
-	colorFg        = lipgloss.Color("#c0caf5")
-	colorBg        = lipgloss.Color("#1a1b26")
-	colorHeaderBg  = lipgloss.Color("#24283b")
-	colorSelected  = lipgloss.Color("#3d59a1")
-	colorError     = lipgloss.Color("#f7768e")
-	colorSuccess   = lipgloss.Color("#9ece6a")
-	colorBorder    = lipgloss.Color("#3b4261")
+	colorPrimary   = lipgloss.Color("#c4915c") // amber/copper accent
+	colorSecondary = lipgloss.Color("#a68a6e") // muted amber
+	colorMuted     = lipgloss.Color("#9992a6") // muted lavender
+	colorFg        = lipgloss.Color("#e8e2d9") // warm off-white
+	colorBg        = lipgloss.Color("#1a1816") // dark background
+	colorHeaderBg  = lipgloss.Color("#242120") // slightly lighter bg
+	colorSelected  = lipgloss.Color("#3a3330") // warm dark selection
+	colorError     = lipgloss.Color("#c46b6b") // muted red
+	colorSuccess   = lipgloss.Color("#8fad5e") // muted green
+	colorBorder    = lipgloss.Color("#3a3330") // warm border
+	colorDim       = lipgloss.Color("#5e5a6e") // dim text for less emphasis
 )
 
 // Shared styles used across screens.

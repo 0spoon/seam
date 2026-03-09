@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, isToday, parseISO } from 'date-fns';
 import { listNotes } from '../../api/client';
+import { useToastStore } from '../../components/Toast/ToastContainer';
 import type { Note } from '../../api/types';
 import styles from './TimelinePage.module.css';
 
@@ -42,28 +43,61 @@ function groupNotesByDate(notes: Note[], mode: SortMode): DateGroup[] {
   });
 }
 
+const PAGE_SIZE = 50;
+
 export function TimelinePage() {
   const navigate = useNavigate();
+  const addToast = useToastStore((s) => s.addToast);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [totalNotes, setTotalNotes] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>('modified');
   const [jumpDate, setJumpDate] = useState('');
 
+  const hasMore = notes.length < totalNotes;
+
   const fetchNotes = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const { notes } = await listNotes({
+      const { notes: fetchedNotes, total } = await listNotes({
         sort: sortMode,
         sort_dir: 'desc',
-        limit: 500,
+        limit: PAGE_SIZE,
+        offset: 0,
       });
-      setNotes(notes);
+      setNotes(fetchedNotes);
+      setTotalNotes(total);
     } catch (err) {
-      console.error('Failed to fetch notes for timeline:', err);
+      const message = err instanceof Error ? err.message : 'Failed to load timeline';
+      setError(message);
+      addToast(message, 'error');
     } finally {
       setLoading(false);
     }
-  }, [sortMode]);
+  }, [sortMode, addToast]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const { notes: moreNotes, total } = await listNotes({
+        sort: sortMode,
+        sort_dir: 'desc',
+        limit: PAGE_SIZE,
+        offset: notes.length,
+      });
+      setNotes((prev) => [...prev, ...moreNotes]);
+      setTotalNotes(total);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load more notes';
+      addToast(message, 'error');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [sortMode, notes.length, loadingMore, hasMore, addToast]);
 
   useEffect(() => {
     fetchNotes();
@@ -84,6 +118,23 @@ export function TimelinePage() {
     return (
       <div className={styles.container}>
         <div className={styles.loading}>Loading timeline...</div>
+      </div>
+    );
+  }
+
+  if (error && notes.length === 0) {
+    return (
+      <div className={styles.container}>
+        <div className={styles.header}>
+          <h1 className={styles.title}>Timeline</h1>
+        </div>
+        <div className={styles.errorState}>
+          <div className={styles.errorTitle}>Failed to load timeline</div>
+          <div className={styles.errorDescription}>{error}</div>
+          <button className={styles.retryButton} onClick={fetchNotes}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -184,6 +235,18 @@ export function TimelinePage() {
             </div>
           </div>
         ))}
+
+        {hasMore && (
+          <div className={styles.loadMoreWrapper}>
+            <button
+              className={styles.loadMoreButton}
+              onClick={loadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading...' : `Load more (${totalNotes - notes.length} remaining)`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

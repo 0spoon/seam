@@ -66,10 +66,20 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = wsm.Height
 	}
 
-	// Handle global quit.
+	// Handle global quit and logout.
 	if km, ok := msg.(tea.KeyMsg); ok {
 		if km.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+		// Ctrl+L to log out: clear tokens and return to login.
+		if km.String() == "ctrl+l" && m.screen != screenLogin {
+			_ = SaveAuth(&AuthData{})
+			m.client.AccessToken = ""
+			m.client.RefreshToken = ""
+			m.username = ""
+			m.screen = screenLogin
+			m.loginModel = newLoginModel(m.client)
+			return m, m.loginModel.Init()
 		}
 	}
 
@@ -146,11 +156,6 @@ func (m appModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m appModel) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Check for editor-triggered screen switches first.
-	if _, ok := msg.(openEditorMsg); ok {
-		// Re-entering editor from search result: handle in caller.
-	}
-
 	var cmd tea.Cmd
 	m.editorModel, cmd = m.editorModel.Update(msg)
 

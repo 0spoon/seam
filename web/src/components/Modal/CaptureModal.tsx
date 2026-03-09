@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Link, Mic, MicOff, FileText } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useToastStore } from '../../components/Toast/ToastContainer';
 import { useNavigate } from 'react-router-dom';
 import { captureURL, captureVoice, listTemplates, applyTemplate } from '../../api/client';
 import type { TemplateMeta } from '../../api/types';
@@ -19,7 +20,9 @@ export function CaptureModal() {
   const defaultProjectId = useUIStore((s) => s.captureDefaultProjectId);
   const projects = useProjectStore((s) => s.projects);
   const createNote = useNoteStore((s) => s.createNote);
+  const addToast = useToastStore((s) => s.addToast);
   const navigate = useNavigate();
+  const modalRef = useRef<HTMLDivElement>(null);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -74,6 +77,7 @@ export function CaptureModal() {
       // URL capture mode: if the body looks like a URL, use the capture endpoint.
       if (urlMode && isURL(body)) {
         const note = await captureURL(body.trim());
+        addToast('URL captured', 'success');
         setOpen(false);
         navigate(`/notes/${note.id}`);
         return;
@@ -94,7 +98,7 @@ export function CaptureModal() {
       setOpen(false);
       navigate(`/notes/${note.id}`);
     } catch {
-      // Error is handled by the store
+      // Error toast is handled by the noteStore
     } finally {
       setIsSaving(false);
     }
@@ -108,9 +112,19 @@ export function CaptureModal() {
       return;
     }
 
+    // Check browser compatibility before attempting to record.
+    if (typeof MediaRecorder === 'undefined') {
+      addToast('Voice recording is not supported in this browser', 'error');
+      return;
+    }
+    if (!MediaRecorder.isTypeSupported('audio/webm')) {
+      addToast('audio/webm recording is not supported in this browser', 'error');
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -127,10 +141,11 @@ export function CaptureModal() {
         setIsSaving(true);
         try {
           const note = await captureVoice(blob, 'recording.webm');
+          addToast('Voice note captured', 'success');
           setOpen(false);
           navigate(`/notes/${note.id}`);
         } catch {
-          // Error handling
+          addToast('Failed to save voice recording', 'error');
         } finally {
           setIsSaving(false);
         }
@@ -139,8 +154,12 @@ export function CaptureModal() {
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecording(true);
-    } catch {
-      // Microphone permission denied or unavailable
+    } catch (err) {
+      const message =
+        err instanceof DOMException && err.name === 'NotAllowedError'
+          ? 'Microphone permission denied'
+          : 'Failed to access microphone';
+      addToast(message, 'error');
     }
   };
 
@@ -148,6 +167,14 @@ export function CaptureModal() {
     setSelectedTemplate(name);
     setShowTemplatePicker(false);
     if (!name) return;
+
+    // Warn before overwriting existing content.
+    if (body.trim()) {
+      if (!window.confirm('This will replace your current text with the template. Continue?')) {
+        return;
+      }
+    }
+
     try {
       const vars: Record<string, string> = {};
       if (title.trim()) vars.title = title.trim();
@@ -156,7 +183,7 @@ export function CaptureModal() {
       const result = await applyTemplate(name, vars);
       setBody(result.body);
     } catch {
-      // Failed to apply template, keep current body
+      addToast('Failed to apply template', 'error');
     }
   };
 
@@ -175,8 +202,34 @@ export function CaptureModal() {
     }
   };
 
+  // Focus trap: keep Tab cycling within the modal using a direct ref
+  // instead of fragile CSS class name selectors.
+  const handleFocusTrap = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab') return;
+    const container = modalRef.current;
+    if (!container) return;
+    const focusable = container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === backdropRef.current) {
+      if (body.trim() || title.trim()) {
+        if (!window.confirm('You have unsaved content. Discard it?')) {
+          return;
+        }
+      }
       setOpen(false);
     }
   };
@@ -188,12 +241,12 @@ export function CaptureModal() {
       ref={backdropRef}
       className={styles.backdrop}
       onClick={handleBackdropClick}
-      onKeyDown={handleKeyDown}
+      onKeyDown={(e) => { handleFocusTrap(e); handleKeyDown(e); }}
       role="dialog"
       aria-modal="true"
       aria-label="Quick capture"
     >
-      <div className={styles.modal} style={{ maxWidth: 'var(--modal-width-sm)' }}>
+      <div ref={modalRef} className={styles.modal} style={{ maxWidth: 'var(--modal-width-sm)' }}>
         <div className={styles.modalHeader}>
           <h2 className={styles.modalTitle}>Quick Capture</h2>
           <button

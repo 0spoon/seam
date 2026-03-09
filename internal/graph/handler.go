@@ -51,14 +51,20 @@ func (h *Handler) getGraph(w http.ResponseWriter, r *http.Request) {
 		filter.Tag = tag
 	}
 	if since := r.URL.Query().Get("since"); since != "" {
-		if t, err := time.Parse(time.RFC3339, since); err == nil {
-			filter.Since = t
+		t, err := time.Parse(time.RFC3339, since)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid since parameter: must be RFC3339 format")
+			return
 		}
+		filter.Since = t
 	}
 	if until := r.URL.Query().Get("until"); until != "" {
-		if t, err := time.Parse(time.RFC3339, until); err == nil {
-			filter.Until = t
+		t, err := time.Parse(time.RFC3339, until)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid until parameter: must be RFC3339 format")
+			return
 		}
+		filter.Until = t
 	}
 	if limit := r.URL.Query().Get("limit"); limit != "" {
 		if v, err := strconv.Atoi(limit); err == nil && v > 0 {
@@ -140,7 +146,9 @@ func (h *Handler) getOrphans(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("graph.writeJSON: encode error", "error", err)
+	}
 }
 
 // writeError writes a JSON error response.

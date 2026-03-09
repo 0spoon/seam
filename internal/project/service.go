@@ -16,11 +16,16 @@ import (
 	"github.com/katata/seam/internal/userdb"
 )
 
+// FrontmatterUpdater clears the project field in a note's YAML frontmatter
+// on disk. Implemented by note.Service via a closure to avoid circular imports.
+type FrontmatterUpdater func(notesDir, filePath string) error
+
 // Service handles project business logic including filesystem operations.
 type Service struct {
-	store         *Store
-	userDBManager userdb.Manager
-	logger        *slog.Logger
+	store              *Store
+	userDBManager      userdb.Manager
+	logger             *slog.Logger
+	frontmatterUpdater FrontmatterUpdater
 }
 
 // NewService creates a new project Service.
@@ -33,6 +38,13 @@ func NewService(store *Store, userDBManager userdb.Manager, logger *slog.Logger)
 		userDBManager: userDBManager,
 		logger:        logger,
 	}
+}
+
+// SetFrontmatterUpdater sets the callback used to clear the project field
+// from YAML frontmatter when cascading notes to inbox. Called after note
+// service is created to break the circular dependency.
+func (s *Service) SetFrontmatterUpdater(fn FrontmatterUpdater) {
+	s.frontmatterUpdater = fn
 }
 
 // Create creates a new project with the given name and description.
@@ -136,6 +148,13 @@ func (s *Service) Update(ctx context.Context, userID, projectID string, name, de
 
 	existing.UpdatedAt = time.Now().UTC()
 
+	// Wrap all DB writes in a transaction for atomicity.
+	tx, txErr := db.BeginTx(ctx, nil)
+	if txErr != nil {
+		return nil, fmt.Errorf("project.Service.Update: begin tx: %w", txErr)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
+
 	// Rename directory if slug changed.
 	if existing.Slug != oldSlug {
 		notesDir := s.userDBManager.UserNotesDir(userID)
@@ -157,7 +176,7 @@ func (s *Service) Update(ctx context.Context, userID, projectID string, name, de
 		// because the DB still has the old slug prefix.
 		oldPrefix := oldSlug + "/"
 		newPrefix := existing.Slug + "/"
-		_, updateErr := db.ExecContext(ctx,
+		_, updateErr := tx.ExecContext(ctx,
 			`UPDATE notes SET file_path = ? || SUBSTR(file_path, ?)
 			 WHERE project_id = ? AND file_path LIKE ?`,
 			newPrefix, len(oldPrefix)+1, projectID, oldPrefix+"%",
@@ -167,8 +186,12 @@ func (s *Service) Update(ctx context.Context, userID, projectID string, name, de
 		}
 	}
 
-	if err := s.store.Update(ctx, db, existing); err != nil {
+	if err := s.store.Update(ctx, tx, existing); err != nil {
 		return nil, fmt.Errorf("project.Service.Update: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("project.Service.Update: commit: %w", err)
 	}
 
 	s.logger.Info("project updated", "user_id", userID, "project_id", projectID)
@@ -224,6 +247,11 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 		return fmt.Errorf("project.Service.Delete: rows error: %w", rowsErr)
 	}
 
+	// I-H12: Perform all DB operations first inside the transaction, then
+	// do file operations after commit. This prevents a transaction rollback
+	// from leaving files in the wrong directories. The watcher reconciliation
+	// system will fix any file/DB drift if file operations partially fail.
+
 	// A-7: Wrap all DB writes in a transaction for atomicity.
 	tx, txErr := db.BeginTx(ctx, nil)
 	if txErr != nil {
@@ -231,44 +259,46 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 	}
 	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
 
+	// Collect pending file operations to execute after commit.
+	type fileMove struct {
+		noteID     string
+		oldAbs     string
+		newRelPath string
+		newAbs     string
+	}
+	var pendingMoves []fileMove
+	var pendingDeletes []string
+
 	switch cascade {
 	case "inbox":
-		// Move notes to inbox: move files to root notes dir, update DB paths.
+		// Update DB first: clear project_id and set new file_path.
 		for _, n := range notes {
-			oldAbs := filepath.Join(notesDir, n.filePath)
 			filename := filepath.Base(n.filePath)
 			newRelPath := filename
-			newAbs := filepath.Join(notesDir, newRelPath)
 
-			// Move file on disk.
-			if mvErr := os.Rename(oldAbs, newAbs); mvErr != nil {
-				if !os.IsNotExist(mvErr) {
-					s.logger.Warn("project.Service.Delete: failed to move note file",
-						"note_id", n.id, "from", oldAbs, "to", newAbs, "error", mvErr)
-				}
-			}
-
-			// Update DB: clear project_id and set new file_path.
 			_, updateErr := tx.ExecContext(ctx,
 				`UPDATE notes SET project_id = NULL, file_path = ? WHERE id = ?`,
 				newRelPath, n.id)
 			if updateErr != nil {
 				return fmt.Errorf("project.Service.Delete: move note %s to inbox: %w", n.id, updateErr)
 			}
+
+			pendingMoves = append(pendingMoves, fileMove{
+				noteID:     n.id,
+				oldAbs:     filepath.Join(notesDir, n.filePath),
+				newRelPath: newRelPath,
+				newAbs:     filepath.Join(notesDir, newRelPath),
+			})
 		}
 
 	case "delete":
-		// Delete notes: remove files and DB rows.
+		// Delete DB rows first, collect file paths for later removal.
 		for _, n := range notes {
-			absPath := filepath.Join(notesDir, n.filePath)
-			if rmErr := os.Remove(absPath); rmErr != nil && !os.IsNotExist(rmErr) {
-				s.logger.Warn("project.Service.Delete: failed to remove note file",
-					"note_id", n.id, "path", absPath, "error", rmErr)
-			}
 			if _, delErr := tx.ExecContext(ctx,
 				`DELETE FROM notes WHERE id = ?`, n.id); delErr != nil {
 				return fmt.Errorf("project.Service.Delete: delete note %s: %w", n.id, delErr)
 			}
+			pendingDeletes = append(pendingDeletes, filepath.Join(notesDir, n.filePath))
 		}
 	}
 
@@ -280,9 +310,40 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 		return fmt.Errorf("project.Service.Delete: commit: %w", err)
 	}
 
-	// Remove project directory (should now be empty).
-	if err := os.Remove(projectDir); err != nil && !os.IsNotExist(err) {
-		// Directory not empty or other error -- log but do not fail.
+	// --- Transaction committed; now perform file operations ---
+	// Failures here are logged but do not roll back the DB. The watcher
+	// reconciliation system will eventually correct any file/DB drift.
+
+	switch cascade {
+	case "inbox":
+		for _, m := range pendingMoves {
+			if mvErr := os.Rename(m.oldAbs, m.newAbs); mvErr != nil {
+				if !os.IsNotExist(mvErr) {
+					s.logger.Warn("project.Service.Delete: failed to move note file",
+						"note_id", m.noteID, "from", m.oldAbs, "to", m.newAbs, "error", mvErr)
+				}
+			}
+
+			// Clear the project field from YAML frontmatter on disk.
+			if s.frontmatterUpdater != nil {
+				if fmErr := s.frontmatterUpdater(notesDir, m.newRelPath); fmErr != nil {
+					s.logger.Warn("project.Service.Delete: failed to clear project in frontmatter",
+						"note_id", m.noteID, "file", m.newRelPath, "error", fmErr)
+				}
+			}
+		}
+
+	case "delete":
+		for _, absPath := range pendingDeletes {
+			if rmErr := os.Remove(absPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				s.logger.Warn("project.Service.Delete: failed to remove note file",
+					"path", absPath, "error", rmErr)
+			}
+		}
+	}
+
+	// Remove project directory and any remaining files (e.g., .DS_Store).
+	if err := os.RemoveAll(projectDir); err != nil {
 		s.logger.Warn("could not remove project directory",
 			"user_id", userID, "project_id", projectID, "path", projectDir, "error", err)
 	}
@@ -290,6 +351,13 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 	s.logger.Info("project deleted", "user_id", userID, "project_id", projectID, "cascade", cascade)
 	return nil
 }
+
+// Pre-compiled regexps for slug generation. Avoids recompiling on every
+// Slugify call (C-17).
+var (
+	slugNonAlphanumRe = regexp.MustCompile(`[^a-z0-9-]`)
+	slugMultiHyphenRe = regexp.MustCompile(`-{2,}`)
+)
 
 // Slugify converts a name into a URL-safe slug.
 // Rules: lowercase, spaces/underscores become hyphens, strip non-alphanumeric
@@ -300,12 +368,10 @@ func Slugify(name string) string {
 	s = strings.ReplaceAll(s, "_", "-")
 
 	// Remove anything that is not alphanumeric or hyphen.
-	re := regexp.MustCompile(`[^a-z0-9-]`)
-	s = re.ReplaceAllString(s, "")
+	s = slugNonAlphanumRe.ReplaceAllString(s, "")
 
 	// Collapse multiple hyphens.
-	multi := regexp.MustCompile(`-{2,}`)
-	s = multi.ReplaceAllString(s, "-")
+	s = slugMultiHyphenRe.ReplaceAllString(s, "-")
 
 	s = strings.Trim(s, "-")
 	return s

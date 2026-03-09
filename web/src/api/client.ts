@@ -41,6 +41,9 @@ export function setTokens(tokens: TokenPair | null) {
   if (tokens) {
     accessToken = tokens.access_token;
     refreshToken = tokens.refresh_token;
+    // Refresh token in localStorage is an accepted XSS tradeoff: the Seam
+    // frontend is an SPA without a backend-for-frontend proxy, so HttpOnly
+    // cookies are not feasible without significant architecture changes.
     localStorage.setItem('seam_refresh_token', tokens.refresh_token);
   } else {
     accessToken = null;
@@ -72,29 +75,60 @@ class ApiError extends Error {
 
 export { ApiError };
 
-async function request<T>(
+// Default request timeout in milliseconds. Individual callers can override
+// via the `signal` option for long-running operations (e.g. AI endpoints).
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+// Low-level request that returns the raw Response for callers that need
+// headers (e.g. X-Total-Count). Auth/retry logic is shared with request().
+async function requestRaw(
   path: string,
   options: RequestInit = {},
   retry = true,
-): Promise<T> {
+): Promise<Response> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
+
+  // Only set Content-Type to JSON when there is no body (GET) or the body
+  // is a string (JSON-serialized). FormData bodies must NOT have
+  // Content-Type set (the browser sets the multipart boundary).
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+  }
 
   if (accessToken) {
     headers['Authorization'] = `Bearer ${accessToken}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  // If the caller already supplied an AbortSignal (e.g. for streaming or
+  // user cancellation), respect it. Otherwise apply a default timeout so
+  // the client does not hang indefinitely when the server is unresponsive.
+  let signal = options.signal;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  if (!signal) {
+    const controller = new AbortController();
+    signal = controller.signal;
+    timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers,
+      signal,
+    });
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 
   if (res.status === 401 && retry && refreshToken) {
     const refreshed = await tryRefresh();
     if (refreshed) {
-      return request<T>(path, options, false);
+      return requestRaw(path, options, false);
     }
     onAuthFailure?.();
     throw new ApiError(401, 'Authentication failed');
@@ -111,6 +145,16 @@ async function request<T>(
     throw new ApiError(res.status, message);
   }
 
+  return res;
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  retry = true,
+): Promise<T> {
+  const res = await requestRaw(path, options, retry);
+
   if (res.status === 204) {
     return undefined as T;
   }
@@ -118,7 +162,22 @@ async function request<T>(
   return res.json();
 }
 
-async function tryRefresh(): Promise<boolean> {
+// Deduplicate concurrent refresh requests: if multiple 401s trigger parallel
+// refreshes, reuse the first in-flight promise instead of firing N requests.
+let refreshPromise: Promise<boolean> | null = null;
+
+export async function tryRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = doRefresh();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+async function doRefresh(): Promise<boolean> {
   try {
     const stored = getRefreshToken();
     if (!stored) return false;
@@ -211,31 +270,12 @@ export async function listNotes(
   if (filter.sort) params.set('sort', filter.sort);
   if (filter.sort_dir) params.set('sort_dir', filter.sort_dir);
   if (filter.limit) params.set('limit', String(filter.limit));
-  if (filter.offset) params.set('offset', String(filter.offset));
+  if (filter.offset != null) params.set('offset', String(filter.offset));
 
   const qs = params.toString();
   const path = `/notes/${qs ? `?${qs}` : ''}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    },
-  });
-
-  if (res.status === 401) {
-    const refreshed = await tryRefresh();
-    if (refreshed) {
-      return listNotes(filter);
-    }
-    onAuthFailure?.();
-    throw new ApiError(401, 'Authentication failed');
-  }
-
-  if (!res.ok) {
-    throw new ApiError(res.status, res.statusText);
-  }
-
+  const res = await requestRaw(path);
   const notes: Note[] = await res.json();
   const total = parseInt(res.headers.get('X-Total-Count') ?? '0', 10);
   return { notes, total };
@@ -289,12 +329,13 @@ export async function listTags(): Promise<TagCount[]> {
 export async function searchSemantic(
   query: string,
   limit = 10,
+  signal?: AbortSignal,
 ): Promise<SemanticResult[]> {
   const params = new URLSearchParams({
     q: query,
     limit: String(limit),
   });
-  return request<SemanticResult[]>(`/search/semantic?${params}`);
+  return request<SemanticResult[]>(`/search/semantic?${params}`, { signal });
 }
 
 export async function getRelatedNotes(
@@ -336,37 +377,10 @@ export async function captureVoice(audioBlob: Blob, filename = 'audio.wav'): Pro
   const formData = new FormData();
   formData.append('audio', audioBlob, filename);
 
-  const headers: Record<string, string> = {};
-  if (accessToken) {
-    headers['Authorization'] = `Bearer ${accessToken}`;
-  }
-
-  const res = await fetch(`${BASE_URL}/capture/`, {
+  const res = await requestRaw('/capture/', {
     method: 'POST',
-    headers,
     body: formData,
   });
-
-  if (res.status === 401) {
-    const refreshed = await tryRefresh();
-    if (refreshed) {
-      return captureVoice(audioBlob, filename);
-    }
-    onAuthFailure?.();
-    throw new ApiError(401, 'Authentication failed');
-  }
-
-  if (!res.ok) {
-    let message = res.statusText;
-    try {
-      const body = await res.json();
-      message = body.error || body.message || message;
-    } catch {
-      // Use status text
-    }
-    throw new ApiError(res.status, message);
-  }
-
   return res.json();
 }
 
@@ -376,7 +390,7 @@ export async function listTemplates(): Promise<TemplateMeta[]> {
 }
 
 export async function getTemplate(name: string): Promise<Template> {
-  return request<Template>(`/templates/${name}`);
+  return request<Template>(`/templates/${encodeURIComponent(name)}`);
 }
 
 export async function applyTemplate(
@@ -384,7 +398,7 @@ export async function applyTemplate(
   vars: Record<string, string> = {},
 ): Promise<TemplateApplyResult> {
   const req: TemplateApplyReq = { vars };
-  return request<TemplateApplyResult>(`/templates/${name}/apply`, {
+  return request<TemplateApplyResult>(`/templates/${encodeURIComponent(name)}/apply`, {
     method: 'POST',
     body: JSON.stringify(req),
   });
@@ -432,6 +446,7 @@ export async function searchFTS(
   query: string,
   limit = 20,
   offset = 0,
+  signal?: AbortSignal,
 ): Promise<{ results: FTSResult[]; total: number }> {
   const params = new URLSearchParams({
     q: query,
@@ -439,43 +454,7 @@ export async function searchFTS(
     offset: String(offset),
   });
 
-  const path = `/search/?${params}`;
-
-  // Use the request() helper with a custom response handler to read
-  // X-Total-Count header. We need to use fetch directly for the header,
-  // but go through the same JWT interceptor logic.
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (accessToken) {
-    headers['Authorization'] = `Bearer ${accessToken}`;
-  }
-
-  let res = await fetch(`${BASE_URL}${path}`, { headers });
-
-  // Handle 401 with token refresh (same logic as request() helper).
-  if (res.status === 401 && refreshToken) {
-    const refreshed = await tryRefresh();
-    if (refreshed) {
-      headers['Authorization'] = `Bearer ${accessToken}`;
-      res = await fetch(`${BASE_URL}${path}`, { headers });
-    } else {
-      onAuthFailure?.();
-      throw new ApiError(401, 'Authentication failed');
-    }
-  }
-
-  if (!res.ok) {
-    let message = res.statusText;
-    try {
-      const body = await res.json();
-      message = body.error || body.message || message;
-    } catch {
-      // Use status text
-    }
-    throw new ApiError(res.status, message);
-  }
-
+  const res = await requestRaw(`/search/?${params}`, { signal });
   const results: FTSResult[] = await res.json();
   const total = parseInt(res.headers.get('X-Total-Count') ?? '0', 10);
   return { results, total };

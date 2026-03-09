@@ -45,26 +45,44 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   createProject: async (req: CreateProjectReq) => {
-    const project = await api.createProject(req);
-    set((state) => ({ projects: [...state.projects, project] }));
-    return project;
+    try {
+      const project = await api.createProject(req);
+      set((state) => ({ projects: [...state.projects, project] }));
+      return project;
+    } catch (err) {
+      const message = err instanceof api.ApiError ? err.message : 'Failed to create project';
+      set({ error: message });
+      throw err;
+    }
   },
 
   updateProject: async (id: string, req: UpdateProjectReq) => {
-    const updated = await api.updateProject(id, req);
-    set((state) => ({
-      projects: state.projects.map((p) => (p.id === id ? updated : p)),
-      currentProject: state.currentProject?.id === id ? updated : state.currentProject,
-    }));
-    return updated;
+    try {
+      const updated = await api.updateProject(id, req);
+      set((state) => ({
+        projects: state.projects.map((p) => (p.id === id ? updated : p)),
+        currentProject: state.currentProject?.id === id ? updated : state.currentProject,
+      }));
+      return updated;
+    } catch (err) {
+      const message = err instanceof api.ApiError ? err.message : 'Failed to update project';
+      set({ error: message });
+      throw err;
+    }
   },
 
   deleteProject: async (id: string, cascade: 'inbox' | 'delete') => {
-    await api.deleteProject(id, cascade);
-    set((state) => ({
-      projects: state.projects.filter((p) => p.id !== id),
-      currentProject: state.currentProject?.id === id ? null : state.currentProject,
-    }));
+    try {
+      await api.deleteProject(id, cascade);
+      set((state) => ({
+        projects: state.projects.filter((p) => p.id !== id),
+        currentProject: state.currentProject?.id === id ? null : state.currentProject,
+      }));
+    } catch (err) {
+      const message = err instanceof api.ApiError ? err.message : 'Failed to delete project';
+      set({ error: message });
+      throw err;
+    }
   },
 
   clearError: () => set({ error: null }),

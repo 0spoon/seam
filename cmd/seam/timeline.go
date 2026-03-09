@@ -40,6 +40,7 @@ func newTimelineModel(client *APIClient, w, h int) timelineModel {
 		width:    w,
 		height:   h,
 		sortMode: "modified",
+		loading:  true,
 	}
 }
 
@@ -189,27 +190,27 @@ func (m timelineModel) Update(msg tea.Msg) (timelineModel, tea.Cmd) {
 
 func (m timelineModel) View() string {
 	if m.loading {
-		return "Loading timeline..."
+		return styleMuted.Render("Loading timeline...")
 	}
 
 	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#c4915c")).
+		Foreground(colorPrimary).
 		Bold(true)
 	dateStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9992a6")).
+		Foreground(colorMuted).
 		Bold(true)
 	activeDate := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#c4915c")).
+		Foreground(colorPrimary).
 		Bold(true)
 	noteStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#e8e2d9"))
+		Foreground(colorFg)
 	selectedNote := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#c4915c")).
+		Foreground(colorPrimary).
 		Bold(true)
 	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#5e5a6e"))
+		Foreground(colorDim)
 	todayDot := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#c4915c")).
+		Foreground(colorPrimary).
 		SetString("*")
 
 	var b strings.Builder
@@ -296,7 +297,7 @@ func (m timelineModel) View() string {
 	}
 
 	if m.err != "" {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#c46b6b")).Render(m.err))
+		b.WriteString("\n" + styleError.Render(m.err))
 	}
 
 	return b.String()

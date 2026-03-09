@@ -10,18 +10,20 @@ import {
   MessageCircle,
   Network,
   Calendar,
+  Check,
 } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useKeyboard } from '../../hooks/useKeyboard';
+import { useNoteWebSocket } from '../../hooks/useWebSocket';
 import { getProjectColor } from '../../lib/tagColor';
 import { searchFTS } from '../../api/client';
 import type { FTSResult } from '../../api/types';
 import { sanitizeHtml } from '../../lib/sanitize';
 import styles from './Sidebar.module.css';
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Check } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useToastStore } from '../../components/Toast/ToastContainer';
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -33,6 +35,7 @@ export function Sidebar() {
   const projects = useProjectStore((s) => s.projects);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const addToast = useToastStore((s) => s.addToast);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FTSResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -47,13 +50,18 @@ export function Sidebar() {
   const [newProjectName, setNewProjectName] = useState('');
   const newProjectRef = useRef<HTMLInputElement>(null);
 
+  // Subscribe to WS note.changed events so the note list stays fresh.
+  useNoteWebSocket();
+
   const focusSearch = useCallback(() => {
     searchRef.current?.focus();
   }, []);
 
-  useKeyboard([
+  const keyBindings = useMemo(() => [
     { key: '/', global: true, handler: focusSearch },
-  ]);
+  ], [focusSearch]);
+
+  useKeyboard(keyBindings);
 
   // Debounced inline search as user types.
   useEffect(() => {
@@ -141,9 +149,9 @@ export function Sidebar() {
       setNewProjectName('');
       navigate(`/projects/${project.id}`);
     } catch {
-      // Failed silently
+      addToast('Failed to create project', 'error');
     }
-  }, [newProjectName, createProject, navigate]);
+  }, [newProjectName, createProject, navigate, addToast]);
 
   useEffect(() => {
     if (showNewProject) {
@@ -180,7 +188,7 @@ export function Sidebar() {
         {collapsed ? (
           <button
             className={styles.iconButton}
-            onClick={focusSearch}
+            onClick={() => navigate('/search')}
             title="Search notes"
             aria-label="Search notes"
           >
@@ -199,12 +207,26 @@ export function Sidebar() {
               onKeyDown={handleSearchKeyDown}
               onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
               aria-label="Search notes"
+              role="combobox"
+              aria-expanded={showDropdown}
+              aria-controls="sidebar-search-listbox"
+              aria-activedescendant={
+                showDropdown && selectedIndex >= 0
+                  ? `search-result-${searchResults[selectedIndex]?.note_id}`
+                  : undefined
+              }
             />
             {showDropdown && (
-              <div ref={dropdownRef} className={styles.searchDropdown}>
+              <div
+                ref={dropdownRef}
+                className={styles.searchDropdown}
+                role="listbox"
+                id="sidebar-search-listbox"
+              >
                 {searchResults.map((result, index) => (
                   <button
                     key={result.note_id}
+                    id={`search-result-${result.note_id}`}
                     className={`${styles.searchResult} ${index === selectedIndex ? styles.searchResultSelected : ''}`}
                     onClick={() => {
                       setShowDropdown(false);
@@ -212,6 +234,8 @@ export function Sidebar() {
                       navigate(`/notes/${result.note_id}`);
                     }}
                     onMouseEnter={() => setSelectedIndex(index)}
+                    role="option"
+                    aria-selected={index === selectedIndex}
                   >
                     <span className={styles.searchResultTitle}>{result.title}</span>
                     <span
@@ -375,8 +399,8 @@ export function Sidebar() {
               <button
                 className={styles.iconButton}
                 onClick={handleLogout}
-                title="Settings"
-                aria-label="Settings"
+                title="Log out"
+                aria-label="Log out"
               >
                 <Settings size={14} />
               </button>

@@ -84,7 +84,7 @@ func (m templatePickerModel) Update(msg tea.Msg) (templatePickerModel, tea.Cmd) 
 		m.loading = false
 		m.templates = msg.templates
 		if len(m.templates) == 0 {
-			// No templates: fall back to plain capture.
+			// No templates: go to title phase for a blank note.
 			m.phase = tplPhaseTitle
 			return m, m.titleInput.Focus()
 		}
@@ -95,8 +95,11 @@ func (m templatePickerModel) Update(msg tea.Msg) (templatePickerModel, tea.Cmd) 
 		m.applying = false
 		// Create a note with the applied body.
 		title := strings.TrimSpace(m.titleInput.Value())
-		if title == "" {
+		if title == "" && m.cursor < len(m.templates) {
 			title = m.templates[m.cursor].Name
+		}
+		if title == "" {
+			title = "Untitled"
 		}
 		client := m.client
 		projectID := m.projectID
@@ -181,6 +184,27 @@ func (m templatePickerModel) updateTitle(msg tea.KeyMsg) (templatePickerModel, t
 	switch msg.String() {
 	case "enter":
 		if m.applying {
+			return m, nil
+		}
+		// If no templates exist, create a blank note directly.
+		if len(m.templates) == 0 {
+			m.applying = true
+			title := strings.TrimSpace(m.titleInput.Value())
+			if title == "" {
+				title = "Untitled"
+			}
+			client := m.client
+			projectID := m.projectID
+			return m, func() tea.Msg {
+				note, err := client.CreateNote(title, "", projectID)
+				if err != nil {
+					return apiErrorMsg{err: err}
+				}
+				return noteCreatedMsg{note: note}
+			}
+		}
+		if m.cursor >= len(m.templates) {
+			m.err = "no template selected"
 			return m, nil
 		}
 		m.applying = true

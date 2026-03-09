@@ -150,12 +150,17 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px 6px;
-  font-family: var(--font-mono);
+  padding: 2px 8px;
+  font-family: var(--font-ui);
+  font-weight: 400;
   font-size: var(--font-size-xs);
   color: var(--accent-primary);
   background: var(--bg-elevated);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: background var(--duration-fast) var(--ease-standard);
 }
 

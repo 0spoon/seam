@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -48,6 +49,7 @@ type Service struct {
 	store         *SQLStore
 	projectStore  *project.Store
 	userDBManager userdb.Manager
+	suppressorMu  sync.RWMutex
 	suppressor    WriteSuppressor
 	logger        *slog.Logger
 }
@@ -76,7 +78,16 @@ func NewService(
 // This is used when the watcher is created after the note service to break
 // the circular dependency during server startup.
 func (s *Service) SetSuppressor(suppressor WriteSuppressor) {
+	s.suppressorMu.Lock()
+	defer s.suppressorMu.Unlock()
 	s.suppressor = suppressor
+}
+
+// getSuppressor returns the current write suppressor under a read lock.
+func (s *Service) getSuppressor() WriteSuppressor {
+	s.suppressorMu.RLock()
+	defer s.suppressorMu.RUnlock()
+	return s.suppressor
 }
 
 // Create creates a new note, writes the .md file to disk, and inserts it
@@ -145,8 +156,8 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 	}
 
 	// Suppress watcher event for our own write.
-	if s.suppressor != nil {
-		s.suppressor.IgnoreNext(absPath)
+	if sup := s.getSuppressor(); sup != nil {
+		sup.IgnoreNext(absPath)
 	}
 
 	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
@@ -258,7 +269,49 @@ func (s *Service) List(ctx context.Context, userID string, filter NoteFilter) ([
 	return notes, total, nil
 }
 
+// GetBacklinks returns all notes that link to the given note.
+func (s *Service) GetBacklinks(ctx context.Context, userID, noteID string) ([]*Note, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.GetBacklinks: open db: %w", err)
+	}
+
+	// Verify note exists.
+	if _, err := s.store.Get(ctx, db, noteID); err != nil {
+		return nil, fmt.Errorf("note.Service.GetBacklinks: %w", err)
+	}
+
+	notes, err := s.store.GetBacklinks(ctx, db, noteID)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.GetBacklinks: %w", err)
+	}
+	return notes, nil
+}
+
+// ListTags returns all tags with note counts.
+func (s *Service) ListTags(ctx context.Context, userID string) ([]TagCount, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.ListTags: open db: %w", err)
+	}
+
+	tags, err := s.store.ListTags(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.ListTags: %w", err)
+	}
+	return tags, nil
+}
+
 // Update modifies an existing note, rewriting the file and updating the DB.
+//
+// I-H11: The DB transaction wraps the file write so that a transaction failure
+// cannot leave a modified file with stale DB data. Sequence:
+//  1. Read old file content (for rollback).
+//  2. Start DB transaction; perform all DB writes.
+//  3. Write file to disk.
+//  4. If file write fails, rollback the transaction.
+//  5. Commit the transaction.
+//  6. If commit fails, restore old file content (best effort).
 func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateNoteReq) (*Note, error) {
 	db, err := s.userDBManager.Open(ctx, userID)
 	if err != nil {
@@ -280,7 +333,14 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 		existing.Body = *req.Body
 	}
 
-	// Handle project change and file move.
+	// Track whether a file move is needed so we can defer it.
+	var pendingMove struct {
+		needed bool
+		oldAbs string
+		newAbs string
+	}
+
+	// Handle project change -- compute new path but defer the rename.
 	if req.ProjectID != nil {
 		oldPath := existing.FilePath
 		newProjectID := *req.ProjectID
@@ -304,18 +364,9 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 		}
 
 		if newRelPath != oldPath {
-			oldAbs := filepath.Join(notesDir, oldPath)
-			newAbs := filepath.Join(notesDir, newRelPath)
-			if err := os.MkdirAll(filepath.Dir(newAbs), 0o755); err != nil {
-				return nil, fmt.Errorf("note.Service.Update: mkdir: %w", err)
-			}
-			if s.suppressor != nil {
-				s.suppressor.IgnoreNext(oldAbs)
-				s.suppressor.IgnoreNext(newAbs)
-			}
-			if err := os.Rename(oldAbs, newAbs); err != nil {
-				return nil, fmt.Errorf("note.Service.Update: rename file: %w", err)
-			}
+			pendingMove.needed = true
+			pendingMove.oldAbs = filepath.Join(notesDir, oldPath)
+			pendingMove.newAbs = filepath.Join(notesDir, newRelPath)
 			existing.FilePath = newRelPath
 		}
 
@@ -345,7 +396,7 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 		existing.Tags = ParseTags(existing.Body, fmTags)
 	}
 
-	// Rewrite .md file with correct (merged) tags.
+	// Build the new .md file content with correct (merged) tags.
 	fm := &Frontmatter{
 		ID:               existing.ID,
 		Title:            existing.Title,
@@ -362,17 +413,20 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 		return nil, fmt.Errorf("note.Service.Update: serialize: %w", err)
 	}
 
-	absPath := filepath.Join(notesDir, existing.FilePath)
-	if s.suppressor != nil {
-		s.suppressor.IgnoreNext(absPath)
-	}
-	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
-		return nil, fmt.Errorf("note.Service.Update: write file: %w", err)
-	}
-
 	existing.ContentHash = computeHash(content)
 
-	// A-7: Wrap all DB writes in a transaction for atomicity.
+	// Read old file content before any mutations so we can restore on failure.
+	absPath := filepath.Join(notesDir, existing.FilePath)
+	oldFileAbs := absPath
+	if pendingMove.needed {
+		oldFileAbs = pendingMove.oldAbs
+	}
+	oldContent, readErr := os.ReadFile(oldFileAbs)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return nil, fmt.Errorf("note.Service.Update: read old file: %w", readErr)
+	}
+
+	// --- Begin DB transaction ---
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("note.Service.Update: begin tx: %w", err)
@@ -398,7 +452,53 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 		}
 	}
 
+	// --- DB operations succeeded; now perform file operations ---
+
+	// Move the file if the project changed.
+	if pendingMove.needed {
+		if err := os.MkdirAll(filepath.Dir(pendingMove.newAbs), 0o755); err != nil {
+			return nil, fmt.Errorf("note.Service.Update: mkdir: %w", err)
+		}
+		if sup := s.getSuppressor(); sup != nil {
+			sup.IgnoreNext(pendingMove.oldAbs)
+			sup.IgnoreNext(pendingMove.newAbs)
+		}
+		if err := os.Rename(pendingMove.oldAbs, pendingMove.newAbs); err != nil {
+			return nil, fmt.Errorf("note.Service.Update: rename file: %w", err)
+		}
+	}
+
+	// Write the updated .md file.
+	if sup := s.getSuppressor(); sup != nil {
+		sup.IgnoreNext(absPath)
+	}
+	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+		// File write failed -- undo the move if we did one.
+		if pendingMove.needed {
+			if undoErr := os.Rename(pendingMove.newAbs, pendingMove.oldAbs); undoErr != nil {
+				s.logger.Error("note.Service.Update: failed to undo file move after write error",
+					"from", pendingMove.newAbs, "to", pendingMove.oldAbs, "error", undoErr)
+			}
+		}
+		return nil, fmt.Errorf("note.Service.Update: write file: %w", err)
+	}
+
+	// --- Commit ---
 	if err := tx.Commit(); err != nil {
+		// Commit failed: restore old file content (best effort).
+		if oldContent != nil {
+			if restoreErr := os.WriteFile(oldFileAbs, oldContent, 0o644); restoreErr != nil {
+				s.logger.Error("note.Service.Update: failed to restore file after commit error",
+					"path", oldFileAbs, "error", restoreErr)
+			}
+			// Undo the move if we did one.
+			if pendingMove.needed {
+				if undoErr := os.Rename(pendingMove.newAbs, pendingMove.oldAbs); undoErr != nil {
+					s.logger.Error("note.Service.Update: failed to undo file move after commit error",
+						"from", pendingMove.newAbs, "to", pendingMove.oldAbs, "error", undoErr)
+				}
+			}
+		}
 		return nil, fmt.Errorf("note.Service.Update: commit: %w", err)
 	}
 
@@ -421,8 +521,8 @@ func (s *Service) Delete(ctx context.Context, userID, noteID string) error {
 	// Delete file from disk.
 	notesDir := s.userDBManager.UserNotesDir(userID)
 	absPath := filepath.Join(notesDir, existing.FilePath)
-	if s.suppressor != nil {
-		s.suppressor.IgnoreNext(absPath)
+	if sup := s.getSuppressor(); sup != nil {
+		sup.IgnoreNext(absPath)
 	}
 	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("note.Service.Delete: remove file: %w", err)
@@ -631,8 +731,8 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 			s.logger.Warn("note.Service.Reindex: failed to serialize frontmatter for ID writeback",
 				"file_path", filePath, "error", serErr)
 		} else {
-			if s.suppressor != nil {
-				s.suppressor.IgnoreNext(absPath)
+			if sup := s.getSuppressor(); sup != nil {
+				sup.IgnoreNext(absPath)
 			}
 			if writeErr := os.WriteFile(absPath, []byte(newContent), 0o644); writeErr != nil {
 				s.logger.Warn("note.Service.Reindex: failed to write ID back to file",

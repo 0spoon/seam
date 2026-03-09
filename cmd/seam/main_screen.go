@@ -22,6 +22,8 @@ type projectItem struct {
 	name string
 }
 
+const notesPerPage = 20
+
 // mainScreenModel is the main two-pane view showing projects and notes.
 type mainScreenModel struct {
 	client              *APIClient
@@ -33,8 +35,10 @@ type mainScreenModel struct {
 	notes               []*Note
 	noteIdx             int
 	totalNotes          int
+	page                int
 	err                 string
 	loading             bool
+	confirmDelete       bool
 	username            string
 	showCapture         bool
 	captureModel        captureModel
@@ -91,13 +95,15 @@ func (m mainScreenModel) loadNotes() tea.Cmd {
 	}
 	client := m.client
 	item := m.projects[m.projectIdx]
+	offset := m.page * notesPerPage
+	limit := notesPerPage
 
 	return func() tea.Msg {
 		projectFilter := item.id
 		if item.id == "" {
 			projectFilter = "inbox"
 		}
-		notes, total, err := client.ListNotes(projectFilter)
+		notes, total, err := client.ListNotesPaged(projectFilter, offset, limit)
 		if err != nil {
 			return apiErrorMsg{err: err}
 		}
@@ -133,13 +139,16 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			m.projects = append(m.projects, projectItem{id: p.ID, name: p.Name})
 		}
 		m.projectIdx = 0
+		m.page = 0
 		return m, m.loadNotes()
 
 	case notesLoadedMsg:
 		m.loading = false
 		m.notes = msg.notes
 		m.totalNotes = msg.total
-		m.noteIdx = 0
+		if m.noteIdx >= len(m.notes) {
+			m.noteIdx = 0
+		}
 		return m, nil
 
 	case apiErrorMsg:
@@ -153,6 +162,10 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 
 	case tea.KeyMsg:
 		m.err = ""
+		// Any key other than "d" resets the delete confirmation.
+		if msg.String() != "d" {
+			m.confirmDelete = false
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -169,6 +182,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			if m.activePane == paneProjects {
 				if m.projectIdx < len(m.projects)-1 {
 					m.projectIdx++
+					m.page = 0
 					m.loading = true
 					return m, m.loadNotes()
 				}
@@ -183,6 +197,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			if m.activePane == paneProjects {
 				if m.projectIdx > 0 {
 					m.projectIdx--
+					m.page = 0
 					m.loading = true
 					return m, m.loadNotes()
 				}
@@ -251,6 +266,12 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 
 		case "d":
 			if m.activePane == paneNotes && len(m.notes) > 0 {
+				if !m.confirmDelete {
+					m.confirmDelete = true
+					m.err = "Press d again to confirm delete"
+					return m, nil
+				}
+				m.confirmDelete = false
 				note := m.notes[m.noteIdx]
 				client := m.client
 				return m, func() tea.Msg {
@@ -262,6 +283,27 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			}
 			return m, nil
 
+		case "ctrl+f":
+			// Next page.
+			totalPages := m.totalPages()
+			if m.page < totalPages-1 {
+				m.page++
+				m.noteIdx = 0
+				m.loading = true
+				return m, m.loadNotes()
+			}
+			return m, nil
+
+		case "ctrl+b":
+			// Previous page.
+			if m.page > 0 {
+				m.page--
+				m.noteIdx = 0
+				m.loading = true
+				return m, m.loadNotes()
+			}
+			return m, nil
+
 		case "r":
 			m.loading = true
 			return m, m.loadProjects()
@@ -269,6 +311,17 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m mainScreenModel) totalPages() int {
+	if m.totalNotes <= 0 {
+		return 1
+	}
+	pages := m.totalNotes / notesPerPage
+	if m.totalNotes%notesPerPage != 0 {
+		pages++
+	}
+	return pages
 }
 
 func (m mainScreenModel) updateCapture(msg tea.Msg) (mainScreenModel, tea.Cmd) {
@@ -355,7 +408,12 @@ func (m mainScreenModel) View() string {
 	)
 
 	// Status bar.
-	statusText := "j/k: nav | Tab: pane | Enter: open | c: capture | n: template | u: URL | v: voice | /: search | a: ask | d: del | q: quit"
+	pageInfo := ""
+	totalPages := m.totalPages()
+	if totalPages > 1 {
+		pageInfo = fmt.Sprintf(" | Page %d/%d (Ctrl+F/B)", m.page+1, totalPages)
+	}
+	statusText := "j/k: nav | Tab: pane | Enter: open | c: capture | n: template | u: URL | v: voice | /: search | a: ask | d: del | q: quit" + pageInfo
 	if m.err != "" {
 		statusText = styleError.Render(m.err)
 	}

@@ -50,7 +50,9 @@ export interface CreateNoteReq {
 export interface UpdateNoteReq {
   title?: string;
   body?: string;
-  project_id?: string | null;
+  // undefined (or field omitted) = no change to project assignment.
+  // empty string "" = move note to inbox (remove from project).
+  project_id?: string;
   tags?: string[];
 }
 
@@ -94,11 +96,6 @@ export interface FTSResult {
   title: string;
   snippet: string;
   rank: number;
-}
-
-export interface SearchResponse {
-  results: FTSResult[];
-  total: number;
 }
 
 export interface SemanticResult {

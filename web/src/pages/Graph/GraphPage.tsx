@@ -5,11 +5,18 @@ import fcose from 'cytoscape-fcose';
 import { getGraph } from '../../api/client';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useToastStore } from '../../components/Toast/ToastContainer';
 import { getProjectColor } from '../../lib/tagColor';
 import type { GraphData } from '../../api/types';
 import styles from './GraphPage.module.css';
 
-cytoscape.use(fcose);
+// Guard against double-registration during hot-reload (cytoscape throws if
+// the same extension is registered twice).
+try {
+  cytoscape.use(fcose);
+} catch {
+  // Already registered
+}
 
 // Design token values extracted from variables.css so Cytoscape
 // (which cannot read CSS custom properties) stays in sync.
@@ -40,12 +47,15 @@ export function GraphPage() {
 
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(
     new Set(),
   );
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
   const [sinceDate, setSinceDate] = useState('');
   const [untilDate, setUntilDate] = useState('');
+  const [focusedNodeIndex, setFocusedNodeIndex] = useState(-1);
+  const addToast = useToastStore((s) => s.addToast);
 
   // Build project color map.
   const projectColorMap = useCallback(() => {
@@ -59,6 +69,7 @@ export function GraphPage() {
   // Fetch graph data (no tag/project filters -- all filtering is client-side).
   const fetchGraph = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await getGraph({
         since: sinceDate ? new Date(sinceDate).toISOString() : undefined,
@@ -66,11 +77,13 @@ export function GraphPage() {
       });
       setGraphData(data);
     } catch (err) {
-      console.error('Failed to fetch graph:', err);
+      const message = err instanceof Error ? err.message : 'Failed to load graph data';
+      setError(message);
+      addToast(message, 'error');
     } finally {
       setLoading(false);
     }
-  }, [sinceDate, untilDate]);
+  }, [sinceDate, untilDate, addToast]);
 
   useEffect(() => {
     fetchGraph();
@@ -273,6 +286,67 @@ export function GraphPage() {
 
       minimapCy.fit(undefined, 4);
       minimapCyRef.current = minimapCy;
+
+      // Update minimap viewport rectangle on pan/zoom/position changes.
+      const updateMinimap = () => {
+        if (!minimapCyRef.current || !cyRef.current) return;
+        const mc = minimapCyRef.current;
+
+        // Sync node positions from main graph to minimap.
+        cyRef.current.nodes().forEach((node) => {
+          const pos = node.position();
+          const minimapNode = mc.getElementById(node.id());
+          if (minimapNode.length > 0) {
+            minimapNode.position(pos);
+          }
+        });
+        mc.fit(undefined, 4);
+
+        // Draw viewport rectangle using an overlay node.
+        const ext = cyRef.current.extent();
+        const viewportId = '__viewport_rect__';
+        const existing = mc.getElementById(viewportId);
+        if (existing.length > 0) {
+          existing.position({
+            x: (ext.x1 + ext.x2) / 2,
+            y: (ext.y1 + ext.y2) / 2,
+          });
+          existing.style({
+            width: ext.x2 - ext.x1,
+            height: ext.y2 - ext.y1,
+          });
+        } else {
+          mc.add({
+            group: 'nodes',
+            data: { id: viewportId },
+            position: {
+              x: (ext.x1 + ext.x2) / 2,
+              y: (ext.y1 + ext.y2) / 2,
+            },
+            style: {
+              width: ext.x2 - ext.x1,
+              height: ext.y2 - ext.y1,
+              shape: 'rectangle',
+              'background-color': 'transparent',
+              'border-width': 1,
+              'border-color': COLORS.accentPrimary,
+              'border-opacity': 0.6,
+              'background-opacity': 0.05,
+              label: '',
+              events: 'no',
+            } as unknown as cytoscape.Css.Node,
+          });
+        }
+      };
+
+      // Listen for viewport-changing events on the main graph.
+      cy.on('pan zoom', updateMinimap);
+      cy.on('position', 'node', updateMinimap);
+      cy.on('add remove', updateMinimap);
+      cy.on('layoutstop', updateMinimap);
+
+      // Initial draw.
+      updateMinimap();
     }
 
     return () => {
@@ -359,10 +433,91 @@ export function GraphPage() {
     setUntilDate('');
   };
 
+  // Keyboard navigation for graph nodes (I-M33).
+  const handleGraphKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!cyRef.current) return;
+    const cy = cyRef.current;
+    const visibleNodes = cy.nodes(':visible');
+    if (visibleNodes.length === 0) return;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const nextIndex = e.shiftKey
+        ? (focusedNodeIndex <= 0 ? visibleNodes.length - 1 : focusedNodeIndex - 1)
+        : (focusedNodeIndex + 1) % visibleNodes.length;
+      setFocusedNodeIndex(nextIndex);
+      const node = visibleNodes[nextIndex];
+      cy.elements().unselect();
+      node.select();
+      cy.animate({ center: { eles: node }, duration: 200 });
+    } else if (e.key === 'Enter' && focusedNodeIndex >= 0 && focusedNodeIndex < visibleNodes.length) {
+      const node = visibleNodes[focusedNodeIndex];
+      navigate(`/notes/${node.id()}`);
+    } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      e.preventDefault();
+      if (focusedNodeIndex < 0) {
+        setFocusedNodeIndex(0);
+        const node = visibleNodes[0];
+        cy.elements().unselect();
+        node.select();
+        cy.animate({ center: { eles: node }, duration: 200 });
+        return;
+      }
+      const currentNode = visibleNodes[focusedNodeIndex];
+      const currentPos = currentNode.position();
+      let bestNode: cytoscape.NodeSingular | null = null;
+      let bestDist = Infinity;
+
+      visibleNodes.forEach((node) => {
+        if (node.id() === currentNode.id()) return;
+        const pos = node.position();
+        const dx = pos.x - currentPos.x;
+        const dy = pos.y - currentPos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        let isDirectional = false;
+        if (e.key === 'ArrowRight' && dx > 0) isDirectional = true;
+        if (e.key === 'ArrowLeft' && dx < 0) isDirectional = true;
+        if (e.key === 'ArrowDown' && dy > 0) isDirectional = true;
+        if (e.key === 'ArrowUp' && dy < 0) isDirectional = true;
+
+        if (isDirectional && dist < bestDist) {
+          bestDist = dist;
+          bestNode = node;
+        }
+      });
+
+      if (bestNode) {
+        const idx = visibleNodes.indexOf(bestNode);
+        setFocusedNodeIndex(idx);
+        cy.elements().unselect();
+        (bestNode as cytoscape.NodeSingular).select();
+        cy.animate({ center: { eles: bestNode }, duration: 200 });
+      }
+    } else if (e.key === 'Escape') {
+      setFocusedNodeIndex(-1);
+      cy.elements().unselect();
+    }
+  }, [focusedNodeIndex, navigate]);
+
   if (loading && !graphData) {
     return (
       <div className={styles.container}>
         <div className={styles.loading}>Loading graph...</div>
+      </div>
+    );
+  }
+
+  if (error && !graphData) {
+    return (
+      <div className={styles.container}>
+        <div className={styles.errorState}>
+          <div className={styles.errorTitle}>Failed to load graph</div>
+          <div className={styles.errorDescription}>{error}</div>
+          <button className={styles.retryButton} onClick={fetchGraph}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -382,7 +537,19 @@ export function GraphPage() {
 
   return (
     <div className={styles.container}>
-      <div ref={containerRef} className={styles.canvas} />
+      {/* Visually hidden instructions for keyboard users */}
+      <div className={styles.srOnly}>
+        Use Tab to focus graph nodes, Arrow keys to navigate between nodes,
+        Enter to open a note, and Escape to deselect.
+      </div>
+      <div
+        ref={containerRef}
+        className={styles.canvas}
+        role="img"
+        aria-label="Knowledge graph showing connections between notes"
+        tabIndex={0}
+        onKeyDown={handleGraphKeyDown}
+      />
 
       {/* Minimap */}
       <div ref={minimapRef} className={styles.minimap} />

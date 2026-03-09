@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/katata/seam/internal/userdb"
 	"github.com/katata/seam/internal/ws"
 )
+
+// jsonArrayRe matches a JSON array pattern in LLM output.
+var jsonArrayRe = regexp.MustCompile(`\[[\s\S]*\]`)
 
 // LinkSuggestion is a single auto-link suggestion.
 type LinkSuggestion struct {
@@ -165,21 +169,36 @@ Only output the JSON array, no other text.`, sourceTitle, sourceBody, strings.Jo
 		return nil, fmt.Errorf("ai.AutoLinker.askForSuggestions: %w", err)
 	}
 
-	// Parse the LLM response.
+	// Parse the LLM response using a multi-strategy approach for robustness.
 	var suggestions []LinkSuggestion
 	content := strings.TrimSpace(resp.Content)
 
-	// Try to extract JSON from the response (LLM may include markdown fences).
-	if idx := strings.Index(content, "["); idx >= 0 {
-		if end := strings.LastIndex(content, "]"); end > idx {
-			content = content[idx : end+1]
-		}
-	}
-
+	// Strategy 1: Try direct unmarshal of the full response.
 	if err := json.Unmarshal([]byte(content), &suggestions); err != nil {
-		l.logger.Warn("ai.AutoLinker: failed to parse LLM suggestions",
-			"content", content, "error", err)
-		return nil, nil // Non-fatal: LLM output was not valid JSON.
+		// Strategy 2: Try bracket-based extraction (handles markdown fences, preamble text).
+		if idx := strings.Index(content, "["); idx >= 0 {
+			if end := strings.LastIndex(content, "]"); end > idx {
+				extracted := content[idx : end+1]
+				if err2 := json.Unmarshal([]byte(extracted), &suggestions); err2 != nil {
+					// Strategy 3: Regex-based extraction for nested or complex output.
+					if match := jsonArrayRe.FindString(content); match != "" {
+						if err3 := json.Unmarshal([]byte(match), &suggestions); err3 != nil {
+							l.logger.Warn("ai.AutoLinker: failed to parse LLM suggestions after all strategies",
+								"error", err3)
+							return nil, nil
+						}
+					} else {
+						l.logger.Warn("ai.AutoLinker: failed to parse LLM suggestions",
+							"error", err2)
+						return nil, nil // Non-fatal: LLM output was not valid JSON.
+					}
+				}
+			}
+		} else {
+			l.logger.Warn("ai.AutoLinker: LLM response contains no JSON array",
+				"error", err)
+			return nil, nil
+		}
 	}
 
 	// Filter to only suggestions referencing known note IDs.

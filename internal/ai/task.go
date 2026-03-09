@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -16,7 +17,6 @@ const (
 	TaskTypeSynthesize          = "synthesize"
 	TaskTypeAutolink            = "autolink"
 	TaskTypeChat                = "chat"
-	TaskTypeTranscribe          = "transcribe"
 	TaskTypeAssist              = "assist"
 	TaskTypeSummarizeTranscript = "summarize_transcript"
 )
@@ -219,13 +219,31 @@ func scanTask(row *sql.Row) (*Task, error) {
 		t.Error = errMsg.String
 	}
 	if createdAt.Valid {
-		t.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt.String)
+		parsed, parseErr := time.Parse(time.RFC3339Nano, createdAt.String)
+		if parseErr != nil {
+			slog.Warn("ai.scanTask: failed to parse created_at",
+				"task_id", t.ID, "value", createdAt.String, "error", parseErr)
+		} else {
+			t.CreatedAt = parsed
+		}
 	}
 	if startedAt.Valid {
-		t.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt.String)
+		parsed, parseErr := time.Parse(time.RFC3339Nano, startedAt.String)
+		if parseErr != nil {
+			slog.Warn("ai.scanTask: failed to parse started_at",
+				"task_id", t.ID, "value", startedAt.String, "error", parseErr)
+		} else {
+			t.StartedAt = parsed
+		}
 	}
 	if finishedAt.Valid {
-		t.FinishedAt, _ = time.Parse(time.RFC3339Nano, finishedAt.String)
+		parsed, parseErr := time.Parse(time.RFC3339Nano, finishedAt.String)
+		if parseErr != nil {
+			slog.Warn("ai.scanTask: failed to parse finished_at",
+				"task_id", t.ID, "value", finishedAt.String, "error", parseErr)
+		} else {
+			t.FinishedAt = parsed
+		}
 	}
 
 	return &t, nil
@@ -254,13 +272,31 @@ func scanTaskRows(rows *sql.Rows) (*Task, error) {
 		t.Error = errMsg.String
 	}
 	if createdAt.Valid {
-		t.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt.String)
+		parsed, parseErr := time.Parse(time.RFC3339Nano, createdAt.String)
+		if parseErr != nil {
+			slog.Warn("ai.scanTaskRows: failed to parse created_at",
+				"task_id", t.ID, "value", createdAt.String, "error", parseErr)
+		} else {
+			t.CreatedAt = parsed
+		}
 	}
 	if startedAt.Valid {
-		t.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt.String)
+		parsed, parseErr := time.Parse(time.RFC3339Nano, startedAt.String)
+		if parseErr != nil {
+			slog.Warn("ai.scanTaskRows: failed to parse started_at",
+				"task_id", t.ID, "value", startedAt.String, "error", parseErr)
+		} else {
+			t.StartedAt = parsed
+		}
 	}
 	if finishedAt.Valid {
-		t.FinishedAt, _ = time.Parse(time.RFC3339Nano, finishedAt.String)
+		parsed, parseErr := time.Parse(time.RFC3339Nano, finishedAt.String)
+		if parseErr != nil {
+			slog.Warn("ai.scanTaskRows: failed to parse finished_at",
+				"task_id", t.ID, "value", finishedAt.String, "error", parseErr)
+		} else {
+			t.FinishedAt = parsed
+		}
 	}
 
 	return &t, nil

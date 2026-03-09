@@ -10,24 +10,43 @@ import (
 	"github.com/katata/seam/internal/userdb"
 )
 
+// defaultNoteLimit is the default maximum number of notes retrieved for synthesis.
+const defaultNoteLimit = 50
+
 // Synthesizer generates summaries and synthesis across notes.
 type Synthesizer struct {
 	ollama    *OllamaClient
 	dbManager userdb.Manager
 	chatModel string
 	logger    *slog.Logger
+	noteLimit int // maximum notes to retrieve for synthesis
 }
 
-// NewSynthesizer creates a new Synthesizer.
-func NewSynthesizer(ollama *OllamaClient, dbManager userdb.Manager, chatModel string, logger *slog.Logger) *Synthesizer {
+// NewSynthesizer creates a new Synthesizer. Optional noteLimit can be set;
+// zero uses the default (50).
+func NewSynthesizer(ollama *OllamaClient, dbManager userdb.Manager, chatModel string, logger *slog.Logger, opts ...func(*Synthesizer)) *Synthesizer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Synthesizer{
+	s := &Synthesizer{
 		ollama:    ollama,
 		dbManager: dbManager,
 		chatModel: chatModel,
 		logger:    logger,
+		noteLimit: defaultNoteLimit,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// WithNoteLimit returns an option that sets the maximum number of notes for synthesis.
+func WithNoteLimit(limit int) func(*Synthesizer) {
+	return func(s *Synthesizer) {
+		if limit > 0 {
+			s.noteLimit = limit
+		}
 	}
 }
 
@@ -36,77 +55,87 @@ type SynthesisResult struct {
 	Response string `json:"response"`
 }
 
-// Synthesize generates a synthesis across notes matching the given scope.
-func (s *Synthesizer) Synthesize(ctx context.Context, userID string, payload SynthesizePayload) (*SynthesisResult, error) {
+// synthesisBodyMaxLen is the maximum body length loaded from SQL for synthesis.
+// Using SUBSTR in the query avoids loading full note bodies into memory.
+const synthesisBodyMaxLen = 1500
+
+// retrieveNotes fetches notes matching the given scope from the user's database.
+// Bodies are truncated at the SQL level to avoid loading excessive data into memory.
+func (s *Synthesizer) retrieveNotes(ctx context.Context, userID string, payload SynthesizePayload) ([]struct{ Title, Body string }, error) {
 	db, err := s.dbManager.Open(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("ai.Synthesizer.Synthesize: open db: %w", err)
+		return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: open db: %w", err)
 	}
 
-	// Retrieve notes matching the scope.
-	var rows []struct {
-		Title string
-		Body  string
-	}
+	var rows []struct{ Title, Body string }
 
 	switch payload.Scope {
 	case "project":
 		if payload.ProjectID == "" {
-			return nil, fmt.Errorf("ai.Synthesizer.Synthesize: project_id required for project scope")
+			return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: project_id required for project scope")
 		}
 		dbRows, err := db.QueryContext(ctx,
-			`SELECT title, body FROM notes WHERE project_id = ? ORDER BY updated_at DESC LIMIT 50`,
-			payload.ProjectID)
+			`SELECT title, SUBSTR(body, 1, ?) FROM notes WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?`,
+			synthesisBodyMaxLen, payload.ProjectID, s.noteLimit)
 		if err != nil {
-			return nil, fmt.Errorf("ai.Synthesizer.Synthesize: query notes: %w", err)
+			return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: query notes: %w", err)
 		}
 		defer dbRows.Close()
 		for dbRows.Next() {
 			var r struct{ Title, Body string }
 			if err := dbRows.Scan(&r.Title, &r.Body); err != nil {
-				return nil, fmt.Errorf("ai.Synthesizer.Synthesize: scan: %w", err)
+				return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: scan: %w", err)
 			}
 			rows = append(rows, r)
 		}
 		if err := dbRows.Err(); err != nil {
-			return nil, fmt.Errorf("ai.Synthesizer.Synthesize: rows iteration: %w", err)
+			return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: rows iteration: %w", err)
 		}
 
 	case "tag":
 		if payload.Tag == "" {
-			return nil, fmt.Errorf("ai.Synthesizer.Synthesize: tag required for tag scope")
+			return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: tag required for tag scope")
 		}
 		dbRows, err := db.QueryContext(ctx,
-			`SELECT n.title, n.body FROM notes n
+			`SELECT n.title, SUBSTR(n.body, 1, ?) FROM notes n
 			 JOIN note_tags nt ON n.id = nt.note_id
 			 JOIN tags t ON nt.tag_id = t.id
 			 WHERE t.name = ?
-			 ORDER BY n.updated_at DESC LIMIT 50`,
-			payload.Tag)
+			 ORDER BY n.updated_at DESC LIMIT ?`,
+			synthesisBodyMaxLen, payload.Tag, s.noteLimit)
 		if err != nil {
-			return nil, fmt.Errorf("ai.Synthesizer.Synthesize: query notes by tag: %w", err)
+			return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: query notes by tag: %w", err)
 		}
 		defer dbRows.Close()
 		for dbRows.Next() {
 			var r struct{ Title, Body string }
 			if err := dbRows.Scan(&r.Title, &r.Body); err != nil {
-				return nil, fmt.Errorf("ai.Synthesizer.Synthesize: scan: %w", err)
+				return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: scan: %w", err)
 			}
 			rows = append(rows, r)
 		}
 		if err := dbRows.Err(); err != nil {
-			return nil, fmt.Errorf("ai.Synthesizer.Synthesize: rows iteration: %w", err)
+			return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: rows iteration: %w", err)
 		}
 
 	default:
-		return nil, fmt.Errorf("ai.Synthesizer.Synthesize: invalid scope %q, must be 'project' or 'tag'", payload.Scope)
+		return nil, fmt.Errorf("ai.Synthesizer.retrieveNotes: invalid scope %q, must be 'project' or 'tag'", payload.Scope)
+	}
+
+	return rows, nil
+}
+
+// Synthesize generates a synthesis across notes matching the given scope.
+func (s *Synthesizer) Synthesize(ctx context.Context, userID string, payload SynthesizePayload) (*SynthesisResult, error) {
+	rows, err := s.retrieveNotes(ctx, userID, payload)
+	if err != nil {
+		return nil, fmt.Errorf("ai.Synthesizer.Synthesize: %w", err)
 	}
 
 	if len(rows) == 0 {
 		return &SynthesisResult{Response: "No notes found matching the given scope."}, nil
 	}
 
-	// Build the synthesis prompt.
 	messages := BuildSynthesisMessages(payload.Prompt, rows)
 
 	resp, err := s.ollama.ChatCompletion(ctx, s.chatModel, messages)
@@ -127,72 +156,9 @@ func (s *Synthesizer) SynthesizeStream(ctx context.Context, userID string, paylo
 		defer close(tokenCh)
 		defer close(errCh)
 
-		db, err := s.dbManager.Open(ctx, userID)
+		rows, err := s.retrieveNotes(ctx, userID, payload)
 		if err != nil {
-			errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: open db: %w", err)
-			return
-		}
-
-		// Retrieve notes matching the scope (same logic as Synthesize).
-		var rows []struct{ Title, Body string }
-
-		switch payload.Scope {
-		case "project":
-			if payload.ProjectID == "" {
-				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: project_id required")
-				return
-			}
-			dbRows, qErr := db.QueryContext(ctx,
-				`SELECT title, body FROM notes WHERE project_id = ? ORDER BY updated_at DESC LIMIT 50`,
-				payload.ProjectID)
-			if qErr != nil {
-				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: query: %w", qErr)
-				return
-			}
-			defer dbRows.Close()
-			for dbRows.Next() {
-				var r struct{ Title, Body string }
-				if sErr := dbRows.Scan(&r.Title, &r.Body); sErr != nil {
-					errCh <- sErr
-					return
-				}
-				rows = append(rows, r)
-			}
-			if rErr := dbRows.Err(); rErr != nil {
-				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: rows iteration: %w", rErr)
-				return
-			}
-		case "tag":
-			if payload.Tag == "" {
-				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: tag required")
-				return
-			}
-			dbRows, qErr := db.QueryContext(ctx,
-				`SELECT n.title, n.body FROM notes n
-				 JOIN note_tags nt ON n.id = nt.note_id
-				 JOIN tags t ON nt.tag_id = t.id
-				 WHERE t.name = ?
-				 ORDER BY n.updated_at DESC LIMIT 50`,
-				payload.Tag)
-			if qErr != nil {
-				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: query by tag: %w", qErr)
-				return
-			}
-			defer dbRows.Close()
-			for dbRows.Next() {
-				var r struct{ Title, Body string }
-				if sErr := dbRows.Scan(&r.Title, &r.Body); sErr != nil {
-					errCh <- sErr
-					return
-				}
-				rows = append(rows, r)
-			}
-			if rErr := dbRows.Err(); rErr != nil {
-				errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: rows iteration: %w", rErr)
-				return
-			}
-		default:
-			errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: invalid scope %q", payload.Scope)
+			errCh <- fmt.Errorf("ai.Synthesizer.SynthesizeStream: %w", err)
 			return
 		}
 
@@ -231,11 +197,8 @@ key themes, and important connections across the notes. Be specific and referenc
 
 	var noteParts []string
 	for _, n := range notes {
-		body := n.Body
-		if len(body) > 1500 {
-			body = body[:1500] + "..."
-		}
-		noteParts = append(noteParts, fmt.Sprintf("--- %s ---\n%s", n.Title, body))
+		// Bodies are already truncated at the SQL level (SUBSTR) in retrieveNotes.
+		noteParts = append(noteParts, fmt.Sprintf("--- %s ---\n%s", n.Title, n.Body))
 	}
 
 	noteContext := strings.Join(noteParts, "\n\n")

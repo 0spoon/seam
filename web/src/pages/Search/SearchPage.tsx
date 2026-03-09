@@ -16,7 +16,7 @@ type SearchResult = {
 };
 
 export function SearchPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const initialQuery = searchParams.get('q') ?? '';
   const [query, setQuery] = useState(initialQuery);
@@ -25,10 +25,21 @@ export function SearchPage() {
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Sync query to URL search params.
+  useEffect(() => {
+    const currentQ = searchParams.get('q') ?? '';
+    if (query.trim() && query !== currentQ) {
+      setSearchParams({ q: query }, { replace: true });
+    } else if (!query.trim() && currentQ) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [query, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -39,12 +50,20 @@ export function SearchPage() {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
+    // Cancel any in-flight search request so stale responses cannot
+    // overwrite newer results.
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
 
     debounceRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      abortRef.current = controller;
       setIsLoading(true);
       try {
         if (mode === 'semantic') {
-          const semanticResults = await searchSemantic(query, 20);
+          const semanticResults = await searchSemantic(query, 20, controller.signal);
+          if (controller.signal.aborted) return;
           setResults(
             semanticResults.map((r: SemanticResult) => ({
               note_id: r.note_id,
@@ -54,7 +73,8 @@ export function SearchPage() {
             })),
           );
         } else {
-          const { results: ftsResults } = await searchFTS(query, 20);
+          const { results: ftsResults } = await searchFTS(query, 20, 0, controller.signal);
+          if (controller.signal.aborted) return;
           setResults(
             ftsResults.map((r: FTSResult) => ({
               note_id: r.note_id,
@@ -63,16 +83,22 @@ export function SearchPage() {
             })),
           );
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         setResults([]);
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
       }
     }, 300);
 
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
+      }
+      if (abortRef.current) {
+        abortRef.current.abort();
       }
     };
   }, [query, mode]);

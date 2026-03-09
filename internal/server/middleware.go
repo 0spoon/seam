@@ -3,9 +3,10 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -83,6 +84,7 @@ func RecoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 						"method", r.Method,
 						"path", r.URL.Path,
 						"request_id", reqctx.RequestIDFromContext(r.Context()),
+						"stack", string(debug.Stack()),
 					)
 					writeJSONError(w, http.StatusInternalServerError, "internal server error")
 				}
@@ -121,5 +123,5 @@ func generateRequestID() string {
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"error":%q}`, msg)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg}) //nolint:errcheck
 }

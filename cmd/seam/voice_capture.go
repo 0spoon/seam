@@ -7,13 +7,18 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// maxRecordingDuration is the maximum allowed recording duration.
+const maxRecordingDuration = 5 * 60 // 5 minutes in seconds
 
 // voiceCaptureModel handles voice capture in the TUI.
 // It uses the system sox command (rec) to record audio, then
@@ -67,6 +72,17 @@ func (m voiceCaptureModel) Update(msg tea.Msg) (voiceCaptureModel, tea.Cmd) {
 	case voiceTickMsg:
 		if m.recording {
 			m.seconds++
+			// Auto-stop at maximum duration.
+			if m.seconds >= maxRecordingDuration {
+				if m.cmd != nil && m.cmd.Process != nil {
+					_ = m.cmd.Process.Kill()
+				}
+				m.recording = false
+				audioFile := m.audioFile
+				return m, func() tea.Msg {
+					return voiceRecordDoneMsg{audioFile: audioFile}
+				}
+			}
 			return m, tea.Tick(time.Second, func(time.Time) tea.Msg {
 				return voiceTickMsg{}
 			})
@@ -110,6 +126,10 @@ func (m voiceCaptureModel) Update(msg tea.Msg) (voiceCaptureModel, tea.Cmd) {
 				}
 				m.recording = false
 			}
+			// Clean up temp file on cancel.
+			if m.audioFile != "" {
+				_ = os.Remove(m.audioFile)
+			}
 			m.done = true
 			return m, nil
 
@@ -137,28 +157,54 @@ func (m voiceCaptureModel) Update(msg tea.Msg) (voiceCaptureModel, tea.Cmd) {
 }
 
 func (m voiceCaptureModel) startRecording() (voiceCaptureModel, tea.Cmd) {
-	// Try to find a recording command: sox/rec, arecord, or ffmpeg.
-	audioFile := fmt.Sprintf("/tmp/seam-voice-%d.wav", time.Now().UnixNano())
+	// Create a secure temporary file for the recording.
+	tmpFile, err := os.CreateTemp("", "seam-voice-*.wav")
+	if err != nil {
+		m.err = fmt.Sprintf("failed to create temp file: %v", err)
+		return m, nil
+	}
+	audioFile := tmpFile.Name()
+	tmpFile.Close()
 	m.audioFile = audioFile
 
+	// Try to find a recording command: sox/rec, arecord, parecord, or ffmpeg.
+	// The ffmpeg input format is OS-specific:
+	//   macOS: -f avfoundation -i ":0"
+	//   Linux: -f alsa -i default (or -f pulse -i default)
 	var cmd *exec.Cmd
-	if _, err := exec.LookPath("rec"); err == nil {
-		// sox rec command: records to wav
+	if _, lookErr := exec.LookPath("rec"); lookErr == nil {
+		// sox rec command: records to wav (cross-platform)
 		cmd = exec.Command("rec", audioFile, "rate", "16000", "channels", "1")
-	} else if _, err := exec.LookPath("arecord"); err == nil {
-		// ALSA arecord
-		cmd = exec.Command("arecord", "-f", "cd", "-t", "wav", audioFile)
-	} else if _, err := exec.LookPath("ffmpeg"); err == nil {
-		// ffmpeg with default audio input
-		cmd = exec.Command("ffmpeg", "-y", "-f", "avfoundation", "-i", ":0", audioFile)
-	} else {
-		m.err = "no audio recording tool found (install sox, arecord, or ffmpeg)"
+	} else if runtime.GOOS == "linux" {
+		// Linux-specific recording tools.
+		if _, lookErr := exec.LookPath("arecord"); lookErr == nil {
+			cmd = exec.Command("arecord", "-f", "cd", "-t", "wav", audioFile)
+		} else if _, lookErr := exec.LookPath("parecord"); lookErr == nil {
+			cmd = exec.Command("parecord", "--file-format=wav", audioFile)
+		} else if _, lookErr := exec.LookPath("ffmpeg"); lookErr == nil {
+			cmd = exec.Command("ffmpeg", "-y", "-f", "alsa", "-i", "default", audioFile)
+		}
+	} else if runtime.GOOS == "darwin" {
+		// macOS-specific recording tools.
+		if _, lookErr := exec.LookPath("ffmpeg"); lookErr == nil {
+			cmd = exec.Command("ffmpeg", "-y", "-f", "avfoundation", "-i", ":0", audioFile)
+		}
+	}
+	if cmd == nil {
+		// Fallback: try ffmpeg with a generic input.
+		if _, lookErr := exec.LookPath("ffmpeg"); lookErr == nil {
+			cmd = exec.Command("ffmpeg", "-y", "-f", "alsa", "-i", "default", audioFile)
+		}
+	}
+	if cmd == nil {
+		_ = os.Remove(audioFile)
+		m.err = "no audio recording tool found (install sox, arecord, parecord, or ffmpeg)"
 		return m, nil
 	}
 
 	// Suppress stdout/stderr to avoid corrupting the TUI.
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 
 	if err := cmd.Start(); err != nil {
 		m.err = fmt.Sprintf("failed to start recording: %v", err)
@@ -176,15 +222,13 @@ func (m voiceCaptureModel) startRecording() (voiceCaptureModel, tea.Cmd) {
 
 // uploadVoice reads the audio file and uploads it via multipart form.
 func uploadVoice(client *APIClient, audioFile string) (*Note, error) {
-	// Read the file data via exec since we cannot import os directly
-	// for TUI simplicity. Actually we can use os.Open.
-	data, err := exec.Command("cat", audioFile).Output()
+	data, err := os.ReadFile(audioFile)
 	if err != nil {
 		return nil, fmt.Errorf("read audio file: %w", err)
 	}
 	defer func() {
 		// Clean up the temp file.
-		_ = exec.Command("rm", "-f", audioFile).Run()
+		_ = os.Remove(audioFile)
 	}()
 
 	var buf bytes.Buffer
@@ -241,8 +285,12 @@ func (m voiceCaptureModel) View() string {
 	b.WriteString("\n\n")
 
 	if m.recording {
+		remaining := maxRecordingDuration - m.seconds
 		b.WriteString(styleError.Render("  Recording..."))
-		b.WriteString(fmt.Sprintf("  %02d:%02d", m.seconds/60, m.seconds%60))
+		b.WriteString(fmt.Sprintf("  %02d:%02d / %02d:%02d", m.seconds/60, m.seconds%60, maxRecordingDuration/60, maxRecordingDuration%60))
+		if remaining <= 30 {
+			b.WriteString(styleError.Render(fmt.Sprintf("  (%ds left)", remaining)))
+		}
 		b.WriteString("\n\n")
 		b.WriteString(styleMuted.Render("Press Enter or Space to stop recording"))
 	} else if m.loading {

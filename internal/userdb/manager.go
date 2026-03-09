@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -160,9 +161,17 @@ func (m *SQLManager) ListUsers(ctx context.Context) ([]string, error) {
 
 	var users []string
 	for _, entry := range entries {
-		if entry.IsDir() {
-			users = append(users, entry.Name())
+		if !entry.IsDir() {
+			continue
 		}
+		name := entry.Name()
+		// Validate that directory names are reasonable user IDs:
+		// not empty, no path traversal characters.
+		if name == "" || name == "." || name == ".." ||
+			strings.ContainsAny(name, "/\\\x00") {
+			continue
+		}
+		users = append(users, name)
 	}
 	return users, nil
 }
@@ -177,6 +186,11 @@ func (m *SQLManager) EnsureUserDirs(userID string) error {
 	notesDir := m.UserNotesDir(userID)
 	if err := os.MkdirAll(notesDir, 0o755); err != nil {
 		return fmt.Errorf("userdb.Manager.EnsureUserDirs: %w", err)
+	}
+	// C-3: Also create notes/inbox/ subdirectory per TEST_PLAN.md spec.
+	inboxDir := filepath.Join(notesDir, "inbox")
+	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
+		return fmt.Errorf("userdb.Manager.EnsureUserDirs: create inbox: %w", err)
 	}
 	return nil
 }
@@ -213,10 +227,15 @@ func (m *SQLManager) openDB(userID string) (*sql.DB, error) {
 		return nil, fmt.Errorf("userdb.Manager.Open: foreign keys: %w", err)
 	}
 
-	if _, err := db.Exec(migrations.UserSQL); err != nil {
+	if err := migrations.Run(db, migrations.UserMigrations()); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("userdb.Manager.Open: migrations: %w", err)
 	}
+
+	// C-1: Limit open connections to 1 for SQLite. SQLite only supports a
+	// single writer at a time; allowing the Go connection pool to open
+	// multiple connections can lead to SQLITE_BUSY errors under contention.
+	db.SetMaxOpenConns(1)
 
 	return db, nil
 }

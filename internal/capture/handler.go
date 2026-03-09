@@ -54,7 +54,8 @@ func (h *Handler) capture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Otherwise, JSON body for URL capture.
+	// Otherwise, JSON body for URL capture (limit to 1MB).
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req captureRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -124,7 +125,9 @@ func (h *Handler) handleVoiceCapture(w http.ResponseWriter, r *http.Request, use
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("capture.writeJSON: encode error", "error", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -31,10 +33,12 @@ type Server struct {
 
 // Config holds the dependencies needed to create a Server.
 type Config struct {
-	Listen     string
-	Logger     *slog.Logger
-	JWTManager *auth.JWTManager
-	Hub        *ws.Hub
+	Listen      string
+	Logger      *slog.Logger
+	JWTManager  *auth.JWTManager
+	Hub         *ws.Hub
+	CORSOrigins []string // allowed CORS origins; defaults to localhost
+	WebDistDir  string   // path to web/dist for SPA serving; empty to skip
 
 	AuthHandler      *auth.Handler
 	ProjectHandler   *project.Handler
@@ -59,8 +63,13 @@ func New(cfg Config) *Server {
 	r.Use(RequestIDMiddleware)
 	r.Use(RecoveryMiddleware(cfg.Logger))
 	r.Use(LoggingMiddleware(cfg.Logger))
+	// C-7: Use configurable CORS origins, falling back to localhost.
+	corsOrigins := cfg.CORSOrigins
+	if len(corsOrigins) == 0 {
+		corsOrigins = []string{"http://localhost:*", "http://127.0.0.1:*"}
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:*", "http://127.0.0.1:*"},
+		AllowedOrigins:   corsOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		ExposedHeaders:   []string{"X-Request-ID", "X-Total-Count"},
@@ -133,6 +142,32 @@ func New(cfg Config) *Server {
 			})
 		}
 	})
+
+	// C-6: Serve the production frontend from web/dist if configured.
+	if cfg.WebDistDir != "" {
+		if info, err := os.Stat(cfg.WebDistDir); err == nil && info.IsDir() {
+			staticFS := http.Dir(cfg.WebDistDir)
+			fileServer := http.FileServer(staticFS)
+
+			// Serve static assets directly; for SPA routes, fall back to index.html.
+			r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+				// Try to serve the file directly.
+				path := r.URL.Path
+				if f, err := staticFS.Open(path); err == nil {
+					f.Close()
+					fileServer.ServeHTTP(w, r)
+					return
+				}
+				// SPA fallback: serve index.html for non-API, non-asset paths.
+				if !strings.HasPrefix(path, "/api/") {
+					http.ServeFile(w, r, cfg.WebDistDir+"/index.html")
+					return
+				}
+				http.NotFound(w, r)
+			})
+			cfg.Logger.Info("serving static files", "dir", cfg.WebDistDir)
+		}
+	}
 
 	return &Server{
 		httpServer: &http.Server{

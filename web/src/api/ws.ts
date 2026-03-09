@@ -1,5 +1,5 @@
 import type { WSMessage } from './types';
-import { getAccessToken } from './client';
+import { getAccessToken, getRefreshToken, tryRefresh, setTokens } from './client';
 
 type MessageHandler = (msg: WSMessage) => void;
 
@@ -51,8 +51,25 @@ export function connect() {
   }
 }
 
-function scheduleReconnect() {
+async function scheduleReconnect() {
   if (reconnectTimer) return;
+
+  // Before reconnecting, ensure the access token is still valid.
+  // If it has expired, attempt a refresh. If refresh fails (e.g. the
+  // refresh token is also expired), stop reconnecting entirely.
+  const token = getAccessToken();
+  const refresh = getRefreshToken();
+  if (!token && !refresh) return;
+
+  if (!token && refresh) {
+    const ok = await tryRefresh();
+    if (!ok) {
+      // Refresh failed -- tokens are invalid, clear them.
+      setTokens(null);
+      return;
+    }
+  }
+
   const delay = Math.min(1000 * 2 ** reconnectAttempts, MAX_RECONNECT_DELAY);
   reconnectAttempts++;
   reconnectTimer = setTimeout(() => {

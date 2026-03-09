@@ -42,7 +42,7 @@ func NewStore() *Store {
 }
 
 // Create inserts a new project. Returns ErrSlugExists if the slug is taken.
-func (s *Store) Create(ctx context.Context, db *sql.DB, p *Project) error {
+func (s *Store) Create(ctx context.Context, db DBTX, p *Project) error {
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO projects (id, name, slug, description, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -59,7 +59,7 @@ func (s *Store) Create(ctx context.Context, db *sql.DB, p *Project) error {
 }
 
 // Get retrieves a project by ID. Returns ErrNotFound if no project matches.
-func (s *Store) Get(ctx context.Context, db *sql.DB, id string) (*Project, error) {
+func (s *Store) Get(ctx context.Context, db DBTX, id string) (*Project, error) {
 	p := &Project{}
 	var createdAt, updatedAt string
 	err := db.QueryRowContext(ctx,
@@ -78,7 +78,7 @@ func (s *Store) Get(ctx context.Context, db *sql.DB, id string) (*Project, error
 }
 
 // GetBySlug retrieves a project by slug. Returns ErrNotFound if no project matches.
-func (s *Store) GetBySlug(ctx context.Context, db *sql.DB, slug string) (*Project, error) {
+func (s *Store) GetBySlug(ctx context.Context, db DBTX, slug string) (*Project, error) {
 	p := &Project{}
 	var createdAt, updatedAt string
 	err := db.QueryRowContext(ctx,
@@ -97,7 +97,7 @@ func (s *Store) GetBySlug(ctx context.Context, db *sql.DB, slug string) (*Projec
 }
 
 // List returns all projects ordered by creation time descending.
-func (s *Store) List(ctx context.Context, db *sql.DB) ([]*Project, error) {
+func (s *Store) List(ctx context.Context, db DBTX) ([]*Project, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, name, slug, description, created_at, updated_at
 		 FROM projects ORDER BY created_at DESC`,
@@ -126,7 +126,7 @@ func (s *Store) List(ctx context.Context, db *sql.DB) ([]*Project, error) {
 
 // Update modifies an existing project. Returns ErrNotFound if the project
 // does not exist, or ErrSlugExists if the updated slug conflicts.
-func (s *Store) Update(ctx context.Context, db *sql.DB, p *Project) error {
+func (s *Store) Update(ctx context.Context, db DBTX, p *Project) error {
 	result, err := db.ExecContext(ctx,
 		`UPDATE projects SET name = ?, slug = ?, description = ?, updated_at = ?
 		 WHERE id = ?`,

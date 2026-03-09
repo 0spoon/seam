@@ -23,17 +23,18 @@ var aiAssistActions = []aiAssistAction{
 
 // aiAssistModel is the command palette overlay for AI writing assist.
 type aiAssistModel struct {
-	client    *APIClient
-	noteID    string
-	selection string
-	cursor    int
-	err       string
-	loading   bool
-	done      bool
-	result    string
-	applied   bool
-	width     int
-	height    int
+	client       *APIClient
+	noteID       string
+	selection    string
+	cursor       int
+	err          string
+	loading      bool
+	done         bool
+	result       string
+	resultScroll int
+	applied      bool
+	width        int
+	height       int
 }
 
 // aiAssistResultMsg is sent when AI assist returns a result.
@@ -75,7 +76,7 @@ func (m aiAssistModel) Update(msg tea.Msg) (aiAssistModel, tea.Cmd) {
 	case tea.KeyMsg:
 		m.err = ""
 
-		// If we have a result, handle insert/dismiss.
+		// If we have a result, handle insert/dismiss/scrolling.
 		if m.result != "" {
 			switch msg.String() {
 			case "enter", "y":
@@ -84,6 +85,17 @@ func (m aiAssistModel) Update(msg tea.Msg) (aiAssistModel, tea.Cmd) {
 				return m, nil
 			case "esc", "n":
 				m.done = true
+				return m, nil
+			case "j", "down":
+				maxScroll := m.resultMaxScroll()
+				if m.resultScroll < maxScroll {
+					m.resultScroll++
+				}
+				return m, nil
+			case "k", "up":
+				if m.resultScroll > 0 {
+					m.resultScroll--
+				}
 				return m, nil
 			}
 			return m, nil
@@ -128,6 +140,24 @@ func (m aiAssistModel) Update(msg tea.Msg) (aiAssistModel, tea.Cmd) {
 	return m, nil
 }
 
+// resultMaxScroll returns the maximum scroll offset for the result view.
+func (m aiAssistModel) resultMaxScroll() int {
+	if m.result == "" {
+		return 0
+	}
+	lines := strings.Split(m.result, "\n")
+	// Allow roughly half the screen for the result.
+	viewportHeight := m.height/2 - 4
+	if viewportHeight < 5 {
+		viewportHeight = 5
+	}
+	max := len(lines) - viewportHeight
+	if max < 0 {
+		max = 0
+	}
+	return max
+}
+
 func (m aiAssistModel) View() string {
 	if m.width == 0 {
 		return ""
@@ -139,21 +169,31 @@ func (m aiAssistModel) View() string {
 	b.WriteString("\n\n")
 
 	if m.result != "" {
-		// Show result preview.
+		// Show scrollable result preview.
 		b.WriteString(styleMuted.Render("Result:"))
 		b.WriteString("\n\n")
 
-		// Truncate long results for display.
-		preview := m.result
-		lines := strings.Split(preview, "\n")
-		if len(lines) > 15 {
-			preview = strings.Join(lines[:15], "\n")
-			preview += fmt.Sprintf("\n... (+%d more lines)", len(lines)-15)
+		lines := strings.Split(m.result, "\n")
+		viewportHeight := m.height/2 - 4
+		if viewportHeight < 5 {
+			viewportHeight = 5
 		}
-		b.WriteString(styleNormal.Render(preview))
+		start := m.resultScroll
+		if start > len(lines) {
+			start = len(lines)
+		}
+		end := start + viewportHeight
+		if end > len(lines) {
+			end = len(lines)
+		}
+		visible := lines[start:end]
+		b.WriteString(styleNormal.Render(strings.Join(visible, "\n")))
+		if end < len(lines) {
+			b.WriteString("\n" + styleMuted.Render(fmt.Sprintf("... (+%d more lines, j/k to scroll)", len(lines)-end)))
+		}
 		b.WriteString("\n\n")
 
-		help := styleMuted.Render("Enter/y: insert into note | Esc/n: dismiss")
+		help := styleMuted.Render("Enter/y: insert | Esc/n: dismiss | j/k: scroll")
 		b.WriteString(help)
 	} else if m.loading {
 		action := aiAssistActions[m.cursor].label

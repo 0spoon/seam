@@ -84,7 +84,7 @@ func (s *SQLStore) Create(ctx context.Context, db DBTX, n *Note) error {
 }
 
 // Get retrieves a note by ID, including its tags.
-func (s *SQLStore) Get(ctx context.Context, db *sql.DB, id string) (*Note, error) {
+func (s *SQLStore) Get(ctx context.Context, db DBTX, id string) (*Note, error) {
 	n, err := s.scanNote(db.QueryRowContext(ctx,
 		`SELECT id, title, project_id, file_path, body, content_hash,
 		 source_url, transcript_source, created_at, updated_at
@@ -106,7 +106,7 @@ func (s *SQLStore) Get(ctx context.Context, db *sql.DB, id string) (*Note, error
 }
 
 // GetByFilePath retrieves a note by its file path.
-func (s *SQLStore) GetByFilePath(ctx context.Context, db *sql.DB, filePath string) (*Note, error) {
+func (s *SQLStore) GetByFilePath(ctx context.Context, db DBTX, filePath string) (*Note, error) {
 	n, err := s.scanNote(db.QueryRowContext(ctx,
 		`SELECT id, title, project_id, file_path, body, content_hash,
 		 source_url, transcript_source, created_at, updated_at
@@ -128,15 +128,16 @@ func (s *SQLStore) GetByFilePath(ctx context.Context, db *sql.DB, filePath strin
 }
 
 // List returns notes matching the filter along with the total count.
-func (s *SQLStore) List(ctx context.Context, db *sql.DB, filter NoteFilter) ([]*Note, int, error) {
+func (s *SQLStore) List(ctx context.Context, db DBTX, filter NoteFilter) ([]*Note, int, error) {
 	var where []string
 	var args []interface{}
 
+	// C-35: ProjectID and InboxOnly are mutually exclusive. If both are
+	// set, ProjectID takes precedence (inbox notes have no project).
 	if filter.ProjectID != "" {
 		where = append(where, "n.project_id = ?")
 		args = append(args, filter.ProjectID)
-	}
-	if filter.InboxOnly {
+	} else if filter.InboxOnly {
 		where = append(where, "n.project_id IS NULL")
 	}
 	if filter.Tag != "" {
@@ -217,13 +218,9 @@ func (s *SQLStore) List(ctx context.Context, db *sql.DB, filter NoteFilter) ([]*
 		return nil, 0, fmt.Errorf("note.SQLStore.List: rows: %w", err)
 	}
 
-	// Load tags for each note.
-	for _, n := range notes {
-		tags, err := s.loadTags(ctx, db, n.ID)
-		if err != nil {
-			return nil, 0, fmt.Errorf("note.SQLStore.List: load tags: %w", err)
-		}
-		n.Tags = tags
+	// Batch-load tags for all notes in a single query (avoids N+1).
+	if err := s.loadAllTags(ctx, db, notes); err != nil {
+		return nil, 0, fmt.Errorf("note.SQLStore.List: load tags: %w", err)
 	}
 
 	return notes, total, nil
@@ -273,7 +270,7 @@ func (s *SQLStore) Delete(ctx context.Context, db DBTX, id string) error {
 }
 
 // GetBacklinks returns all notes that link to the given note ID.
-func (s *SQLStore) GetBacklinks(ctx context.Context, db *sql.DB, noteID string) ([]*Note, error) {
+func (s *SQLStore) GetBacklinks(ctx context.Context, db DBTX, noteID string) ([]*Note, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT n.id, n.title, n.project_id, n.file_path, n.body, n.content_hash,
 		 n.source_url, n.transcript_source, n.created_at, n.updated_at
@@ -349,10 +346,13 @@ func (s *SQLStore) ResolveLink(ctx context.Context, db DBTX, linkText string) (s
 		return "", fmt.Errorf("note.SQLStore.ResolveLink: title: %w", err)
 	}
 
-	// Step 2: filename match (file_path ends with "/{linkText}.md").
-	pattern := "%" + escapeLIKE(linkText) + ".md"
+	// Step 2: filename match (file_path is exactly "linkText.md" or ends
+	// with "/linkText.md"). Two conditions with OR prevent false matches
+	// like "something-linkText.md".
+	escaped := escapeLIKE(linkText)
 	err = db.QueryRowContext(ctx,
-		`SELECT id FROM notes WHERE LOWER(file_path) LIKE LOWER(?) ESCAPE '\' LIMIT 1`, pattern,
+		`SELECT id FROM notes WHERE (LOWER(file_path) = LOWER(?) OR LOWER(file_path) LIKE LOWER(?) ESCAPE '\') LIMIT 1`,
+		escaped+".md", "%/"+escaped+".md",
 	).Scan(&noteID)
 	if err == nil {
 		return noteID, nil
@@ -514,7 +514,7 @@ func (s *SQLStore) UpdateTags(ctx context.Context, db DBTX, noteID string, tags 
 }
 
 // ListTags returns all tags with the count of notes using each.
-func (s *SQLStore) ListTags(ctx context.Context, db *sql.DB) ([]TagCount, error) {
+func (s *SQLStore) ListTags(ctx context.Context, db DBTX) ([]TagCount, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT t.name, COUNT(nt.note_id) as cnt
 		 FROM tags t
@@ -602,8 +602,52 @@ func (s *SQLStore) scanNoteRow(rows *sql.Rows) (*Note, error) {
 	return n, nil
 }
 
+// loadAllTags batch-loads tags for a slice of notes in a single query,
+// replacing the N+1 per-note loadTags pattern.
+func (s *SQLStore) loadAllTags(ctx context.Context, db DBTX, notes []*Note) error {
+	if len(notes) == 0 {
+		return nil
+	}
+
+	// Build note ID index and IN-clause placeholders.
+	placeholders := make([]string, len(notes))
+	args := make([]interface{}, len(notes))
+	noteIndex := make(map[string]int, len(notes))
+	for i, n := range notes {
+		placeholders[i] = "?"
+		args[i] = n.ID
+		noteIndex[n.ID] = i
+	}
+
+	query := fmt.Sprintf(
+		`SELECT nt.note_id, t.name
+		 FROM note_tags nt
+		 JOIN tags t ON t.id = nt.tag_id
+		 WHERE nt.note_id IN (%s)
+		 ORDER BY t.name`,
+		strings.Join(placeholders, ","),
+	)
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("note.SQLStore.loadAllTags: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var noteID, tagName string
+		if err := rows.Scan(&noteID, &tagName); err != nil {
+			return fmt.Errorf("note.SQLStore.loadAllTags: scan: %w", err)
+		}
+		if idx, ok := noteIndex[noteID]; ok {
+			notes[idx].Tags = append(notes[idx].Tags, tagName)
+		}
+	}
+	return rows.Err()
+}
+
 // loadTags loads all tag names for a note.
-func (s *SQLStore) loadTags(ctx context.Context, db *sql.DB, noteID string) ([]string, error) {
+func (s *SQLStore) loadTags(ctx context.Context, db DBTX, noteID string) ([]string, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT t.name FROM tags t
 		 JOIN note_tags nt ON nt.tag_id = t.id

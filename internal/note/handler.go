@@ -137,14 +137,20 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	filter.SortDir = sortDir
 
 	if since := r.URL.Query().Get("since"); since != "" {
-		if t, err := time.Parse(time.RFC3339, since); err == nil {
-			filter.Since = t
+		t, err := time.Parse(time.RFC3339, since)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid 'since' format, expected RFC3339")
+			return
 		}
+		filter.Since = t
 	}
 	if until := r.URL.Query().Get("until"); until != "" {
-		if t, err := time.Parse(time.RFC3339, until); err == nil {
-			filter.Until = t
+		t, err := time.Parse(time.RFC3339, until)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid 'until' format, expected RFC3339")
+			return
 		}
+		filter.Until = t
 	}
 
 	// Default limit is 100, max is 500.
@@ -280,26 +286,12 @@ func (h *Handler) backlinks(w http.ResponseWriter, r *http.Request) {
 
 	noteID := chi.URLParam(r, "id")
 
-	db, err := h.service.userDBManager.Open(r.Context(), userID)
+	notes, err := h.service.GetBacklinks(r.Context(), userID, noteID)
 	if err != nil {
-		h.logger.Error("backlinks: open db failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
-		return
-	}
-
-	// Verify note exists.
-	if _, err := h.service.store.Get(r.Context(), db, noteID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeError(w, http.StatusNotFound, "note not found")
 			return
 		}
-		h.logger.Error("backlinks: get note failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
-		return
-	}
-
-	notes, err := h.service.store.GetBacklinks(r.Context(), db, noteID)
-	if err != nil {
 		h.logger.Error("get backlinks failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -326,14 +318,7 @@ func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	db, err := h.service.userDBManager.Open(r.Context(), userID)
-	if err != nil {
-		h.logger.Error("open user db failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
-		return
-	}
-
-	tags, err := h.service.store.ListTags(r.Context(), db)
+	tags, err := h.service.ListTags(r.Context(), userID)
 	if err != nil {
 		h.logger.Error("list tags failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
@@ -351,7 +336,9 @@ func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("note.writeJSON: encode error", "error", err)
+	}
 }
 
 // writeError writes a JSON error response.

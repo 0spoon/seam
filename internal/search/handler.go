@@ -52,6 +52,9 @@ func (h *Handler) searchFTS(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	if limit > 500 {
+		limit = 500
+	}
 
 	offset := 0
 	if v := r.URL.Query().Get("offset"); v != "" {
@@ -112,7 +115,9 @@ func (h *Handler) searchSemantic(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("search.writeJSON: encode error", "error", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

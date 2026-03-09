@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,9 +69,20 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// Set up structured logging.
+	// Set up structured logging with configurable level.
+	var logLevel slog.Level
+	switch strings.ToLower(cfg.LogLevel) {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
 
@@ -92,6 +105,9 @@ func run() error {
 		cfg.UserDB.EvictionTimeout.Duration,
 		logger,
 	)
+	// NOTE: userDBMgr.CloseAll is deferred here but watcher.Close and
+	// aiQueue shutdown are deferred AFTER this (below), so in LIFO order
+	// the watcher and AI queue stop before the DBs are closed.
 	defer userDBMgr.CloseAll()
 
 	// Set up context with signal handling for graceful shutdown.
@@ -139,6 +155,26 @@ func run() error {
 	noteSvc := note.NewService(noteStore, projectStore, userDBMgr, nil, logger) // suppressor set below
 	noteHandler := note.NewHandler(noteSvc, logger)
 
+	// C-19: Wire frontmatter updater so project cascade-to-inbox clears
+	// the project field from YAML frontmatter on disk.
+	projectSvc.SetFrontmatterUpdater(func(notesDir, filePath string) error {
+		absPath := filepath.Join(notesDir, filePath)
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			return err
+		}
+		fm, body, err := note.ParseFrontmatter(string(data))
+		if err != nil {
+			return err
+		}
+		fm.Project = ""
+		content, err := note.SerializeFrontmatter(fm, body)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(absPath, []byte(content), 0o644)
+	})
+
 	// Create search components.
 	ftsStore := search.NewFTSStore()
 	searchSvc := search.NewService(ftsStore, userDBMgr, logger)
@@ -176,6 +212,8 @@ func run() error {
 
 	var aiHandler *ai.Handler
 	var aiQueue *ai.Queue
+	var chatSvc *ai.ChatService
+	var synthSvc *ai.Synthesizer
 
 	// Create WebSocket hub.
 	hub := ws.NewHub(logger)
@@ -190,15 +228,15 @@ func run() error {
 	if cfg.ChromaDBURL != "" {
 		chromaClient = ai.NewChromaClient(cfg.ChromaDBURL)
 		embedder = ai.NewEmbedder(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
-		chatSvc := ai.NewChatService(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
-		synthesizer := ai.NewSynthesizer(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
+		chatSvc = ai.NewChatService(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
+		synthSvc = ai.NewSynthesizer(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
 		linker := ai.NewAutoLinker(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Background, hub, logger)
 
 		// Register task handlers.
 		aiQueue.RegisterHandler(ai.TaskTypeEmbed, embedder.HandleEmbedTask)
 		aiQueue.RegisterHandler(ai.TaskTypeDeleteEmbed, embedder.HandleDeleteEmbedTask)
 		aiQueue.RegisterHandler(ai.TaskTypeChat, chatSvc.HandleChatTask)
-		aiQueue.RegisterHandler(ai.TaskTypeSynthesize, synthesizer.HandleSynthesizeTask)
+		aiQueue.RegisterHandler(ai.TaskTypeSynthesize, synthSvc.HandleSynthesizeTask)
 		aiQueue.RegisterHandler(ai.TaskTypeAutolink, linker.HandleAutolinkTask)
 
 		// Create AI writer (uses chat model for writing assist).
@@ -226,7 +264,7 @@ func run() error {
 		semanticSearcher := search.NewSemanticSearcher(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
 		searchSvc.SetSemanticSearcher(semanticSearcher)
 
-		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthesizer, linker, embedder, aiWriter, userDBMgr, logger)
+		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthSvc, linker, embedder, aiWriter, userDBMgr, logger)
 		logger.Info("AI features enabled", "ollama_url", cfg.OllamaBaseURL, "chromadb_url", cfg.ChromaDBURL)
 	} else {
 		// Even without ChromaDB, writer can work with just Ollama.
@@ -303,24 +341,29 @@ func run() error {
 		hub.Send(uid, ws.Message{Type: ws.MsgTypeNoteChanged, Payload: payload})
 
 		// Enqueue embedding tasks if AI is enabled.
+		// C-32: Log enqueue errors instead of silently discarding them.
 		if embedder != nil && aiQueue != nil {
 			switch changeType {
 			case "created", "modified":
 				embedPayload, _ := json.Marshal(ai.EmbedPayload{NoteID: noteID})
-				aiQueue.Enqueue(fctx, &ai.Task{
+				if err := aiQueue.Enqueue(fctx, &ai.Task{
 					UserID:   uid,
 					Type:     ai.TaskTypeEmbed,
 					Priority: ai.PriorityBackground,
 					Payload:  embedPayload,
-				})
+				}); err != nil {
+					logger.Warn("failed to enqueue embed task", "note_id", noteID, "error", err)
+				}
 			case "deleted":
 				deletePayload, _ := json.Marshal(ai.DeleteEmbedPayload{NoteID: noteID})
-				aiQueue.Enqueue(fctx, &ai.Task{
+				if err := aiQueue.Enqueue(fctx, &ai.Task{
 					UserID:   uid,
 					Type:     ai.TaskTypeDeleteEmbed,
 					Priority: ai.PriorityBackground,
 					Payload:  deletePayload,
-				})
+				}); err != nil {
+					logger.Warn("failed to enqueue delete embed task", "note_id", noteID, "error", err)
+				}
 			}
 		}
 
@@ -331,6 +374,8 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create watcher: %w", err)
 	}
+	// Deferred after userDBMgr.CloseAll, so in LIFO order the watcher
+	// closes before user databases are closed.
 	defer w.Close()
 
 	// Wire the watcher as the note service's write suppressor.
@@ -367,21 +412,27 @@ func run() error {
 	}()
 
 	// Start AI task queue (load pending tasks, then run workers).
+	// aiQueueDone is closed when the queue workers finish, so the shutdown
+	// sequence can wait for in-flight tasks before closing databases.
+	aiQueueDone := make(chan struct{})
 	if aiQueue != nil {
 		if err := aiQueue.LoadPending(ctx); err != nil {
 			logger.Warn("failed to load pending AI tasks", "error", err)
 		}
 		go func() {
+			defer close(aiQueueDone)
 			if err := aiQueue.Run(ctx); err != nil {
 				logger.Error("AI queue stopped", "error", err)
 			}
 		}()
+	} else {
+		close(aiQueueDone)
 	}
 
-	// Build WebSocket message handler for chat.ask.
+	// Build WebSocket message handler for chat.ask and synthesize.stream.
+	// Reuses the chatSvc and synthSvc created in the ChromaDB block above.
 	var wsHandler ws.MessageHandler
-	if cfg.ChromaDBURL != "" && chromaClient != nil {
-		chatSvc := ai.NewChatService(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
+	if cfg.ChromaDBURL != "" && chatSvc != nil {
 		wsHandler = func(fctx context.Context, h *ws.Hub, conn *websocket.Conn, uid string, msg ws.Message) {
 			switch msg.Type {
 			case ws.MsgTypeChatAsk:
@@ -393,19 +444,42 @@ func run() error {
 					return
 				}
 
+				// Validate history message roles before streaming.
+				for _, m := range payload.History {
+					if m.Role != "user" && m.Role != "assistant" {
+						errPayload, _ := json.Marshal(map[string]string{"error": "invalid message role in history"})
+						data, _ := json.Marshal(ws.Message{
+							Type:    ws.MsgTypeChatDone,
+							Payload: errPayload,
+						})
+						writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						conn.Write(writeCtx, websocket.MessageText, data)
+						cancel()
+						return
+					}
+				}
+
 				tokenCh, citations, errCh := chatSvc.AskStream(fctx, uid, payload.Query, payload.History)
 
 				// Stream tokens to client.
 				go func() {
+					writeFailed := false
 					for token := range tokenCh {
+						if writeFailed {
+							continue // drain channel
+						}
 						tokenPayload, _ := json.Marshal(map[string]string{"token": token})
 						data, _ := json.Marshal(ws.Message{
 							Type:    ws.MsgTypeChatStream,
 							Payload: tokenPayload,
 						})
 						writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-						conn.Write(writeCtx, websocket.MessageText, data)
+						err := conn.Write(writeCtx, websocket.MessageText, data)
 						cancel()
+						if err != nil {
+							logger.Debug("chat stream write failed, stopping", "error", err)
+							writeFailed = true
+						}
 					}
 
 					// Check for errors.
@@ -415,10 +489,65 @@ func run() error {
 						}
 					}
 
+					if writeFailed {
+						return
+					}
+
 					// Send done message with citations.
 					donePayload, _ := json.Marshal(map[string]interface{}{"citations": citations})
 					data, _ := json.Marshal(ws.Message{
 						Type:    ws.MsgTypeChatDone,
+						Payload: donePayload,
+					})
+					writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					conn.Write(writeCtx, websocket.MessageText, data)
+					cancel()
+				}()
+
+			case "synthesize.stream":
+				var payload ai.SynthesizePayload
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					return
+				}
+				if payload.Scope == "" || payload.Prompt == "" {
+					return
+				}
+
+				tokenCh, errCh := synthSvc.SynthesizeStream(fctx, uid, payload)
+
+				go func() {
+					writeFailed := false
+					for token := range tokenCh {
+						if writeFailed {
+							continue // drain channel
+						}
+						tokenPayload, _ := json.Marshal(map[string]string{"token": token})
+						data, _ := json.Marshal(ws.Message{
+							Type:    "synthesize.token",
+							Payload: tokenPayload,
+						})
+						writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						err := conn.Write(writeCtx, websocket.MessageText, data)
+						cancel()
+						if err != nil {
+							logger.Debug("synthesize stream write failed, stopping", "error", err)
+							writeFailed = true
+						}
+					}
+
+					for err := range errCh {
+						if err != nil {
+							logger.Error("synthesize stream error", "error", err)
+						}
+					}
+
+					if writeFailed {
+						return
+					}
+
+					donePayload, _ := json.Marshal(map[string]string{})
+					data, _ := json.Marshal(ws.Message{
+						Type:    "synthesize.done",
 						Payload: donePayload,
 					})
 					writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -438,6 +567,8 @@ func run() error {
 		Logger:           logger,
 		JWTManager:       jwtMgr,
 		Hub:              hub,
+		CORSOrigins:      cfg.CORSOrigins,
+		WebDistDir:       cfg.WebDistDir,
 		AuthHandler:      authHandler,
 		ProjectHandler:   projectHandler,
 		NoteHandler:      noteHandler,
@@ -479,9 +610,12 @@ func run() error {
 	// 2. Close all WebSocket connections with close frames.
 	hub.CloseAll()
 
-	// 3. Stop file watcher (deferred w.Close() handles this).
-	// 4. Close all user databases (deferred userDBMgr.CloseAll() handles this).
-	// 5. Close server database (deferred serverDB.Close() handles this).
+	// 3. Wait for AI queue workers to finish before closing databases.
+	<-aiQueueDone
+
+	// 4. Stop file watcher (deferred w.Close() handles this -- LIFO before DBs).
+	// 5. Close all user databases (deferred userDBMgr.CloseAll() handles this).
+	// 6. Close server database (deferred serverDB.Close() handles this).
 
 	logger.Info("shutdown complete")
 	return nil

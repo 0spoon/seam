@@ -1,2 +1,46 @@
-data/users/*
-data/chromadb/*
+# Binaries
+bin/
+seam
+seamd
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Data / runtime state
+data/users/
+data/chromadb/
+data/server.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Config (keep the example, ignore the real one)
+seam-server.yaml
+
+# Go
+vendor/
+*.test
+cover.out
+coverage.out
+*.prof
+
+# Web / Node (handled mostly by web/.gitignore)
+web/node_modules/
+web/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Misc
+.opencode/
+*.log
+tmp/

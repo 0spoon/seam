@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,30 +11,66 @@ import (
 	"github.com/katata/seam/internal/userdb"
 )
 
+// ErrInvalidRole is returned when a chat history message has an invalid role.
+var ErrInvalidRole = errors.New("invalid message role in history: only 'user' and 'assistant' are allowed")
+
 const maxConversationTurns = 5
+
+// Default chat retrieval parameters.
+const (
+	defaultRetrievalLimit  = 10   // number of ChromaDB chunks to retrieve
+	defaultBodyTruncateLen = 2000 // max note body length for context
+)
 
 // ChatService handles RAG-powered chat using note context.
 type ChatService struct {
-	ollama     *OllamaClient
-	chroma     *ChromaClient
-	dbManager  userdb.Manager
-	embedModel string
-	chatModel  string
-	logger     *slog.Logger
+	ollama          *OllamaClient
+	chroma          *ChromaClient
+	dbManager       userdb.Manager
+	embedModel      string
+	chatModel       string
+	logger          *slog.Logger
+	retrievalLimit  int // number of ChromaDB chunks to retrieve
+	bodyTruncateLen int // max note body chars included in context
 }
 
-// NewChatService creates a new ChatService.
-func NewChatService(ollama *OllamaClient, chroma *ChromaClient, dbManager userdb.Manager, embedModel, chatModel string, logger *slog.Logger) *ChatService {
+// NewChatService creates a new ChatService. Optional configuration functions
+// can be passed to set retrieval limit and body truncation length.
+func NewChatService(ollama *OllamaClient, chroma *ChromaClient, dbManager userdb.Manager, embedModel, chatModel string, logger *slog.Logger, opts ...func(*ChatService)) *ChatService {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ChatService{
-		ollama:     ollama,
-		chroma:     chroma,
-		dbManager:  dbManager,
-		embedModel: embedModel,
-		chatModel:  chatModel,
-		logger:     logger,
+	cs := &ChatService{
+		ollama:          ollama,
+		chroma:          chroma,
+		dbManager:       dbManager,
+		embedModel:      embedModel,
+		chatModel:       chatModel,
+		logger:          logger,
+		retrievalLimit:  defaultRetrievalLimit,
+		bodyTruncateLen: defaultBodyTruncateLen,
+	}
+	for _, opt := range opts {
+		opt(cs)
+	}
+	return cs
+}
+
+// WithRetrievalLimit returns an option that sets the number of chunks to retrieve.
+func WithRetrievalLimit(limit int) func(*ChatService) {
+	return func(cs *ChatService) {
+		if limit > 0 {
+			cs.retrievalLimit = limit
+		}
+	}
+}
+
+// WithBodyTruncateLen returns an option that sets the max body length in context.
+func WithBodyTruncateLen(length int) func(*ChatService) {
+	return func(cs *ChatService) {
+		if length > 0 {
+			cs.bodyTruncateLen = length
+		}
 	}
 }
 
@@ -49,9 +86,25 @@ type noteSnippet struct {
 	Body  string
 }
 
+// validateHistoryRoles checks that all history messages have valid roles
+// (only "user" or "assistant"). Returns ErrInvalidRole if any message has
+// an invalid role, preventing prompt injection via "system" messages.
+func validateHistoryRoles(history []ChatMessage) error {
+	for _, msg := range history {
+		if msg.Role != "user" && msg.Role != "assistant" {
+			return ErrInvalidRole
+		}
+	}
+	return nil
+}
+
 // Ask handles a chat question by retrieving relevant notes and generating
 // a response grounded in the user's knowledge base.
 func (c *ChatService) Ask(ctx context.Context, userID, query string, history []ChatMessage) (*ChatResult, error) {
+	if err := validateHistoryRoles(history); err != nil {
+		return nil, fmt.Errorf("ai.ChatService.Ask: %w", err)
+	}
+
 	contexts, citations, err := c.retrieveContext(ctx, userID, query)
 	if err != nil {
 		return nil, err
@@ -75,6 +128,13 @@ func (c *ChatService) Ask(ctx context.Context, userID, query string, history []C
 func (c *ChatService) AskStream(ctx context.Context, userID, query string, history []ChatMessage) (<-chan string, []string, <-chan error) {
 	tokenCh := make(chan string, 64)
 	errCh := make(chan error, 1)
+
+	if err := validateHistoryRoles(history); err != nil {
+		close(tokenCh)
+		errCh <- fmt.Errorf("ai.ChatService.AskStream: %w", err)
+		close(errCh)
+		return tokenCh, nil, errCh
+	}
 
 	contexts, citations, err := c.retrieveContext(ctx, userID, query)
 	if err != nil {
@@ -123,7 +183,7 @@ func (c *ChatService) retrieveContext(ctx context.Context, userID, query string)
 		return nil, nil, fmt.Errorf("ai.ChatService.retrieveContext: get collection: %w", err)
 	}
 
-	chromaResults, err := c.chroma.Query(ctx, colID, queryEmbedding, 10)
+	chromaResults, err := c.chroma.Query(ctx, colID, queryEmbedding, c.retrievalLimit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ai.ChatService.retrieveContext: query chroma: %w", err)
 	}
@@ -153,8 +213,8 @@ func (c *ChatService) retrieveContext(ctx context.Context, userID, query string)
 		}
 
 		// Truncate long bodies to avoid blowing up context window.
-		if len(body) > 2000 {
-			body = body[:2000] + "..."
+		if len(body) > c.bodyTruncateLen {
+			body = body[:c.bodyTruncateLen] + "..."
 		}
 
 		contexts = append(contexts, noteSnippet{Title: title, Body: body})

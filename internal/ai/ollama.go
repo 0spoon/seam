@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -216,7 +217,9 @@ func (c *OllamaClient) ChatCompletionStream(ctx context.Context, model string, m
 			}
 			var chunk ollamaChatResponse
 			if err := json.Unmarshal(line, &chunk); err != nil {
-				continue // skip malformed lines
+				slog.Warn("ai.OllamaClient.ChatCompletionStream: malformed JSON line",
+					"error", err, "line", string(line[:min(len(line), 200)]))
+				continue
 			}
 			if chunk.Message.Content != "" {
 				select {

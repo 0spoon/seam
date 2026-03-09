@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
+import { motion } from 'motion/react';
+import { Loader2 } from 'lucide-react';
 import {
   Bold,
   Italic,
@@ -24,6 +26,7 @@ import {
 import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useToastStore } from '../../components/Toast/ToastContainer';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { getRelatedNotes, aiAssist, getTwoHopBacklinks } from '../../api/client';
 import { renderMarkdown } from '../../lib/markdown';
@@ -57,6 +60,7 @@ export function NoteEditorPage() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('split');
   const [content, setContent] = useState('');
+  const [noteLoading, setNoteLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const [showMenu, setShowMenu] = useState(false);
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
@@ -64,22 +68,44 @@ export function NoteEditorPage() {
   const [twoHopBacklinks, setTwoHopBacklinks] = useState<TwoHopBacklink[]>([]);
   const [isOrphan, setIsOrphan] = useState(false);
   const [showAIMenu, setShowAIMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const aiMenuRef = useRef<HTMLDivElement>(null);
+  const addToast = useToastStore((s) => s.addToast);
   const [aiLoading, setAILoading] = useState(false);
   const [aiResult, setAIResult] = useState<{ action: string; text: string } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const contentRef = useRef('');
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let aborted = false;
     if (id) {
-      fetchNote(id);
+      // Clear previous content and show loading when switching notes.
+      setNoteLoading(true);
+      setContent('');
+      contentRef.current = '';
+
+      fetchNote(id).finally(() => {
+        if (!aborted) setNoteLoading(false);
+      });
       fetchBacklinks(id);
       // Fetch related notes (semantic similarity).
-      getRelatedNotes(id).then(setRelatedNotes).catch(() => setRelatedNotes([]));
+      getRelatedNotes(id).then((data) => {
+        if (!aborted) setRelatedNotes(data);
+      }).catch(() => {
+        if (!aborted) setRelatedNotes([]);
+      });
       // Fetch two-hop backlinks.
-      getTwoHopBacklinks(id).then(setTwoHopBacklinks).catch(() => setTwoHopBacklinks([]));
+      getTwoHopBacklinks(id).then((data) => {
+        if (!aborted) setTwoHopBacklinks(data);
+      }).catch(() => {
+        if (!aborted) setTwoHopBacklinks([]);
+      });
       // Orphan status is computed from backlinks and content below.
     }
     return () => {
+      aborted = true;
       clearCurrentNote();
       setLinkSuggestions([]);
       setRelatedNotes([]);
@@ -116,6 +142,7 @@ export function NoteEditorPage() {
   useEffect(() => {
     if (currentNote) {
       setContent(currentNote.body);
+      contentRef.current = currentNote.body;
       setSaveStatus('saved');
     }
   }, [currentNote?.id]); // Only reset content on note change, not on every update
@@ -133,6 +160,7 @@ export function NoteEditorPage() {
 
   const handleChange = useCallback((value: string) => {
     setContent(value);
+    contentRef.current = value;
     setSaveStatus('unsaved');
 
     if (saveTimerRef.current) {
@@ -143,20 +171,26 @@ export function NoteEditorPage() {
     }, 1000);
   }, [handleSave]);
 
-  // Cleanup save timer on unmount
+  // Cleanup save timer on unmount -- flush any pending save.
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
+        // Flush the pending save with the latest content.
+        handleSave(contentRef.current);
       }
     };
-  }, []);
+  }, [handleSave]);
 
   const handleDelete = async () => {
     if (!id) return;
     if (window.confirm('Delete this note? This cannot be undone.')) {
-      await deleteNote(id);
-      navigate('/');
+      try {
+        await deleteNote(id);
+        navigate('/');
+      } catch {
+        // Error is surfaced via noteStore.error
+      }
     }
     setShowMenu(false);
   };
@@ -274,12 +308,13 @@ export function NoteEditorPage() {
       const selection = getSelectedText();
       const result = await aiAssist(id, action, selection || undefined);
       setAIResult({ action, text: result.result });
-    } catch {
-      // Failed silently -- could add error state here
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'AI assist request failed';
+      addToast(message, 'error');
     } finally {
       setAILoading(false);
     }
-  }, [id, getSelectedText]);
+  }, [id, getSelectedText, addToast]);
 
   const handleInsertAIResult = useCallback(() => {
     if (!aiResult) return;
@@ -306,6 +341,55 @@ export function NoteEditorPage() {
   const handleDismissAIResult = useCallback(() => {
     setAIResult(null);
   }, []);
+
+  // Close dropdown menus on outside click or Escape key.
+  useEffect(() => {
+    if (!showMenu && !showAIMenu) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showMenu && menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+      if (showAIMenu && aiMenuRef.current && !aiMenuRef.current.contains(e.target as Node)) {
+        setShowAIMenu(false);
+      }
+    };
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowMenu(false);
+        setShowAIMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showMenu, showAIMenu]);
+
+  // Handle wikilink clicks in the preview pane.
+  useEffect(() => {
+    const container = previewRef.current;
+    if (!container) return;
+
+    const handleClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest('a[data-wikilink]');
+      if (!anchor) return;
+      e.preventDefault();
+      const target = anchor.getAttribute('data-wikilink');
+      if (target) {
+        navigate(`/search?q=${encodeURIComponent(target)}`);
+      }
+    };
+
+    container.addEventListener('click', handleClick);
+    return () => {
+      container.removeEventListener('click', handleClick);
+    };
+  }, [navigate, viewMode]);
 
   const renderedHtml = useMemo(
     () => (viewMode === 'editor' ? '' : sanitizeHtml(renderMarkdown(content))),
@@ -344,20 +428,23 @@ export function NoteEditorPage() {
 
           <div className={styles.toolbarSeparator} />
 
-          <div className={styles.menuContainer}>
+          <div className={styles.menuContainer} ref={aiMenuRef}>
             <button
               className={`${styles.toolButton} ${aiLoading ? styles.activeView : ''}`}
               onClick={() => setShowAIMenu(!showAIMenu)}
               title="AI Assist"
               aria-label="AI Assist"
+              aria-expanded={showAIMenu}
+              aria-haspopup="menu"
               disabled={aiLoading}
             >
               <Sparkles size={16} />
             </button>
             {showAIMenu && (
-              <div className={styles.menu}>
+              <div className={styles.menu} role="menu">
                 <button
                   className={styles.menuItemDefault}
+                  role="menuitem"
                   onClick={() => handleAIAssist('expand')}
                 >
                   <Sparkles size={14} />
@@ -365,6 +452,7 @@ export function NoteEditorPage() {
                 </button>
                 <button
                   className={styles.menuItemDefault}
+                  role="menuitem"
                   onClick={() => handleAIAssist('summarize')}
                 >
                   <Sparkles size={14} />
@@ -372,6 +460,7 @@ export function NoteEditorPage() {
                 </button>
                 <button
                   className={styles.menuItemDefault}
+                  role="menuitem"
                   onClick={() => handleAIAssist('extract-actions')}
                 >
                   <ListChecks size={14} />
@@ -419,18 +508,20 @@ export function NoteEditorPage() {
             <PanelRight size={16} />
           </button>
 
-          <div className={styles.menuContainer}>
+          <div className={styles.menuContainer} ref={menuRef}>
             <button
               className={styles.toolButton}
               onClick={() => setShowMenu(!showMenu)}
               title="More options"
               aria-label="More options"
+              aria-expanded={showMenu}
+              aria-haspopup="menu"
             >
               <MoreHorizontal size={16} />
             </button>
             {showMenu && (
-              <div className={styles.menu}>
-                <button className={styles.menuItem} onClick={handleDelete}>
+              <div className={styles.menu} role="menu">
+                <button className={styles.menuItem} role="menuitem" onClick={handleDelete}>
                   <Trash2 size={14} />
                   Delete note
                 </button>
@@ -442,6 +533,12 @@ export function NoteEditorPage() {
 
       {/* Content area */}
       <div className={styles.contentArea}>
+        {noteLoading ? (
+          <div className={styles.noteLoadingState}>
+            <Loader2 size={24} className={styles.noteLoadingSpinner} />
+            <span className={styles.noteLoadingText}>Loading note...</span>
+          </div>
+        ) : (<>
         <div className={styles.editorWrapper}>
           {/* Editor pane */}
           {viewMode !== 'preview' && (
@@ -473,6 +570,7 @@ export function NoteEditorPage() {
           {/* Preview pane */}
           {viewMode !== 'editor' && (
             <div
+              ref={previewRef}
               className={styles.previewPane}
               style={{ flex: viewMode === 'split' ? '1' : undefined }}
             >
@@ -573,17 +671,23 @@ export function NoteEditorPage() {
               {relatedNotes.length === 0 ? (
                 <p className={styles.panelEmpty}>No related notes</p>
               ) : (
-                relatedNotes.map((note) => (
-                  <button
+                relatedNotes.map((note, i) => (
+                  <motion.div
                     key={note.note_id}
-                    className={styles.backlinkItem}
-                    onClick={() => navigate(`/notes/${note.note_id}`)}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.25, delay: i * 0.03, ease: [0.16, 1, 0.3, 1] }}
                   >
-                    <span className={styles.backlinkTitle}>{note.title}</span>
-                    <span className={styles.backlinkMeta}>
-                      {Math.round(note.score * 100)}% similar
-                    </span>
-                  </button>
+                    <button
+                      className={styles.backlinkItem}
+                      onClick={() => navigate(`/notes/${note.note_id}`)}
+                    >
+                      <span className={styles.backlinkTitle}>{note.title}</span>
+                      <span className={styles.backlinkMeta}>
+                        {Math.round(note.score * 100)}% similar
+                      </span>
+                    </button>
+                  </motion.div>
                 ))
               )}
             </section>
@@ -594,17 +698,23 @@ export function NoteEditorPage() {
               {backlinks.length === 0 ? (
                 <p className={styles.panelEmpty}>No backlinks</p>
               ) : (
-                backlinks.map((note) => (
-                  <button
+                backlinks.map((note, i) => (
+                  <motion.div
                     key={note.id}
-                    className={styles.backlinkItem}
-                    onClick={() => navigate(`/notes/${note.id}`)}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.25, delay: i * 0.03, ease: [0.16, 1, 0.3, 1] }}
                   >
-                    <span className={styles.backlinkTitle}>{note.title}</span>
-                    <span className={styles.backlinkMeta}>
-                      {timeAgo(note.updated_at)}
-                    </span>
-                  </button>
+                    <button
+                      className={styles.backlinkItem}
+                      onClick={() => navigate(`/notes/${note.id}`)}
+                    >
+                      <span className={styles.backlinkTitle}>{note.title}</span>
+                      <span className={styles.backlinkMeta}>
+                        {timeAgo(note.updated_at)}
+                      </span>
+                    </button>
+                  </motion.div>
                 ))
               )}
             </section>
@@ -710,6 +820,7 @@ export function NoteEditorPage() {
             </section>
           </aside>
         )}
+        </>)}
       </div>
 
       {/* Save status */}

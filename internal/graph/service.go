@@ -272,6 +272,8 @@ func (s *Service) GetTwoHopBacklinks(ctx context.Context, userID, noteID string)
 }
 
 // GetOrphanNotes returns notes with no incoming or outgoing links.
+// C-26: Now includes project names (LEFT JOIN) and batch-loads tags.
+// C-28: Limits results to 500 to prevent unbounded queries.
 func (s *Service) GetOrphanNotes(ctx context.Context, userID string) ([]Node, error) {
 	db, err := s.dbManager.Open(ctx, userID)
 	if err != nil {
@@ -279,14 +281,16 @@ func (s *Service) GetOrphanNotes(ctx context.Context, userID string) ([]Node, er
 	}
 
 	rows, err := db.QueryContext(ctx,
-		`SELECT n.id, n.title, n.project_id, n.created_at
+		`SELECT n.id, n.title, n.project_id, p.name, n.created_at
 		 FROM notes n
+		 LEFT JOIN projects p ON p.id = n.project_id
 		 WHERE n.id NOT IN (
 		     SELECT DISTINCT source_note_id FROM links WHERE target_note_id IS NOT NULL
 		     UNION
 		     SELECT DISTINCT target_note_id FROM links WHERE target_note_id IS NOT NULL
 		 )
-		 ORDER BY n.title`)
+		 ORDER BY n.title
+		 LIMIT 500`)
 	if err != nil {
 		return nil, fmt.Errorf("graph.Service.GetOrphanNotes: %w", err)
 	}
@@ -296,13 +300,24 @@ func (s *Service) GetOrphanNotes(ctx context.Context, userID string) ([]Node, er
 	for rows.Next() {
 		var n Node
 		var projectID sql.NullString
+		var projectName sql.NullString
 		var createdAt string
-		if err := rows.Scan(&n.ID, &n.Title, &projectID, &createdAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.Title, &projectID, &projectName, &createdAt); err != nil {
 			return nil, fmt.Errorf("graph.Service.GetOrphanNotes: scan: %w", err)
 		}
 		n.ProjectID = projectID.String
+		n.ProjectName = projectName.String
 		n.CreatedAt = createdAt
 		nodes = append(nodes, n)
 	}
-	return nodes, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("graph.Service.GetOrphanNotes: rows: %w", err)
+	}
+
+	// Batch-load tags for all orphan nodes.
+	if err := s.loadAllNodeTags(ctx, db, nodes); err != nil {
+		return nil, fmt.Errorf("graph.Service.GetOrphanNotes: %w", err)
+	}
+
+	return nodes, nil
 }

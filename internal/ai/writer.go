@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/katata/seam/internal/userdb"
 )
@@ -44,6 +45,7 @@ type NoteBodyUpdater interface {
 
 // Writer provides AI writing assistance: expand, summarize, extract action items.
 type Writer struct {
+	mu          sync.RWMutex
 	ollama      *OllamaClient
 	bodyLoader  NoteBodyLoader
 	bodyUpdater NoteBodyUpdater
@@ -67,12 +69,30 @@ func NewWriter(ollama *OllamaClient, dbManager userdb.Manager, model string, log
 
 // SetNoteBodyLoader sets the loader for reading note bodies.
 func (w *Writer) SetNoteBodyLoader(loader NoteBodyLoader) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.bodyLoader = loader
 }
 
 // SetNoteBodyUpdater sets the updater for writing note bodies.
 func (w *Writer) SetNoteBodyUpdater(updater NoteBodyUpdater) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.bodyUpdater = updater
+}
+
+// getBodyLoader returns the current body loader under read lock.
+func (w *Writer) getBodyLoader() NoteBodyLoader {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.bodyLoader
+}
+
+// getBodyUpdater returns the current body updater under read lock.
+func (w *Writer) getBodyUpdater() NoteBodyUpdater {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.bodyUpdater
 }
 
 // Assist performs a writing assist action on the given text.
@@ -84,8 +104,9 @@ func (w *Writer) Assist(ctx context.Context, userID, noteID, action, selection s
 	if text == "" {
 		// Load the full note body via the NoteBodyLoader interface (if available)
 		// or fall back to direct DB query for backward compatibility.
-		if w.bodyLoader != nil {
-			body, err := w.bodyLoader.LoadNoteBody(ctx, userID, noteID)
+		loader := w.getBodyLoader()
+		if loader != nil {
+			body, err := loader.LoadNoteBody(ctx, userID, noteID)
 			if err != nil {
 				return "", fmt.Errorf("ai.Writer.Assist: %w", err)
 			}
@@ -140,7 +161,12 @@ func (w *Writer) HandleAssistTask(ctx context.Context, task *Task) (json.RawMess
 		return nil, err
 	}
 
-	return marshalResult(map[string]string{"result": result}), nil
+	resultJSON, marshalErr := marshalResult(map[string]string{"result": result})
+	if marshalErr != nil {
+		w.logger.Error("ai.Writer.HandleAssistTask: marshal result failed", "error", marshalErr)
+		return nil, marshalErr
+	}
+	return resultJSON, nil
 }
 
 // HandleSummarizeTranscriptTask processes a "summarize_transcript" task.
@@ -151,10 +177,11 @@ func (w *Writer) HandleSummarizeTranscriptTask(ctx context.Context, task *Task) 
 		return nil, fmt.Errorf("ai.Writer.HandleSummarizeTranscriptTask: %w", err)
 	}
 
+	loader := w.getBodyLoader()
 	var body string
-	if w.bodyLoader != nil {
+	if loader != nil {
 		var loadErr error
-		body, loadErr = w.bodyLoader.LoadNoteBody(ctx, task.UserID, payload.NoteID)
+		body, loadErr = loader.LoadNoteBody(ctx, task.UserID, payload.NoteID)
 		if loadErr != nil {
 			return nil, fmt.Errorf("ai.Writer.HandleSummarizeTranscriptTask: %w", loadErr)
 		}
@@ -172,7 +199,12 @@ func (w *Writer) HandleSummarizeTranscriptTask(ctx context.Context, task *Task) 
 	}
 
 	if body == "" {
-		return marshalResult(map[string]string{"result": ""}), nil
+		emptyResult, marshalErr := marshalResult(map[string]string{"result": ""})
+		if marshalErr != nil {
+			w.logger.Error("ai.Writer.HandleSummarizeTranscriptTask: marshal empty result failed", "error", marshalErr)
+			return nil, marshalErr
+		}
+		return emptyResult, nil
 	}
 
 	messages := []ChatMessage{
@@ -185,28 +217,29 @@ func (w *Writer) HandleSummarizeTranscriptTask(ctx context.Context, task *Task) 
 		return nil, fmt.Errorf("ai.Writer.HandleSummarizeTranscriptTask: %w", err)
 	}
 
-	// Prepend summary to the note body.
+	// Prepend summary to the note body. Use the note service via bodyUpdater
+	// to ensure the .md file on disk (source of truth) is also updated.
 	newBody := fmt.Sprintf("## Summary\n\n%s\n\n---\n\n%s", resp.Content, body)
-	if w.bodyUpdater != nil {
-		if err := w.bodyUpdater.UpdateNoteBody(ctx, task.UserID, payload.NoteID, newBody); err != nil {
+	updater := w.getBodyUpdater()
+	if updater != nil {
+		if err := updater.UpdateNoteBody(ctx, task.UserID, payload.NoteID, newBody); err != nil {
 			return nil, fmt.Errorf("ai.Writer.HandleSummarizeTranscriptTask: update note: %w", err)
 		}
 	} else {
-		db, err := w.dbManager.Open(ctx, task.UserID)
-		if err != nil {
-			return nil, fmt.Errorf("ai.Writer.HandleSummarizeTranscriptTask: open db: %w", err)
-		}
-		_, err = db.ExecContext(ctx,
-			`UPDATE notes SET body = ?, updated_at = datetime('now') WHERE id = ?`,
-			newBody, payload.NoteID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("ai.Writer.HandleSummarizeTranscriptTask: update note: %w", err)
-		}
+		// No updater configured; direct DB writes bypass the note service and
+		// would leave the .md file on disk out of sync. Log and skip.
+		w.logger.Error("ai.Writer.HandleSummarizeTranscriptTask: no NoteBodyUpdater configured, skipping note update",
+			"note_id", payload.NoteID, "user_id", task.UserID)
+		return nil, fmt.Errorf("ai.Writer.HandleSummarizeTranscriptTask: no NoteBodyUpdater configured")
 	}
 
 	w.logger.Info("transcript summarized", "note_id", payload.NoteID, "user_id", task.UserID)
-	return marshalResult(map[string]string{"result": resp.Content}), nil
+	summaryResult, marshalErr := marshalResult(map[string]string{"result": resp.Content})
+	if marshalErr != nil {
+		w.logger.Error("ai.Writer.HandleSummarizeTranscriptTask: marshal result failed", "error", marshalErr)
+		return nil, marshalErr
+	}
+	return summaryResult, nil
 }
 
 const assistSystemPrompt = `You are a writing assistant for a personal knowledge management system. 
@@ -250,7 +283,10 @@ func unmarshalPayload(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
 
-func marshalResult(v interface{}) []byte {
-	b, _ := json.Marshal(v)
-	return b
+func marshalResult(v interface{}) (json.RawMessage, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("ai.marshalResult: %w", err)
+	}
+	return json.RawMessage(b), nil
 }

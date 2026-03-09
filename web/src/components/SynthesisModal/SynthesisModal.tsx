@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { synthesize } from '../../api/client';
 import { renderMarkdown } from '../../lib/markdown';
@@ -20,6 +20,7 @@ export function SynthesisModal({
   title,
   onClose,
 }: SynthesisModalProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState('Summarize the key themes and ideas');
   const [response, setResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -48,6 +49,26 @@ export function SynthesisModal({
     }
   };
 
+  // Focus trap: keep Tab cycling within the modal.
+  const handleFocusTrap = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab') return;
+    const modal = backdropRef.current?.querySelector('[class*="modal"]') as HTMLElement | null;
+    if (!modal) return;
+    const focusable = modal.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
@@ -55,7 +76,7 @@ export function SynthesisModal({
   };
 
   return (
-    <div className={styles.backdrop} onClick={handleBackdropClick}>
+    <div ref={backdropRef} className={styles.backdrop} onClick={handleBackdropClick} onKeyDown={handleFocusTrap}>
       <div className={styles.modal}>
         <div className={styles.header}>
           <h2 className={styles.title}>{title}</h2>

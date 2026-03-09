@@ -45,8 +45,8 @@ auth:
 # AI task queue settings.
 ai:
   queue_workers: 1             # concurrent Ollama requests
-  embedding_timeout: "30s"
-  chat_timeout: "120s"
+  embedding_timeout: "60s"     # per-embedding call timeout (increase for large models)
+  chat_timeout: "5m"           # per-chat call timeout (local models can take several minutes)
 
 # Per-user database manager settings.
 userdb:

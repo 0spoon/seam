@@ -48,6 +48,11 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "username or email already exists")
 			return
 		}
+		if errors.Is(err, ErrValidation) {
+			writeError(w, http.StatusBadRequest, safeRegistrationMessage(err))
+			return
+		}
+		// Keep ErrInvalidCredentials check for backward compatibility.
 		if errors.Is(err, ErrInvalidCredentials) {
 			writeError(w, http.StatusBadRequest, safeRegistrationMessage(err))
 			return
@@ -83,6 +88,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req RefreshReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -104,6 +110,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req LogoutReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -123,7 +130,9 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("auth.writeJSON: encode error", "error", err)
+	}
 }
 
 // writeError writes a JSON error response.

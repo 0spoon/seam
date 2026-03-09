@@ -21,6 +21,7 @@ var (
 	ErrUserExists         = errors.New("user already exists")
 	ErrNotFound           = errors.New("not found")
 	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrValidation         = errors.New("validation error")
 )
 
 // User represents a registered user.
@@ -240,10 +241,15 @@ func OpenServerDB(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("auth.OpenServerDB: foreign keys: %w", err)
 	}
 
-	if _, err := db.Exec(migrations.ServerSQL); err != nil {
+	if err := migrations.Run(db, migrations.ServerMigrations()); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("auth.OpenServerDB: migrations: %w", err)
 	}
+
+	// C-1: Limit open connections to 1 for SQLite. SQLite only supports a
+	// single writer at a time; allowing the Go connection pool to open
+	// multiple connections can lead to SQLITE_BUSY errors under contention.
+	db.SetMaxOpenConns(1)
 
 	return db, nil
 }

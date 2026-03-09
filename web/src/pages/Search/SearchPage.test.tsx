@@ -76,7 +76,7 @@ describe('SearchPage', () => {
 
     await waitFor(
       () => {
-        expect(searchFTS).toHaveBeenCalledWith('API', 20);
+        expect(searchFTS).toHaveBeenCalledWith('API', 20, 0, expect.any(AbortSignal));
       },
       { timeout: 2000 },
     );
@@ -102,7 +102,7 @@ describe('SearchPage', () => {
 
     await waitFor(
       () => {
-        expect(searchSemantic).toHaveBeenCalledWith('caching', 20);
+        expect(searchSemantic).toHaveBeenCalledWith('caching', 20, expect.any(AbortSignal));
       },
       { timeout: 2000 },
     );

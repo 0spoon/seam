@@ -9,14 +9,22 @@
   transition: margin-left var(--duration-normal) var(--ease-out);
 }
 
+.pageTransition {
+  height: 100%;
+}
+
+/* >1024px: full sidebar (260px) -- default styles apply */
+
+/* 640-1024px: collapsed sidebar (icons only, 52px) */
 @media (max-width: 1024px) {
   .main {
-    margin-left: var(--sidebar-collapsed) !important;
+    margin-left: var(--sidebar-collapsed);
   }
 }
 
+/* <640px: sidebar hidden, full-width content */
 @media (max-width: 640px) {
   .main {
-    margin-left: 0 !important;
+    margin-left: 0;
   }
 }

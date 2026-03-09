@@ -60,7 +60,6 @@ export const wikilinkDecorationTheme = EditorView.baseTheme({
 // Completions are fetched from the search API.
 
 let cachedTitles: { label: string; noteId: string }[] = [];
-let lastFetch = 0;
 
 async function fetchNoteTitles(query: string): Promise<{ label: string; noteId: string }[]> {
   try {
@@ -92,7 +91,6 @@ async function wikilinkCompletions(
   // Fetch titles matching the query.
   const titles = await fetchNoteTitles(query);
   cachedTitles = titles;
-  lastFetch = Date.now();
 
   const filtered = query
     ? titles.filter((t) =>

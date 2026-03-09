@@ -29,7 +29,7 @@ func NewVoiceTranscriber(binaryPath, modelPath string) *VoiceTranscriber {
 	return &VoiceTranscriber{
 		binaryPath: binaryPath,
 		modelPath:  modelPath,
-		timeout:    120 * time.Second,
+		timeout:    3 * time.Minute,
 	}
 }
 

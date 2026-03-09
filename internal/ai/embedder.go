@@ -10,34 +10,63 @@ import (
 	"github.com/katata/seam/internal/userdb"
 )
 
-// chunkSize is the approximate number of characters per chunk.
-// Targeting ~512 tokens; rough estimate is 4 chars per token for English.
-const chunkSize = 2048
+// Default chunk parameters for embedding.
+const (
+	defaultChunkSize    = 2048
+	defaultChunkOverlap = 200
+)
 
-// chunkOverlap is the number of characters that overlap between adjacent chunks.
-const chunkOverlap = 200
+// defaultReindexLimit is the maximum number of notes loaded in a single ReindexAll call.
+const defaultReindexLimit = 10000
 
 // Embedder manages the embedding pipeline: chunking notes, generating
 // embeddings via Ollama, and storing them in ChromaDB.
 type Embedder struct {
-	ollama    *OllamaClient
-	chroma    *ChromaClient
-	dbManager userdb.Manager
-	model     string
-	logger    *slog.Logger
+	ollama       *OllamaClient
+	chroma       *ChromaClient
+	dbManager    userdb.Manager
+	model        string
+	logger       *slog.Logger
+	chunkSize    int
+	chunkOverlap int
 }
 
-// NewEmbedder creates a new Embedder.
-func NewEmbedder(ollama *OllamaClient, chroma *ChromaClient, dbManager userdb.Manager, model string, logger *slog.Logger) *Embedder {
+// NewEmbedder creates a new Embedder. Optional chunkSize and chunkOverlap can
+// be provided; zero values use defaults (2048 and 200 respectively).
+func NewEmbedder(ollama *OllamaClient, chroma *ChromaClient, dbManager userdb.Manager, model string, logger *slog.Logger, opts ...func(*Embedder)) *Embedder {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Embedder{
-		ollama:    ollama,
-		chroma:    chroma,
-		dbManager: dbManager,
-		model:     model,
-		logger:    logger,
+	e := &Embedder{
+		ollama:       ollama,
+		chroma:       chroma,
+		dbManager:    dbManager,
+		model:        model,
+		logger:       logger,
+		chunkSize:    defaultChunkSize,
+		chunkOverlap: defaultChunkOverlap,
+	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// WithChunkSize returns an option that sets the chunk size for embedding.
+func WithChunkSize(size int) func(*Embedder) {
+	return func(e *Embedder) {
+		if size > 0 {
+			e.chunkSize = size
+		}
+	}
+}
+
+// WithChunkOverlap returns an option that sets the chunk overlap for embedding.
+func WithChunkOverlap(overlap int) func(*Embedder) {
+	return func(e *Embedder) {
+		if overlap >= 0 {
+			e.chunkOverlap = overlap
+		}
 	}
 }
 
@@ -63,7 +92,7 @@ func (e *Embedder) EmbedNote(ctx context.Context, userID, noteID, title, body st
 
 	// Prepare text: prepend title for better semantic matching.
 	fullText := title + "\n\n" + body
-	chunks := ChunkText(fullText, chunkSize, chunkOverlap)
+	chunks := ChunkText(fullText, e.chunkSize, e.chunkOverlap)
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -73,6 +102,9 @@ func (e *Embedder) EmbedNote(ctx context.Context, userID, noteID, title, body st
 	var metadatas []map[string]string
 
 	for i, chunk := range chunks {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("ai.Embedder.EmbedNote: context cancelled before chunk %d: %w", i, err)
+		}
 		docID := fmt.Sprintf("%s_chunk_%d", noteID, i)
 		embedding, err := e.ollama.GenerateEmbedding(ctx, e.model, chunk)
 		if err != nil {
@@ -99,27 +131,20 @@ func (e *Embedder) EmbedNote(ctx context.Context, userID, noteID, title, body st
 	return nil
 }
 
-// maxChunksPerNote is the maximum number of chunk IDs to generate when
-// deleting embeddings for a note. Based on chunkSize=2048 and overlap=200,
-// a 400KB note (~200K tokens) would produce roughly 200 chunks. We use a
-// generous upper bound to avoid leaving orphaned embeddings.
-const maxChunksPerNote = 500
-
 // DeleteNoteEmbeddings removes all embeddings for a note from ChromaDB.
+// C-29: Uses metadata-based deletion (`where: {note_id: noteID}`) instead
+// of generating 500 chunk IDs per delete. This is both more efficient and
+// correctly handles notes with any number of chunks.
 func (e *Embedder) DeleteNoteEmbeddings(ctx context.Context, userID, noteID string) error {
 	colID, err := e.EnsureCollection(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("ai.Embedder.DeleteNoteEmbeddings: %w", err)
 	}
 
-	// Delete all chunks for this note. We generate IDs for up to
-	// maxChunksPerNote. ChromaDB silently ignores IDs that do not exist.
-	var ids []string
-	for i := 0; i < maxChunksPerNote; i++ {
-		ids = append(ids, fmt.Sprintf("%s_chunk_%d", noteID, i))
+	where := map[string]interface{}{
+		"note_id": noteID,
 	}
-
-	if err := e.chroma.DeleteDocuments(ctx, colID, ids); err != nil {
+	if err := e.chroma.DeleteByMetadata(ctx, colID, where); err != nil {
 		return fmt.Errorf("ai.Embedder.DeleteNoteEmbeddings: %w", err)
 	}
 
@@ -176,7 +201,7 @@ func (e *Embedder) ReindexAll(ctx context.Context, userID string, queue *Queue) 
 		return 0, fmt.Errorf("ai.Embedder.ReindexAll: open db: %w", err)
 	}
 
-	rows, err := db.QueryContext(ctx, `SELECT id FROM notes`)
+	rows, err := db.QueryContext(ctx, `SELECT id FROM notes LIMIT ?`, defaultReindexLimit+1)
 	if err != nil {
 		return 0, fmt.Errorf("ai.Embedder.ReindexAll: query notes: %w", err)
 	}
@@ -202,10 +227,56 @@ func (e *Embedder) ReindexAll(ctx context.Context, userID string, queue *Queue) 
 		count++
 	}
 
+	if count > defaultReindexLimit {
+		e.logger.Warn("ai.Embedder.ReindexAll: note count exceeds limit, some notes were not reindexed",
+			"user_id", userID, "limit", defaultReindexLimit, "enqueued", count)
+	}
+
 	e.logger.Info("ai.Embedder.ReindexAll: enqueued embedding tasks",
 		"user_id", userID, "count", count)
 
 	return count, rows.Err()
+}
+
+// FindRelated finds notes related to the given note by embedding similarity.
+// It returns ChromaDB query results for the given note's content, requesting
+// nResults neighbors (caller should over-request to allow dedup/filtering).
+func (e *Embedder) FindRelated(ctx context.Context, noteID, userID string, nResults int) ([]QueryResult, error) {
+	db, err := e.dbManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ai.Embedder.FindRelated: open db: %w", err)
+	}
+
+	var title, body string
+	err = db.QueryRowContext(ctx,
+		`SELECT title, body FROM notes WHERE id = ?`, noteID,
+	).Scan(&title, &body)
+	if err != nil {
+		return nil, fmt.Errorf("ai.Embedder.FindRelated: query note: %w", err)
+	}
+
+	text := title + "\n\n" + body
+	if len(text) > 3000 {
+		text = text[:3000]
+	}
+
+	queryEmbedding, err := e.ollama.GenerateEmbedding(ctx, e.model, text)
+	if err != nil {
+		return nil, fmt.Errorf("ai.Embedder.FindRelated: generate embedding: %w", err)
+	}
+
+	colName := CollectionName(userID)
+	colID, err := e.chroma.GetOrCreateCollection(ctx, colName)
+	if err != nil {
+		return nil, fmt.Errorf("ai.Embedder.FindRelated: get collection: %w", err)
+	}
+
+	results, err := e.chroma.Query(ctx, colID, queryEmbedding, nResults)
+	if err != nil {
+		return nil, fmt.Errorf("ai.Embedder.FindRelated: query: %w", err)
+	}
+
+	return results, nil
 }
 
 // ChunkText splits text into overlapping chunks for embedding.

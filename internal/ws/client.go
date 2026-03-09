@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -28,18 +27,26 @@ type MessageHandler func(ctx context.Context, hub *Hub, conn *websocket.Conn, us
 // and a read loop runs until the client disconnects or the context is cancelled.
 //
 // An optional MessageHandler can process incoming messages (e.g., chat.ask).
-func ServeWS(hub *Hub, jwtManager *auth.JWTManager, handler MessageHandler) http.HandlerFunc {
+// allowedOrigins specifies additional origin patterns for WebSocket upgrades.
+// Localhost patterns are always included as defaults.
+func ServeWS(hub *Hub, jwtManager *auth.JWTManager, handler MessageHandler, allowedOrigins ...string) http.HandlerFunc {
+	origins := []string{"localhost:*", "127.0.0.1:*"}
+	origins = append(origins, allowedOrigins...)
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		logger := hub.logger.With("remote_addr", r.RemoteAddr)
 
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			OriginPatterns: []string{"localhost:*", "127.0.0.1:*"},
+			OriginPatterns: origins,
 		})
 		if err != nil {
 			logger.Error("ws.ServeWS: accept failed", "error", err)
 			return
 		}
 		defer conn.CloseNow()
+
+		// Set an explicit read limit (64KB) to prevent oversized messages.
+		conn.SetReadLimit(64 * 1024)
 
 		// Step 1: Read the auth message with a timeout.
 		authCtx, authCancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -163,18 +170,4 @@ func readLoop(ctx context.Context, hub *Hub, conn *websocket.Conn, userID string
 			)
 		}
 	}
-}
-
-// writeError is a helper to write a JSON error frame to a WebSocket connection.
-func writeError(ctx context.Context, conn *websocket.Conn, errMsg string) error {
-	payload, _ := json.Marshal(map[string]string{"error": errMsg})
-	msg := Message{
-		Type:    "error",
-		Payload: payload,
-	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("ws.writeError: marshal: %w", err)
-	}
-	return conn.Write(ctx, websocket.MessageText, data)
 }

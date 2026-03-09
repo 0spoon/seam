@@ -7,6 +7,7 @@ import {
   Network,
   Calendar,
   PanelLeftClose,
+  MessageCircle,
 } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -32,7 +33,9 @@ export function CommandPalette() {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const paletteRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const baseCommands: CommandItem[] = [
     {
@@ -74,6 +77,15 @@ export function CommandPalette() {
       },
     },
     {
+      id: 'ask-seam',
+      label: 'Ask Seam',
+      icon: <MessageCircle size={16} />,
+      action: () => {
+        setOpen(false);
+        navigate('/ask');
+      },
+    },
+    {
       id: 'toggle-sidebar',
       label: 'Toggle sidebar',
       icon: <PanelLeftClose size={16} />,
@@ -105,9 +117,15 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (isOpen) {
+      // Save the element that had focus before opening so we can restore it.
+      previousFocusRef.current = document.activeElement as HTMLElement | null;
       setQuery('');
       setSelectedIndex(0);
       setTimeout(() => inputRef.current?.focus(), 50);
+    } else if (previousFocusRef.current) {
+      // Return focus to the previously focused element on close.
+      previousFocusRef.current.focus();
+      previousFocusRef.current = null;
     }
   }, [isOpen]);
 
@@ -135,6 +153,25 @@ export function CommandPalette() {
         e.preventDefault();
         setOpen(false);
         break;
+      case 'Tab': {
+        // Focus trap: keep Tab cycling within the palette.
+        const container = paletteRef.current;
+        if (!container) break;
+        const focusable = container.querySelectorAll<HTMLElement>(
+          'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) break;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+        break;
+      }
     }
   };
 
@@ -152,7 +189,14 @@ export function CommandPalette() {
       className={styles.backdrop}
       onClick={handleBackdropClick}
     >
-      <div className={styles.palette} onKeyDown={handleKeyDown}>
+      <div
+        ref={paletteRef}
+        className={styles.palette}
+        onKeyDown={handleKeyDown}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+      >
         <input
           ref={inputRef}
           type="text"

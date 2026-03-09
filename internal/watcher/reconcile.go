@@ -78,15 +78,16 @@ func Reconcile(ctx context.Context, userID string, notesDir string, handler File
 		diskFiles[relPath] = true
 
 		// Fast pass: skip files whose mtime has not changed.
+		// C-21: RFC3339 stores only second precision, so we add 1 second
+		// to the DB time to compensate for sub-second mtime. Any file
+		// whose mtime is strictly after (dbTime + 1s) is considered changed.
 		if dbTimes != nil {
 			if dbTime, found := dbTimes[relPath]; found {
 				fInfo, statErr := d.Info()
 				if statErr == nil && !fInfo.ModTime().After(dbTime.Add(time.Second)) {
-					// File has not been modified since last index. Skip.
 					return nil
 				}
 			}
-			// File is new or has been modified -- fall through to handler.
 		}
 
 		if handlerErr := handler(ctx, userID, relPath); handlerErr != nil {
@@ -100,8 +101,15 @@ func Reconcile(ctx context.Context, userID string, notesDir string, handler File
 	}
 
 	// Detect deleted files: DB rows with no corresponding file on disk.
+	// C-22: Check for context cancellation in each iteration so the loop
+	// does not block shutdown when there are many orphaned DB entries.
 	if dbTimes != nil {
 		for relPath := range dbTimes {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			if diskFiles[relPath] {
 				continue
 			}
@@ -129,6 +137,7 @@ func loadDBFileTimes(ctx context.Context, db *sql.DB) (map[string]time.Time, err
 	for rows.Next() {
 		var fp, updatedAt string
 		if scanErr := rows.Scan(&fp, &updatedAt); scanErr != nil {
+			slog.Warn("watcher.loadDBFileTimes: scan error", "error", scanErr)
 			continue
 		}
 		if t, parseErr := time.Parse(time.RFC3339, updatedAt); parseErr == nil {

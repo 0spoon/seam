@@ -523,6 +523,31 @@
   align-items: center;
 }
 
+/* Loading state */
+.noteLoadingState {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--text-tertiary);
+}
+
+.noteLoadingSpinner {
+  animation: noteLoadingSpin 1s linear infinite;
+}
+
+@keyframes noteLoadingSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.noteLoadingText {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
 /* Save status */
 .saveStatus {
   position: absolute;

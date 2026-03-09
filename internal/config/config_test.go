@@ -109,8 +109,8 @@ models:
 	require.Equal(t, 168*time.Hour, cfg.Auth.RefreshTokenTTL.Duration)
 	require.Equal(t, 12, cfg.Auth.BcryptCost)
 	require.Equal(t, 1, cfg.AI.QueueWorkers)
-	require.Equal(t, 30*time.Second, cfg.AI.EmbeddingTimeout.Duration)
-	require.Equal(t, 120*time.Second, cfg.AI.ChatTimeout.Duration)
+	require.Equal(t, 60*time.Second, cfg.AI.EmbeddingTimeout.Duration)
+	require.Equal(t, 5*time.Minute, cfg.AI.ChatTimeout.Duration)
 	require.Equal(t, 30*time.Minute, cfg.UserDB.EvictionTimeout.Duration)
 	require.Equal(t, 200*time.Millisecond, cfg.Watcher.DebounceInterval.Duration)
 }

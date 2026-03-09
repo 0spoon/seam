@@ -12,21 +12,25 @@ import (
 type loginField int
 
 const (
-	fieldUsername loginField = iota
+	fieldServerURL loginField = iota
+	fieldUsername
+	fieldEmail
 	fieldPassword
-	loginFieldCount
 )
 
 // loginModel handles the login screen.
 type loginModel struct {
-	inputs   [loginFieldCount]textinput.Model
-	focused  loginField
-	err      string
-	loading  bool
-	width    int
-	height   int
-	client   *APIClient
-	register bool // toggle between login and register mode
+	serverURL textinput.Model
+	username  textinput.Model
+	email     textinput.Model
+	password  textinput.Model
+	focused   loginField
+	err       string
+	loading   bool
+	width     int
+	height    int
+	client    *APIClient
+	register  bool // toggle between login and register mode
 }
 
 // loginSuccessMsg is sent when authentication succeeds.
@@ -40,29 +44,66 @@ type loginErrorMsg struct {
 }
 
 func newLoginModel(client *APIClient) loginModel {
-	var inputs [loginFieldCount]textinput.Model
+	serverURLInput := textinput.New()
+	serverURLInput.Placeholder = "http://localhost:8080"
+	serverURLInput.CharLimit = 256
+	serverURLInput.SetValue(client.BaseURL)
 
 	usernameInput := textinput.New()
 	usernameInput.Placeholder = "username"
 	usernameInput.CharLimit = 64
 	usernameInput.Focus()
-	inputs[fieldUsername] = usernameInput
+
+	emailInput := textinput.New()
+	emailInput.Placeholder = "email"
+	emailInput.CharLimit = 256
 
 	passwordInput := textinput.New()
 	passwordInput.Placeholder = "password"
 	passwordInput.EchoMode = textinput.EchoPassword
 	passwordInput.EchoCharacter = '*'
 	passwordInput.CharLimit = 128
-	inputs[fieldPassword] = passwordInput
 
 	return loginModel{
-		inputs: inputs,
-		client: client,
+		serverURL: serverURLInput,
+		username:  usernameInput,
+		email:     emailInput,
+		password:  passwordInput,
+		focused:   fieldUsername,
+		client:    client,
 	}
 }
 
 func (m loginModel) Init() tea.Cmd {
 	return textinput.Blink
+}
+
+// focusField sets focus to the given login field.
+func (m *loginModel) focusField(field loginField) tea.Cmd {
+	m.focused = field
+	m.serverURL.Blur()
+	m.username.Blur()
+	m.email.Blur()
+	m.password.Blur()
+	switch field {
+	case fieldServerURL:
+		return m.serverURL.Focus()
+	case fieldUsername:
+		return m.username.Focus()
+	case fieldEmail:
+		return m.email.Focus()
+	case fieldPassword:
+		return m.password.Focus()
+	}
+	return nil
+}
+
+// visibleFields returns the ordered list of fields for the current mode.
+func (m loginModel) visibleFields() []loginField {
+	if m.register {
+		return []loginField{fieldServerURL, fieldUsername, fieldEmail, fieldPassword}
+	}
+	return []loginField{fieldServerURL, fieldUsername, fieldPassword}
 }
 
 func (m loginModel) Update(msg tea.Msg) (loginModel, tea.Cmd) {
@@ -85,30 +126,53 @@ func (m loginModel) Update(msg tea.Msg) (loginModel, tea.Cmd) {
 		m.err = ""
 		switch msg.String() {
 		case "tab", "shift+tab", "down", "up":
-			if msg.String() == "tab" || msg.String() == "down" {
-				m.focused = (m.focused + 1) % loginFieldCount
-			} else {
-				m.focused = (m.focused - 1 + loginFieldCount) % loginFieldCount
-			}
-			var cmds []tea.Cmd
-			for i := range m.inputs {
-				if loginField(i) == m.focused {
-					cmds = append(cmds, m.inputs[i].Focus())
-				} else {
-					m.inputs[i].Blur()
+			fields := m.visibleFields()
+			// Find current index in the visible fields list.
+			curIdx := 0
+			for i, f := range fields {
+				if f == m.focused {
+					curIdx = i
+					break
 				}
 			}
-			return m, tea.Batch(cmds...)
+			if msg.String() == "tab" || msg.String() == "down" {
+				curIdx = (curIdx + 1) % len(fields)
+			} else {
+				curIdx = (curIdx - 1 + len(fields)) % len(fields)
+			}
+			cmd := m.focusField(fields[curIdx])
+			return m, cmd
 
 		case "enter":
 			if m.loading {
 				return m, nil
 			}
-			username := strings.TrimSpace(m.inputs[fieldUsername].Value())
-			password := m.inputs[fieldPassword].Value()
+			// Apply server URL if provided.
+			serverURL := strings.TrimSpace(m.serverURL.Value())
+			if serverURL != "" {
+				m.client.BaseURL = serverURL
+			}
+			username := strings.TrimSpace(m.username.Value())
+			password := m.password.Value()
 			if username == "" || password == "" {
 				m.err = "username and password are required"
 				return m, nil
+			}
+			if m.register {
+				email := strings.TrimSpace(m.email.Value())
+				if email == "" {
+					m.err = "email is required for registration"
+					return m, nil
+				}
+				m.loading = true
+				client := m.client
+				return m, func() tea.Msg {
+					resp, err := client.Register(username, email, password)
+					if err != nil {
+						return loginErrorMsg{err: err}
+					}
+					return loginSuccessMsg{auth: resp}
+				}
 			}
 			m.loading = true
 			client := m.client
@@ -122,13 +186,28 @@ func (m loginModel) Update(msg tea.Msg) (loginModel, tea.Cmd) {
 
 		case "ctrl+r":
 			m.register = !m.register
+			// If the focused field is email and we switched to login mode,
+			// move focus to password.
+			if !m.register && m.focused == fieldEmail {
+				cmd := m.focusField(fieldPassword)
+				return m, cmd
+			}
 			return m, nil
 		}
 	}
 
 	// Update the focused text input.
 	var cmd tea.Cmd
-	m.inputs[m.focused], cmd = m.inputs[m.focused].Update(msg)
+	switch m.focused {
+	case fieldServerURL:
+		m.serverURL, cmd = m.serverURL.Update(msg)
+	case fieldUsername:
+		m.username, cmd = m.username.Update(msg)
+	case fieldEmail:
+		m.email, cmd = m.email.Update(msg)
+	case fieldPassword:
+		m.password, cmd = m.password.Update(msg)
+	}
 	return m, cmd
 }
 
@@ -153,12 +232,22 @@ func (m loginModel) View() string {
 		Foreground(colorMuted).
 		Align(lipgloss.Right)
 
-	b.WriteString(labelStyle.Render("Username: "))
-	b.WriteString(m.inputs[fieldUsername].View())
+	b.WriteString(labelStyle.Render("Server: "))
+	b.WriteString(m.serverURL.View())
 	b.WriteString("\n\n")
 
+	b.WriteString(labelStyle.Render("Username: "))
+	b.WriteString(m.username.View())
+	b.WriteString("\n\n")
+
+	if m.register {
+		b.WriteString(labelStyle.Render("Email: "))
+		b.WriteString(m.email.View())
+		b.WriteString("\n\n")
+	}
+
 	b.WriteString(labelStyle.Render("Password: "))
-	b.WriteString(m.inputs[fieldPassword].View())
+	b.WriteString(m.password.View())
 	b.WriteString("\n\n")
 
 	if m.err != "" {

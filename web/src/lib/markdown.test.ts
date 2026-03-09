@@ -11,20 +11,20 @@ describe('renderMarkdown', () => {
   it('renders wikilinks as clickable links', () => {
     const html = renderMarkdown('Link to [[Some Note]]');
     expect(html).toContain('class="wikilink"');
-    expect(html).toContain('data-target="Some Note"');
+    expect(html).toContain('data-wikilink="Some Note"');
     expect(html).toContain('>Some Note</a>');
   });
 
   it('renders wikilinks with display aliases', () => {
     const html = renderMarkdown('See [[Target Note|display text]]');
-    expect(html).toContain('data-target="Target Note"');
+    expect(html).toContain('data-wikilink="Target Note"');
     expect(html).toContain('>display text</a>');
   });
 
   it('renders multiple wikilinks', () => {
     const html = renderMarkdown('[[First]] and [[Second]]');
-    expect(html).toContain('data-target="First"');
-    expect(html).toContain('data-target="Second"');
+    expect(html).toContain('data-wikilink="First"');
+    expect(html).toContain('data-wikilink="Second"');
   });
 
   it('renders inline code', () => {

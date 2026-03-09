@@ -84,27 +84,30 @@ func NewService(store Store, jwtManager *JWTManager, userDBManager userdb.Manage
 }
 
 // Register creates a new user account and returns an AuthResponse with tokens.
+// C-33: Registration validation errors use ErrValidation (-> HTTP 400) instead
+// of ErrInvalidCredentials (-> HTTP 401) to distinguish input validation
+// failures from authentication failures.
 func (s *Service) Register(ctx context.Context, req RegisterReq) (*AuthResponse, error) {
 	if req.Username == "" {
-		return nil, fmt.Errorf("auth.Service.Register: username is required: %w", ErrInvalidCredentials)
+		return nil, fmt.Errorf("auth.Service.Register: username is required: %w", ErrValidation)
 	}
 	if !usernameRe.MatchString(req.Username) {
-		return nil, fmt.Errorf("auth.Service.Register: username must be 3-64 characters, alphanumeric/underscore/hyphen only: %w", ErrInvalidCredentials)
+		return nil, fmt.Errorf("auth.Service.Register: username must be 3-64 characters, alphanumeric/underscore/hyphen only: %w", ErrValidation)
 	}
 	if req.Email == "" {
-		return nil, fmt.Errorf("auth.Service.Register: email is required: %w", ErrInvalidCredentials)
+		return nil, fmt.Errorf("auth.Service.Register: email is required: %w", ErrValidation)
 	}
 	if !isValidEmail(req.Email) {
-		return nil, fmt.Errorf("auth.Service.Register: invalid email format: %w", ErrInvalidCredentials)
+		return nil, fmt.Errorf("auth.Service.Register: invalid email format: %w", ErrValidation)
 	}
 	if req.Password == "" {
-		return nil, fmt.Errorf("auth.Service.Register: password is required: %w", ErrInvalidCredentials)
+		return nil, fmt.Errorf("auth.Service.Register: password is required: %w", ErrValidation)
 	}
 	if len(req.Password) < 8 {
-		return nil, fmt.Errorf("auth.Service.Register: password must be at least 8 characters: %w", ErrInvalidCredentials)
+		return nil, fmt.Errorf("auth.Service.Register: password must be at least 8 characters: %w", ErrValidation)
 	}
 	if len(req.Password) > 1024 {
-		return nil, fmt.Errorf("auth.Service.Register: password must not exceed 1024 characters: %w", ErrInvalidCredentials)
+		return nil, fmt.Errorf("auth.Service.Register: password must not exceed 1024 characters: %w", ErrValidation)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), s.bcryptCost)

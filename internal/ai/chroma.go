@@ -21,6 +21,13 @@ type QueryResult struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
+// ChromaConfig holds configurable options for the ChromaDB client.
+type ChromaConfig struct {
+	Tenant   string        // ChromaDB tenant (default: "default_tenant")
+	Database string        // ChromaDB database (default: "default_database")
+	Timeout  time.Duration // HTTP client timeout (default: 30s)
+}
+
 // ChromaClient is an HTTP client for the ChromaDB REST API v2.
 type ChromaClient struct {
 	baseURL    string
@@ -29,17 +36,42 @@ type ChromaClient struct {
 	httpClient *http.Client
 }
 
-// NewChromaClient creates a new ChromaDB API client.
-func NewChromaClient(baseURL string) *ChromaClient {
+// NewChromaClient creates a new ChromaDB API client. The timeout parameter
+// controls the HTTP client timeout; if zero, defaults to 30 seconds.
+// Use NewChromaClientWithConfig for full configuration control.
+func NewChromaClient(baseURL string, timeout ...time.Duration) *ChromaClient {
+	cfg := ChromaConfig{}
+	if len(timeout) > 0 {
+		cfg.Timeout = timeout[0]
+	}
+	return NewChromaClientWithConfig(baseURL, cfg)
+}
+
+// NewChromaClientWithConfig creates a new ChromaDB API client with full
+// configuration. Zero values in the config use defaults.
+func NewChromaClientWithConfig(baseURL string, cfg ChromaConfig) *ChromaClient {
+	if cfg.Tenant == "" {
+		cfg.Tenant = "default_tenant"
+	}
+	if cfg.Database == "" {
+		cfg.Database = "default_database"
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 30 * time.Second
+	}
 	return &ChromaClient{
 		baseURL:  baseURL,
-		tenant:   "default_tenant",
-		database: "default_database",
+		tenant:   cfg.Tenant,
+		database: cfg.Database,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: cfg.Timeout,
 		},
 	}
 }
+
+// ErrMismatchedArrayLengths is returned when ids, embeddings, and metadatas
+// have different lengths in Add or Upsert calls.
+var ErrMismatchedArrayLengths = errors.New("ids, embeddings, and metadatas must have matching lengths")
 
 // collectionPath returns the API path prefix for collections.
 func (c *ChromaClient) collectionPath() string {
@@ -101,6 +133,10 @@ type chromaAddRequest struct {
 
 // AddDocuments adds embeddings with IDs and optional metadata to a collection.
 func (c *ChromaClient) AddDocuments(ctx context.Context, collectionID string, ids []string, embeddings [][]float64, metadatas []map[string]string) error {
+	if len(ids) != len(embeddings) || (metadatas != nil && len(ids) != len(metadatas)) {
+		return fmt.Errorf("ai.ChromaClient.AddDocuments: %w: ids=%d embeddings=%d metadatas=%d",
+			ErrMismatchedArrayLengths, len(ids), len(embeddings), len(metadatas))
+	}
 	reqBody := chromaAddRequest{
 		IDs:        ids,
 		Embeddings: embeddings,
@@ -129,6 +165,9 @@ func (c *ChromaClient) AddDocuments(ctx context.Context, collectionID string, id
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("ai.ChromaClient.AddDocuments: status %d: %s", resp.StatusCode, string(respBody))
 	}
+
+	// Drain response body for HTTP connection reuse.
+	io.Copy(io.Discard, resp.Body)
 
 	return nil
 }
@@ -184,7 +223,7 @@ func (c *ChromaClient) Query(ctx context.Context, collectionID string, embedding
 	}
 
 	if len(result.IDs) == 0 || len(result.IDs[0]) == 0 {
-		return nil, nil
+		return []QueryResult{}, nil
 	}
 
 	var queryResults []QueryResult
@@ -204,6 +243,10 @@ func (c *ChromaClient) Query(ctx context.Context, collectionID string, embedding
 
 // UpsertDocuments upserts (add or update) embeddings in a collection.
 func (c *ChromaClient) UpsertDocuments(ctx context.Context, collectionID string, ids []string, embeddings [][]float64, metadatas []map[string]string) error {
+	if len(ids) != len(embeddings) || (metadatas != nil && len(ids) != len(metadatas)) {
+		return fmt.Errorf("ai.ChromaClient.UpsertDocuments: %w: ids=%d embeddings=%d metadatas=%d",
+			ErrMismatchedArrayLengths, len(ids), len(embeddings), len(metadatas))
+	}
 	reqBody := chromaAddRequest{
 		IDs:        ids,
 		Embeddings: embeddings,
@@ -233,12 +276,16 @@ func (c *ChromaClient) UpsertDocuments(ctx context.Context, collectionID string,
 		return fmt.Errorf("ai.ChromaClient.UpsertDocuments: status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	// Drain response body for HTTP connection reuse.
+	io.Copy(io.Discard, resp.Body)
+
 	return nil
 }
 
 // chromaDeleteRequest is the request body for deleting documents.
 type chromaDeleteRequest struct {
-	IDs []string `json:"ids"`
+	IDs   []string               `json:"ids,omitempty"`
+	Where map[string]interface{} `json:"where,omitempty"`
 }
 
 // DeleteDocuments removes documents by ID from a collection.
@@ -270,6 +317,44 @@ func (c *ChromaClient) DeleteDocuments(ctx context.Context, collectionID string,
 		return fmt.Errorf("ai.ChromaClient.DeleteDocuments: status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	// Drain response body for HTTP connection reuse.
+	io.Copy(io.Discard, resp.Body)
+
+	return nil
+}
+
+// DeleteByMetadata removes documents matching a metadata filter from a collection.
+// This is used for note deletion where we match by note_id metadata instead of
+// generating chunk IDs (C-29).
+func (c *ChromaClient) DeleteByMetadata(ctx context.Context, collectionID string, where map[string]interface{}) error {
+	reqBody := chromaDeleteRequest{
+		Where: where,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("ai.ChromaClient.DeleteByMetadata: marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s%s/%s/delete", c.baseURL, c.collectionPath(), collectionID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("ai.ChromaClient.DeleteByMetadata: new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ai.ChromaClient.DeleteByMetadata: %w: %w", ErrChromaUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("ai.ChromaClient.DeleteByMetadata: status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	io.Copy(io.Discard, resp.Body)
 	return nil
 }
 

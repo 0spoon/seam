@@ -8,6 +8,7 @@ interface UIState {
   rightPanelOpen: boolean;
   commandPaletteOpen: boolean;
   captureModalOpen: boolean;
+  captureDefaultProjectId: string;
   tags: TagCount[];
 
   toggleSidebar: () => void;
@@ -16,7 +17,7 @@ interface UIState {
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
-  setCaptureModalOpen: (open: boolean) => void;
+  setCaptureModalOpen: (open: boolean, defaultProjectId?: string) => void;
   fetchTags: () => Promise<void>;
 }
 
@@ -26,6 +27,7 @@ export const useUIStore = create<UIState>((set) => ({
   rightPanelOpen: false,
   commandPaletteOpen: false,
   captureModalOpen: false,
+  captureDefaultProjectId: '',
   tags: [],
 
   toggleSidebar: () =>
@@ -41,7 +43,8 @@ export const useUIStore = create<UIState>((set) => ({
 
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
-  setCaptureModalOpen: (open) => set({ captureModalOpen: open }),
+  setCaptureModalOpen: (open, defaultProjectId) =>
+    set({ captureModalOpen: open, captureDefaultProjectId: open ? (defaultProjectId ?? '') : '' }),
 
   fetchTags: async () => {
     try {

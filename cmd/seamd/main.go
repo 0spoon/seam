@@ -141,8 +141,8 @@ func run() error {
 	// Create capture components.
 	urlFetcher := capture.NewURLFetcher()
 	var voiceTranscriber *capture.VoiceTranscriber
-	if cfg.Models.Transcription != "" {
-		voiceTranscriber = capture.NewVoiceTranscriber(cfg.OllamaBaseURL, cfg.Models.Transcription)
+	if cfg.Whisper.ModelPath != "" {
+		voiceTranscriber = capture.NewVoiceTranscriber(cfg.Whisper.BinaryPath, cfg.Whisper.ModelPath)
 	}
 	captureSvc := capture.NewService(noteSvc, urlFetcher, voiceTranscriber, logger)
 	captureHandler := capture.NewHandler(captureSvc, logger)

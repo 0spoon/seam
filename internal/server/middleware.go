@@ -92,6 +92,8 @@ func RecoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // statusWriter wraps http.ResponseWriter to capture the status code.
+// It implements http.Hijacker by delegating to the underlying writer,
+// which is required for WebSocket upgrades to work through middleware.
 type statusWriter struct {
 	http.ResponseWriter
 	status int
@@ -100,6 +102,12 @@ type statusWriter struct {
 func (sw *statusWriter) WriteHeader(code int) {
 	sw.status = code
 	sw.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap returns the underlying ResponseWriter. This is used by libraries
+// like coder/websocket to discover interface implementations (e.g. Hijacker).
+func (sw *statusWriter) Unwrap() http.ResponseWriter {
+	return sw.ResponseWriter
 }
 
 func generateRequestID() string {

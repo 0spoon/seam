@@ -89,7 +89,7 @@ func (s *Service) CaptureURL(ctx context.Context, userID, rawURL string) (*note.
 // CaptureVoice transcribes audio and creates a note in the user's Inbox.
 func (s *Service) CaptureVoice(ctx context.Context, userID string, audio io.Reader, filename string) (*note.Note, error) {
 	if s.transcriber == nil {
-		return nil, fmt.Errorf("capture.Service.CaptureVoice: voice transcription not configured (models.transcription not set)")
+		return nil, fmt.Errorf("capture.Service.CaptureVoice: voice transcription not configured (whisper.model_path not set)")
 	}
 
 	result, err := s.transcriber.Transcribe(ctx, audio, filename)

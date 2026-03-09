@@ -16,6 +16,7 @@ function isURL(text: string): boolean {
 export function CaptureModal() {
   const isOpen = useUIStore((s) => s.captureModalOpen);
   const setOpen = useUIStore((s) => s.setCaptureModalOpen);
+  const defaultProjectId = useUIStore((s) => s.captureDefaultProjectId);
   const projects = useProjectStore((s) => s.projects);
   const createNote = useNoteStore((s) => s.createNote);
   const navigate = useNavigate();
@@ -38,6 +39,8 @@ export function CaptureModal() {
 
   useEffect(() => {
     if (isOpen) {
+      // Pre-select the default project if provided (e.g. from ProjectPage).
+      setProjectId(defaultProjectId);
       // Auto-focus body textarea
       setTimeout(() => bodyRef.current?.focus(), 100);
       // Load available templates.
@@ -56,7 +59,7 @@ export function CaptureModal() {
         mediaRecorderRef.current.stop();
       }
     }
-  }, [isOpen]);
+  }, [isOpen, defaultProjectId]);
 
   // Detect URL paste in body field.
   useEffect(() => {

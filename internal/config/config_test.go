@@ -38,7 +38,9 @@ models:
   embeddings: "qwen3-embedding:8b"
   background: "qwen3:32b"
   chat: "qwen3:32b"
-  transcription: "whisper"
+whisper:
+  model_path: "/path/to/ggml-base.en.bin"
+  binary_path: "/usr/local/bin/whisper-cli"
 auth:
   access_token_ttl: "30m"
   refresh_token_ttl: "48h"
@@ -69,7 +71,9 @@ func TestLoad_ValidConfig(t *testing.T) {
 	require.Equal(t, "qwen3-embedding:8b", cfg.Models.Embeddings)
 	require.Equal(t, "qwen3:32b", cfg.Models.Background)
 	require.Equal(t, "qwen3:32b", cfg.Models.Chat)
-	require.Equal(t, "whisper", cfg.Models.Transcription)
+
+	require.Equal(t, "/path/to/ggml-base.en.bin", cfg.Whisper.ModelPath)
+	require.Equal(t, "/usr/local/bin/whisper-cli", cfg.Whisper.BinaryPath)
 
 	require.Equal(t, 30*time.Minute, cfg.Auth.AccessTokenTTL.Duration)
 	require.Equal(t, 48*time.Hour, cfg.Auth.RefreshTokenTTL.Duration)

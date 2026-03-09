@@ -338,4 +338,160 @@ All gaps identified during Phase 4 have been fixed.
 
 ---
 
-*Last updated: 2026-03-08 (Phase 4 all gaps resolved)*
+## Post-Implementation Audit (2026-03-09)
+
+Comprehensive code review across all packages, frontend, and migrations. All Go tests (15 packages) and frontend tests (18 files, 154 tests) pass. Issues below are organized by severity.
+
+---
+
+### Critical / High Severity (15 issues)
+
+| ID | Package | File:Line(s) | Category | Description |
+|----|---------|-------------|----------|-------------|
+| A-1 | note | `service.go:408-415` | Security | **No path traversal validation in `Reindex`.** `filePath` is joined directly via `filepath.Join(notesDir, filePath)`. A path like `../../other-user/notes/secret.md` escapes the user directory. AGENTS.md mandates: "reject any file path containing `..`, absolute paths, or null bytes." |
+| A-2 | userdb | `manager.go:131-166` | Security | **No path traversal validation on `userID`.** `UserNotesDir`, `UserDataDir`, `EnsureUserDirs`, and `Open` use `userID` directly in filesystem paths without validating for `..`, `/`, `\`, or null bytes. A crafted `userID` accesses arbitrary directories. |
+| A-3 | capture | `url.go:54-72` | Security | **SSRF bypass via DNS rebinding (TOCTOU).** DNS is resolved to check for private IPs, then `dialer.DialContext` re-resolves DNS internally. Between the two resolutions, a DNS rebinding attack can flip the A record from public to `127.0.0.1`. Fix: connect to the already-validated IP directly. |
+| A-4 | capture | `url.go:76-78` | Security | **SSRF bypass: `0.0.0.0` not blocked.** `isPrivateIP` does not call `ip.IsUnspecified()`. The address `0.0.0.0` routes to localhost on many OSes. |
+| A-5 | note | `handler.go:73-76`, `service.go:84` | Security | **No input validation for note titles.** Only checks for empty. Does not reject `\x00`, `/`, `\`, or `..` per AGENTS.md security invariants. |
+| A-6 | project | `handler.go:64-66` | Security | **No input validation for project names.** Same issue as A-5. |
+| A-7 | note, project | `note/service.go:170-191,347-370,472-486`, `project/service.go:189-258` | Data integrity | **No DB transactions for multi-step operations.** Create/Update/Reindex perform separate DB writes for notes, tags, and links without a transaction. A crash mid-operation leaves the database inconsistent (note without tags, half-resolved links, etc.). |
+| A-8 | note | `service.go:321-330` | Data integrity | **Stale tags written to frontmatter on Update.** When building frontmatter for Update, `existing.Tags` (the OLD tags from the initial `store.Get`) is used. New tags from `req.Tags` are only applied to the DB after the file is rewritten. The frontmatter on disk has old tags; next reindex restores old tags, overwriting the new ones. |
+| A-9 | project | `service.go:139-154` | Data integrity | **Project slug rename does not update note `file_path` in DB.** When a project is renamed and the slug changes, the directory is renamed on disk but the `notes.file_path` column is not updated. All notes with the old slug have stale paths, causing `Get` to fail with file-not-found. |
+| A-10 | userdb | `manager.go:188-203` | Concurrency | **DB handle use-after-close from eviction.** The eviction timer can close a `*sql.DB` handle while other goroutines still hold references from previous `Open()` calls. No reference counting or lease mechanism exists. Subsequent queries on evicted handles fail with "database is closed." |
+| A-11 | watcher | `watcher.go:273-288` | Concurrency | **Race condition in debounce timer.** `time.Timer.Stop()` does not prevent an already-fired callback from executing, so duplicate handler invocations are possible when rapid events reset the same file's timer. |
+| A-12 | watcher | `watcher.go:139-148,237-251` | Concurrency | **Self-write suppression is one-shot but writes generate multiple fsnotify events.** A single `os.WriteFile` produces 2+ events (CREATE+WRITE or WRITE+CHMOD). Only the first is suppressed; subsequent events trigger the handler, causing unnecessary reindex cycles. |
+| A-13 | ai | `queue.go:94-171` | Concurrency | **AI queue workers: only 1 processes tasks despite config.** The `notify` channel has buffer size 1. Only one worker wakes up per notification and calls `processAll()` which drains the entire queue serially. Multiple workers provide no parallelism. |
+| A-14 | ai | `queue.go:207-227` | Correctness | **Fair scheduling incorrect: assumes heap elements are sorted.** The `dequeue` method linearly scans and breaks early when priority differs, but a heap only guarantees `pq[0]` is minimum -- other elements are NOT in sorted order. Tasks from the same priority may not be interleaved across users correctly. |
+| A-15 | ai | `chroma.go:186-199` | Correctness | **ChromaDB nil pointer panic.** Accesses `result.Distances[0]` and `result.Metadatas[0]` without checking if these slices are non-nil/non-empty. If ChromaDB returns null for these fields, the code panics with index-out-of-range. |
+
+---
+
+### Medium Severity (30 issues)
+
+| ID | Package | File:Line(s) | Category | Description |
+|----|---------|-------------|----------|-------------|
+| B-1 | all handlers | various | Security | **No request body size limit (`MaxBytesReader`) on any handler.** All `json.NewDecoder(r.Body).Decode` calls read the entire request body without size limits. An attacker can send multi-GB payloads to exhaust server memory. |
+| B-2 | server | `server.go:141-142` | Security | **`WriteTimeout: 30s` kills WebSocket and streaming connections.** The `http.Server.WriteTimeout` is a hard deadline for the entire response, including long-lived WebSocket connections and streaming AI responses. |
+| B-3 | auth | `service.go:96-98` | Security | **No maximum password length check.** `bcrypt.GenerateFromPassword` silently truncates at 72 bytes. More importantly, an attacker can send a multi-MB password to cause excessive CPU usage. |
+| B-4 | auth | `service.go:84` | Security | **No username format validation.** Accepts spaces, special characters, and extreme lengths. Should enforce alphanumeric/underscore/hyphen with a max length. |
+| B-5 | auth | `jwt.go:31`, `config/config.go:191` | Security | **No JWT secret minimum length enforcement.** Accepts a single-character secret. Should enforce at least 32 characters. |
+| B-6 | config | `config.go:153` | Security | **No bcrypt cost range validation.** A user can set `bcrypt_cost: 1` (below `bcrypt.MinCost` of 4) or `bcrypt_cost: 31` (extreme DoS). |
+| B-7 | auth, capture | `auth/handler.go:51`, `capture/handler.go:81` | Security | **Error messages leak internal details to clients.** Appends full Go error chains (including function names and package paths) to HTTP responses. AGENTS.md: "Never expose internal error details in HTTP responses." |
+| B-8 | capture | `url.go:42-48` | Security | **SSRF: redirect target scheme not validated.** `CheckRedirect` limits redirect count but does not validate the redirect target URL's scheme. A redirect to `file://` is possible before the dialer is invoked. |
+| B-9 | ws | `client.go:35-38` | Security | **WebSocket origin check disabled.** `InsecureSkipVerify: true` allows any website to connect via WebSocket (cross-site WebSocket hijacking). |
+| B-10 | ws | `client.go:45-46` | Security | **No WebSocket auth timeout.** After accepting the upgrade, `conn.Read` blocks indefinitely waiting for the auth message. Malicious clients can hold connections open without authenticating. |
+| B-11 | server | `middleware.go:51,57,63,86` | Correctness | **`http.Error` sets Content-Type to `text/plain` but body is JSON.** Auth middleware and recovery middleware write JSON-formatted error bodies but `http.Error()` sets `Content-Type: text/plain`. Clients parsing Content-Type will not attempt JSON decode. |
+| B-12 | note | `store.go:133-158` | Correctness | **`Since`/`Until` filters use `created_at` but default sort uses `updated_at`.** Users filtering by time range likely expect the filter and sort to apply to the same column. A note modified within the range but created outside it is excluded. |
+| B-13 | auth, note, project | `auth/store.go:91-92,145`, `note/store.go:531-532`, `project/store.go:68-69` | Correctness | **Silently discarded `time.Parse` errors.** If stored timestamps are malformed, fields silently become zero-value (`time.Time{}`), causing downstream logic errors. |
+| B-14 | ai | `synthesizer.go:63-93,146-179` | Correctness | **No `rows.Err()` check after `Next()` loops.** If `dbRows.Next()` terminates due to a scan error, the error is swallowed and synthesis proceeds with incomplete data. |
+| B-15 | main | `main.go:57-70` | Architecture | **`noteBodyAdapter.UpdateNoteBody` bypasses service layer.** Directly executes raw SQL `UPDATE` against the notes table. The `.md` file on disk is not updated, no wikilink re-parsing occurs, and no `content_hash` update happens -- causing DB/disk divergence. |
+| B-16 | main | `main.go:468-478` | Correctness | **Incorrect shutdown order.** WebSocket connections are closed before the HTTP server stops accepting new connections. New WS connections can be accepted between `hub.CloseAll()` and `srv.Shutdown()`. |
+| B-17 | auth | `service.go:220-243` | Resource leak | **Refresh token accumulation with no cap per user.** Every login creates a new refresh token. No limit on active tokens per user and no cleanup of old ones. |
+| B-18 | auth | store/service | Resource leak | **No expired refresh token cleanup job.** Expired tokens are only deleted when used. Unused expired tokens remain in the database indefinitely. |
+| B-19 | note | `service.go:594-601` | Correctness | **Unbounded loop in `uniqueFilename`.** `for i := 2; ; i++` runs indefinitely if the filesystem has a pathological state. Should have a reasonable upper bound (e.g., 10000). |
+| B-20 | note | `store.go:328-334` | Correctness | **SQL LIKE wildcards not escaped in `ResolveLink`.** `linkText` from wikilinks is used directly in a `LIKE` pattern. A link text containing `%` or `_` matches unintended rows. |
+| B-21 | note | `store.go:344-361` | Performance | **Full table scan for slug-match link resolution.** Step 3 of `ResolveLink` loads ALL notes into memory for slug comparison. Same issue in `ResolveDanglingLinks` (lines 416-438). |
+| B-22 | search | `service.go:32-34` | Concurrency | **Race condition on `Service.semantic` field.** `SetSemanticSearcher()` writes without synchronization while `SearchSemantic()` reads concurrently. |
+| B-23 | search | `semantic.go:151-197` | Correctness | **`extractSnippet` slices bytes not runes.** `body[start:end]` can split a multi-byte UTF-8 character in half, producing invalid UTF-8. |
+| B-24 | capture | `voice.go:81` | Security | **Unbounded `io.Copy` for audio data.** Copies the entire audio stream to disk without size limit. |
+| B-25 | ai | `handler.go:77,105,275`, `chat.go:54`, `writer.go:83` | Security | **No max length on query/selection input strings.** A 100MB query string would be forwarded to Ollama, potentially causing OOM. |
+| B-26 | web | multiple pages | Security | **XSS risk via `dangerouslySetInnerHTML`.** FTS snippets from the backend and markdown-rendered content are injected as raw HTML without sanitization (SearchPage, Sidebar, NoteEditorPage, AskPage, SynthesisModal). `markdown-it` with `linkify: true` does not block `javascript:` URLs. |
+| B-27 | web | `AskPage.tsx:38-58` | Concurrency | **Stale closure in AskPage streaming handler.** `chat.done` handler reads `streamingContent` from a stale closure. The completed message may be missing tokens. Should use a ref. |
+| B-28 | web | `InboxPage.tsx:88-96`, `ProjectPage.tsx:111-117` | Correctness | **"Load More" replaces notes instead of appending.** `noteStore.fetchNotes` does `set({ notes })` which replaces the entire array. Clicking "Load more" loses the previously loaded notes. |
+| B-29 | web | `NoteEditorPage.tsx:304` | Performance | **`renderMarkdown(content)` called on every render without `useMemo`.** CPU-intensive markdown rendering runs even when the preview pane is hidden (`viewMode === 'editor'`). |
+| B-30 | web | `NoteEditorPage.tsx:80-82` | Performance | **`getOrphanNotes()` fetches ALL orphans to check one note.** Expensive for large note collections. Should use a per-note endpoint or cache. |
+
+---
+
+### Low Severity (35+ issues)
+
+| ID | Package | File:Line(s) | Category | Description |
+|----|---------|-------------|----------|-------------|
+| C-1 | auth, userdb | `auth/store.go:174`, `userdb/manager.go:212` | Reliability | No SQLite `MaxOpenConns` set. Default unlimited connections can cause `SQLITE_BUSY` errors under write contention. |
+| C-2 | config | `config.go:175` | Correctness | `DataDir` not resolved to absolute path. Relative paths (e.g., `./data`) resolve differently based on working directory. |
+| C-3 | userdb | `manager.go:160-167` | Spec gap | `EnsureUserDirs` does not create `notes/inbox/` subdirectory. TEST_PLAN.md expects it. |
+| C-4 | server | `middleware.go:74-92` | Observability | Recovery middleware missing stack trace. Uses `debug.Stack()` would help debug panics in production. |
+| C-5 | main | `main.go:83-86` | Config | Logging level hardcoded to DEBUG. No config option for log level or format. |
+| C-6 | server | `server.go` | Deployment | No static file serving for production frontend. `web/dist/` is not served by the Go server. |
+| C-7 | server | `server.go:63-64` | Config | CORS origins not configurable. Hardcoded to `localhost`/`127.0.0.1` only, blocking LAN access. |
+| C-8 | all handlers | various | Code quality | Duplicated `writeJSON`/`writeError` across 6+ handler files. Should extract to shared package. |
+| C-9 | all handlers | various | Correctness | `writeJSON` ignores `json.Encoder.Encode` errors. |
+| C-10 | various | 5+ locations | Correctness | `ulid.MustNew` can panic on entropy failure. Should use non-panicking `ulid.New()` in server code. |
+| C-11 | note | `store.go:201-208` | Performance | N+1 query for tags in `note.Store.List`. Each note triggers a separate `loadTags` query. |
+| C-12 | ai | `queue.go:61` | Concurrency | `RegisterHandler` writes to `q.handlers` map without lock. Safe only if all handlers are registered before `Run()` starts. |
+| C-13 | ai | `chroma.go:126-133,229-236,266-273` | Performance | ChromaDB response bodies not drained on success. Prevents HTTP connection reuse. |
+| C-14 | ai | `ollama.go:219` | Correctness | Silently skips malformed JSON lines in Ollama streaming. No logging or error signal. |
+| C-15 | ai | `task.go:19` | Dead code | `TaskTypeTranscribe = "transcribe"` defined but no handler registered anywhere. |
+| C-16 | main | `main.go:187,378` | Dead code | Duplicate `ChatService` instantiation. Two separate instances created with identical arguments. |
+| C-17 | project | `service.go:281-286` | Performance | Regex recompiled on every `Slugify` call. Should be package-level `var`. |
+| C-18 | note | `handler.go:257-331` | Architecture | `backlinks` and `listTags` handlers bypass service layer, directly accessing `service.store` and `service.userDBManager`. |
+| C-19 | project | `service.go:214-237` | Correctness | Project cascade-to-inbox does not update YAML frontmatter on disk. File still contains `project: old-slug`. |
+| C-20 | ws | `client.go:168-179` | Dead code | `writeError` function defined but never called. |
+| C-21 | watcher | `reconcile.go:82-87` | Correctness | Mtime comparison has 1-second blind spot due to RFC3339 second precision vs nanosecond mtime. |
+| C-22 | watcher | `reconcile.go:103-115` | Correctness | No context cancellation check in delete-detection loop. Causes slow shutdown with many orphaned entries. |
+| C-23 | watcher | `watcher.go:75-103` | Concurrency | `Watch`/`Unwatch` race on concurrent calls for same user. `WalkDir` and `fsWatcher.Add/Remove` execute outside the mutex. |
+| C-24 | search | `semantic.go:99-120` | Performance | N+1 DB query per note in semantic search snippet retrieval. |
+| C-25 | search | `semantic.go:134-147` | Correctness | `getNoteSnippet` silently swallows DB errors. Returns empty string with no logging. |
+| C-26 | graph | `service.go:274-307` | Correctness | `GetOrphanNotes` does not load tags or project names. Inconsistent with `GetGraph` which loads both. |
+| C-27 | graph | `handler.go:53-61` | Correctness | Invalid date parameters silently ignored. No HTTP 400 returned. |
+| C-28 | graph | `service.go:281-289` | Performance | No upper limit on orphan notes query result size. |
+| C-29 | ai | `embedder.go:107-127` | Performance | `DeleteNoteEmbeddings` sends 500 chunk IDs per delete regardless of actual chunk count. |
+| C-30 | ai | `chroma.go:38-39` | Config | ChromaDB client has 30s hardcoded timeout, not configurable. |
+| C-31 | note | `store.go:293` | Correctness | `INSERT OR IGNORE` in `UpdateLinks` silently drops links with duplicate `link_text` but different display text. |
+| C-32 | main | `main.go:304-309` | Correctness | Swallowed `Enqueue` errors for embed/delete tasks. If persistence fails, the task is silently lost. |
+| C-33 | auth | `service.go:85-98` | Semantics | `ErrInvalidCredentials` used for validation errors in Register. Conflates authentication failures with input validation errors. |
+| C-34 | config | `config.go:140-171` | Spec gap | Default Whisper binary path (`whisper-cli`) not applied in `applyDefaults`. |
+| C-35 | note | `store.go:122-128` | Correctness | `ProjectID` and `InboxOnly` not mutually exclusive at store level (handler prevents this, but store does not). |
+
+---
+
+### Frontend-Specific Low Severity
+
+| ID | Area | Description |
+|----|------|-------------|
+| C-F1 | `api/client.ts:44` | Refresh token stored in localStorage (vulnerable to XSS). HttpOnly cookies would be more secure. |
+| C-F2 | `api/client.ts:203-242,431-482` | `listNotes`, `searchFTS`, `captureVoice` bypass the `request()` helper, duplicating auth/retry logic. |
+| C-F3 | `api/client.ts:379,387` | Template name not URL-encoded in path interpolation. |
+| C-F4 | Stores | `noteStore` and `projectStore` methods (`createNote`, `updateNote`, `deleteNote`, `createProject`) do not catch errors internally. Callers must handle. |
+| C-F5 | `NoteEditorPage.tsx:149-156` | `handleDelete` missing error handling. If deletion fails, `navigate('/')` never executes. |
+| C-F6 | `NoteEditorPage.tsx` | Dropdown menus lack ARIA roles (`role="menu"`, `aria-expanded`), keyboard navigation, and outside-click handlers. |
+| C-F7 | `CaptureModal.tsx`, `SynthesisModal.tsx` | Missing focus trap in modals. Tab key can escape to elements behind the backdrop. |
+| C-F8 | `CaptureModal.tsx:178-182` | Backdrop click discards content without confirmation (unlike Escape key which shows confirm dialog). |
+| C-F9 | `Layout.tsx:16-32`, `Sidebar.tsx:53-55` | `useKeyboard` hook creates new bindings array on every render, causing listener re-registration. Should use `useMemo`. |
+| C-F10 | `AskPage.tsx:23` | `useStreaming` state never toggled. Non-streaming code path is unreachable dead code. |
+| C-F11 | `NoteEditorPage/editorTheme.ts:22` | Uses `!important` (violates FE_DESIGN.md / AGENTS.md rule: "Never use `!important`"). |
+| C-F12 | `Sidebar.tsx:374-381` | Settings button actually logs out. Misleading `title="Settings"` and `aria-label="Settings"` with Settings icon but `onClick` calls `handleLogout`. |
+| C-F13 | `wikilinkExtension.ts:63` | `lastFetch` variable written but never read (dead code). |
+| C-F14 | `GraphPage.tsx:12` | `cytoscape.use(fcose)` called at module level. Double-registration in hot-reload can throw. |
+| C-F15 | Search pages | Search debounce does not cancel in-flight requests. Stale responses can overwrite newer results. Should use `AbortController`. |
+| C-F16 | `api/client.ts` | Concurrent token refresh requests not deduplicated. Multiple 401s trigger parallel refresh calls. |
+
+---
+
+### Spec Mismatches
+
+| ID | Description |
+|----|-------------|
+| S-1 | AI routes at `/api/ai/notes/{id}/assist` and `/api/ai/notes/{id}/related` instead of `/api/notes/{id}/ai-assist` and `/api/notes/{id}/related` per IMP_PLAN.md. |
+| S-2 | Missing `internal/userdb/migrate.go` -- no migration version tracking. Uses `IF NOT EXISTS` only, which cannot handle future `ALTER TABLE` migrations. |
+| S-3 | Many TEST_PLAN.md test cases not implemented (auth handler edge cases, JWT edge cases, middleware tests, store validation tests). |
+| S-4 | `models.transcription` default value for Whisper binary path not applied in `applyDefaults`. |
+
+---
+
+### Recommended Fix Priority
+
+1. **A-1, A-2**: Add path traversal validation (reject `..`, absolute paths, null bytes) to `userdb.Manager` and `note.Service.Reindex`
+2. **A-3, A-4**: Fix SSRF -- add `IsUnspecified()` check; connect to validated IP directly instead of re-resolving DNS
+3. **A-5, A-6**: Add input validation for note titles, project names, tags per AGENTS.md security invariants
+4. **A-7**: Wrap multi-step DB operations in transactions (note Create/Update/Reindex, project Delete)
+5. **A-8**: Fix stale tags -- apply new tags to frontmatter before writing file to disk
+6. **A-9**: Fix project rename to update `notes.file_path` for all affected notes
+7. **B-1**: Add `http.MaxBytesReader` on all handler JSON decode paths (1-10MB limit)
+8. **B-2**: Remove `WriteTimeout` from HTTP server (breaks WebSocket/streaming) or use per-handler timeouts
+9. **B-26**: Add DOMPurify for all `dangerouslySetInnerHTML` usage; configure markdown-it to reject `javascript:` URLs
+10. **B-27**: Fix AskPage stale closure -- use `useRef` for streaming content accumulation
+
+---
+
+*Last updated: 2026-03-09 (Post-implementation audit)*

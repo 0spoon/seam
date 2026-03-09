@@ -21,6 +21,7 @@ type Config struct {
 	OllamaBaseURL string        `yaml:"ollama_base_url"`
 	ChromaDBURL   string        `yaml:"chromadb_url"`
 	Models        ModelsConfig  `yaml:"models"`
+	Whisper       WhisperConfig `yaml:"whisper"`
 	Auth          AuthConfig    `yaml:"auth"`
 	AI            AIConfig      `yaml:"ai"`
 	UserDB        UserDBConfig  `yaml:"userdb"`
@@ -29,10 +30,18 @@ type Config struct {
 
 // ModelsConfig specifies the AI model names.
 type ModelsConfig struct {
-	Embeddings    string `yaml:"embeddings"`
-	Background    string `yaml:"background"`
-	Chat          string `yaml:"chat"`
-	Transcription string `yaml:"transcription"`
+	Embeddings string `yaml:"embeddings"`
+	Background string `yaml:"background"`
+	Chat       string `yaml:"chat"`
+}
+
+// WhisperConfig specifies local whisper.cpp transcription settings.
+type WhisperConfig struct {
+	// ModelPath is the path to the ggml model file (e.g. ggml-base.en.bin).
+	ModelPath string `yaml:"model_path"`
+	// BinaryPath is the path to the whisper-cli executable.
+	// Defaults to "whisper-cli" (looked up on PATH).
+	BinaryPath string `yaml:"binary_path"`
 }
 
 // AuthConfig specifies authentication parameters.
@@ -199,8 +208,8 @@ func validate(cfg *Config) error {
 	if cfg.ChromaDBURL == "" {
 		slog.Warn("chromadb_url not configured; semantic search (Phase 2) will not be available")
 	}
-	if cfg.Models.Transcription == "" {
-		slog.Warn("models.transcription not configured; voice capture (Phase 3) will not be available")
+	if cfg.Whisper.ModelPath == "" {
+		slog.Warn("whisper.model_path not configured; voice capture will not be available")
 	}
 
 	if len(errs) > 0 {

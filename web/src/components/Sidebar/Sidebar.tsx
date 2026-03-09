@@ -20,6 +20,7 @@ import { searchFTS } from '../../api/client';
 import type { FTSResult } from '../../api/types';
 import styles from './Sidebar.module.css';
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { Check } from 'lucide-react';
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -38,8 +39,12 @@ export function Sidebar() {
   const searchRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const createProject = useProjectStore((s) => s.createProject);
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [tagsExpanded, setTagsExpanded] = useState(true);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const newProjectRef = useRef<HTMLInputElement>(null);
 
   const focusSearch = useCallback(() => {
     searchRef.current?.focus();
@@ -125,6 +130,25 @@ export function Sidebar() {
       }
     }
   };
+
+  const handleCreateProject = useCallback(async () => {
+    const name = newProjectName.trim();
+    if (!name) return;
+    try {
+      const project = await createProject({ name });
+      setShowNewProject(false);
+      setNewProjectName('');
+      navigate(`/projects/${project.id}`);
+    } catch {
+      // Failed silently
+    }
+  }, [newProjectName, createProject, navigate]);
+
+  useEffect(() => {
+    if (showNewProject) {
+      setTimeout(() => newProjectRef.current?.focus(), 50);
+    }
+  }, [showNewProject]);
 
   const isActive = (path: string) => location.pathname === path;
   const isProjectActive = (id: string) =>
@@ -243,12 +267,48 @@ export function Sidebar() {
         {/* Projects */}
         <div className={styles.section}>
           {!collapsed && (
-            <button
-              className={styles.sectionHeader}
-              onClick={() => setProjectsExpanded(!projectsExpanded)}
-            >
-              Projects
-            </button>
+            <div className={styles.sectionHeaderRow}>
+              <button
+                className={styles.sectionHeader}
+                onClick={() => setProjectsExpanded(!projectsExpanded)}
+              >
+                Projects
+              </button>
+              <button
+                className={styles.sectionAction}
+                onClick={() => setShowNewProject(!showNewProject)}
+                title="Create project"
+                aria-label="Create project"
+              >
+                <Plus size={12} />
+              </button>
+            </div>
+          )}
+          {!collapsed && showNewProject && (
+            <div className={styles.newProjectRow}>
+              <input
+                ref={newProjectRef}
+                className={styles.newProjectInput}
+                placeholder="Project name"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateProject();
+                  if (e.key === 'Escape') {
+                    setShowNewProject(false);
+                    setNewProjectName('');
+                  }
+                }}
+              />
+              <button
+                className={styles.newProjectConfirm}
+                onClick={handleCreateProject}
+                disabled={!newProjectName.trim()}
+                aria-label="Confirm"
+              >
+                <Check size={12} />
+              </button>
+            </div>
           )}
           {(collapsed || projectsExpanded) &&
             projects.map((project, index) => (

@@ -22,6 +22,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { getRelatedNotes, aiAssist, getTwoHopBacklinks, getOrphanNotes } from '../../api/client';
@@ -49,6 +50,7 @@ export function NoteEditorPage() {
   const deleteNote = useNoteStore((s) => s.deleteNote);
   const fetchBacklinks = useNoteStore((s) => s.fetchBacklinks);
   const clearCurrentNote = useNoteStore((s) => s.clearCurrentNote);
+  const projects = useProjectStore((s) => s.projects);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
   const toggleRightPanel = useUIStore((s) => s.toggleRightPanel);
 
@@ -184,6 +186,15 @@ export function NoteEditorPage() {
       prev.filter((s) => s.target_title !== targetTitle),
     );
   }, []);
+
+  const handleProjectChange = useCallback(async (newProjectId: string) => {
+    if (!id) return;
+    try {
+      await updateNote(id, { project_id: newProjectId || null });
+    } catch {
+      // Failed silently
+    }
+  }, [id, updateNote]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -644,6 +655,24 @@ export function NoteEditorPage() {
                   <p className={styles.panelEmpty}>No tags</p>
                 )}
               </div>
+            </section>
+
+            {/* Project */}
+            <section className={styles.panelSection}>
+              <h3 className={styles.panelSectionTitle}>Project</h3>
+              <select
+                className={styles.projectSelect}
+                value={currentNote?.project_id ?? ''}
+                onChange={(e) => handleProjectChange(e.target.value)}
+                aria-label="Assign project"
+              >
+                <option value="">Inbox</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
             </section>
 
             {/* Metadata */}

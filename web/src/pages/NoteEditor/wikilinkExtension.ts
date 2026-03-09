@@ -2,7 +2,7 @@ import {
   ViewPlugin,
   Decoration,
   type DecorationSet,
-  type EditorView,
+  EditorView,
   type ViewUpdate,
   MatchDecorator,
   WidgetType,

@@ -183,9 +183,14 @@
   margin-top: var(--space-2);
 }
 
+.sectionHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .sectionHeader {
   display: block;
-  width: 100%;
   text-align: left;
   padding: var(--space-1) var(--space-2);
   font-family: var(--font-ui);
@@ -198,6 +203,71 @@
 
 .sectionHeader:hover {
   color: var(--text-secondary);
+}
+
+.sectionAction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition: background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.sectionAction:hover {
+  background: var(--bg-elevated);
+  color: var(--accent-primary);
+}
+
+.newProjectRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+}
+
+.newProjectInput {
+  flex: 1;
+  height: 26px;
+  padding: 0 var(--space-2);
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+}
+
+.newProjectInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+.newProjectInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.newProjectConfirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--accent-primary);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.newProjectConfirm:hover:not(:disabled) {
+  background: var(--accent-muted);
+}
+
+.newProjectConfirm:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
 }
 
 .divider {

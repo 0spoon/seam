@@ -27,7 +27,14 @@ models:
   embeddings: "qwen3-embedding:8b"
   background: "qwen3:32b"
   chat: "qwen3:32b"
-  transcription: "whisper"     # optional; required for voice capture
+
+# Whisper.cpp settings for voice transcription. Optional; required for voice capture.
+# Install: brew install whisper-cpp
+# Download model: curl -L -o ~/.local/share/seam/models/ggml-base.en.bin \
+#   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+whisper:
+  model_path: ""                    # path to ggml model file (e.g. ~/.local/share/seam/models/ggml-base.en.bin)
+  binary_path: "whisper-cli"        # optional; defaults to "whisper-cli" on PATH
 
 # Authentication settings.
 auth:

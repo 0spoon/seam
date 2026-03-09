@@ -70,7 +70,7 @@ export function ProjectPage() {
           </button>
           <button
             className={styles.newNoteButton}
-            onClick={() => setCaptureModalOpen(true)}
+            onClick={() => setCaptureModalOpen(true, id)}
           >
             <Plus size={14} />
             <span>New note</span>
@@ -92,7 +92,7 @@ export function ProjectPage() {
           subtext="Create the first note in this project"
           action={{
             label: 'New note',
-            onClick: () => setCaptureModalOpen(true),
+            onClick: () => setCaptureModalOpen(true, id),
           }}
         />
       ) : (

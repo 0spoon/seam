@@ -7,7 +7,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -16,71 +18,151 @@ import (
 	"github.com/katata/seam/internal/reqctx"
 )
 
+// fakeWhisperScript creates a shell script that mimics whisper-cli.
+// It writes a JSON output file to the path derived from -of flag.
+func fakeWhisperScript(t *testing.T, text string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "whisper-cli")
+
+	// The script parses -of to find the output file base, then writes .json.
+	content := `#!/bin/sh
+OF=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -of) OF="$2"; shift 2;;
+    *) shift;;
+  esac
+done
+if [ -n "$OF" ]; then
+  cat > "${OF}.json" <<'JSONEOF'
+{"transcription":[{"text":"` + text + `"}]}
+JSONEOF
+fi
+`
+	err := os.WriteFile(script, []byte(content), 0o755)
+	require.NoError(t, err)
+	return script
+}
+
+// fakeWhisperScriptError creates a script that exits with an error.
+func fakeWhisperScriptError(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "whisper-cli")
+	content := `#!/bin/sh
+echo "error: model not found" >&2
+exit 1
+`
+	err := os.WriteFile(script, []byte(content), 0o755)
+	require.NoError(t, err)
+	return script
+}
+
+// fakeWhisperScriptEmpty creates a script that outputs empty transcription.
+func fakeWhisperScriptEmpty(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "whisper-cli")
+	content := `#!/bin/sh
+OF=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -of) OF="$2"; shift 2;;
+    *) shift;;
+  esac
+done
+if [ -n "$OF" ]; then
+  cat > "${OF}.json" <<'JSONEOF'
+{"transcription":[{"text":""}]}
+JSONEOF
+fi
+`
+	err := os.WriteFile(script, []byte(content), 0o755)
+	require.NoError(t, err)
+	return script
+}
+
 func TestTranscribe_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1/audio/transcriptions", r.URL.Path)
-		require.True(t, strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data"))
+	script := fakeWhisperScript(t, "This is the transcribed text from the audio recording.")
 
-		// Verify multipart form contains model and file.
-		err := r.ParseMultipartForm(10 << 20)
-		require.NoError(t, err)
-		require.Equal(t, "whisper", r.FormValue("model"))
+	// Model path can be any file -- the fake script ignores it.
+	modelPath := filepath.Join(t.TempDir(), "fake-model.bin")
+	require.NoError(t, os.WriteFile(modelPath, []byte("fake"), 0o644))
 
-		file, header, err := r.FormFile("file")
-		require.NoError(t, err)
-		defer file.Close()
-		require.Equal(t, "test.wav", header.Filename)
+	transcriber := NewVoiceTranscriber(script, modelPath)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"text": "This is the transcribed text from the audio recording.",
-		})
-	}))
-	defer srv.Close()
-
-	transcriber := NewVoiceTranscriber(srv.URL, "whisper")
-	transcriber.client = srv.Client()
-
-	result, err := transcriber.Transcribe(context.Background(), strings.NewReader("fake audio data"), "test.wav")
+	result, err := transcriber.Transcribe(context.Background(), bytes.NewReader([]byte("fake audio data")), "test.wav")
 	require.NoError(t, err)
 	require.Equal(t, "This is the transcribed text from the audio recording.", result.Text)
 }
 
-func TestTranscribe_ServerError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("model not loaded"))
-	}))
-	defer srv.Close()
+func TestTranscribe_CLIError(t *testing.T) {
+	script := fakeWhisperScriptError(t)
+	modelPath := filepath.Join(t.TempDir(), "fake-model.bin")
+	require.NoError(t, os.WriteFile(modelPath, []byte("fake"), 0o644))
 
-	transcriber := NewVoiceTranscriber(srv.URL, "whisper")
-	transcriber.client = srv.Client()
+	transcriber := NewVoiceTranscriber(script, modelPath)
 
-	_, err := transcriber.Transcribe(context.Background(), strings.NewReader("fake audio"), "test.wav")
+	_, err := transcriber.Transcribe(context.Background(), bytes.NewReader([]byte("fake audio")), "test.wav")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "status 500")
+	require.Contains(t, err.Error(), "whisper-cli")
+}
+
+func TestTranscribe_BinaryNotFound(t *testing.T) {
+	transcriber := NewVoiceTranscriber("/nonexistent/whisper-cli", "/nonexistent/model.bin")
+
+	_, err := transcriber.Transcribe(context.Background(), bytes.NewReader([]byte("audio")), "test.wav")
+	require.Error(t, err)
 }
 
 func TestTranscribe_DefaultFilename(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		err := r.ParseMultipartForm(10 << 20)
-		require.NoError(t, err)
+	script := fakeWhisperScript(t, "hello")
+	modelPath := filepath.Join(t.TempDir(), "fake-model.bin")
+	require.NoError(t, os.WriteFile(modelPath, []byte("fake"), 0o644))
 
-		_, header, err := r.FormFile("file")
-		require.NoError(t, err)
-		require.Equal(t, "audio.wav", header.Filename)
+	transcriber := NewVoiceTranscriber(script, modelPath)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"text": "hello"})
-	}))
-	defer srv.Close()
-
-	transcriber := NewVoiceTranscriber(srv.URL, "whisper")
-	transcriber.client = srv.Client()
-
-	result, err := transcriber.Transcribe(context.Background(), strings.NewReader("audio"), "")
+	result, err := transcriber.Transcribe(context.Background(), bytes.NewReader([]byte("audio")), "")
 	require.NoError(t, err)
 	require.Equal(t, "hello", result.Text)
+}
+
+func TestTranscribe_EmptyResult(t *testing.T) {
+	script := fakeWhisperScriptEmpty(t)
+	modelPath := filepath.Join(t.TempDir(), "fake-model.bin")
+	require.NoError(t, os.WriteFile(modelPath, []byte("fake"), 0o644))
+
+	transcriber := NewVoiceTranscriber(script, modelPath)
+
+	result, err := transcriber.Transcribe(context.Background(), bytes.NewReader([]byte("")), "empty.wav")
+	require.NoError(t, err)
+	require.Equal(t, "", result.Text)
+}
+
+func TestTranscribe_ContextCancelled(t *testing.T) {
+	// Use a real binary that would take time, but cancel immediately.
+	_, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep not available")
+	}
+
+	// Create a script that sleeps forever.
+	dir := t.TempDir()
+	script := filepath.Join(dir, "whisper-cli")
+	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nsleep 60\n"), 0o755))
+	modelPath := filepath.Join(dir, "fake-model.bin")
+	require.NoError(t, os.WriteFile(modelPath, []byte("fake"), 0o644))
+
+	transcriber := NewVoiceTranscriber(script, modelPath)
+	transcriber.timeout = 1 // 1 nanosecond -- will timeout immediately
+
+	ctx := context.Background()
+	_, err = transcriber.Transcribe(ctx, bytes.NewReader([]byte("audio")), "test.wav")
+	require.Error(t, err)
 }
 
 func TestGenerateTitle(t *testing.T) {
@@ -114,28 +196,10 @@ func TestGenerateTitle(t *testing.T) {
 	}
 }
 
-func TestTranscribe_EmptyAudio(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1/audio/transcriptions", r.URL.Path)
-
-		err := r.ParseMultipartForm(10 << 20)
-		require.NoError(t, err)
-
-		file, _, err := r.FormFile("file")
-		require.NoError(t, err)
-		defer file.Close()
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"text": ""})
-	}))
-	defer srv.Close()
-
-	transcriber := NewVoiceTranscriber(srv.URL, "whisper")
-	transcriber.client = srv.Client()
-
-	result, err := transcriber.Transcribe(context.Background(), strings.NewReader(""), "empty.wav")
-	require.NoError(t, err)
-	require.Equal(t, "", result.Text)
+func TestNewVoiceTranscriber_DefaultBinary(t *testing.T) {
+	vt := NewVoiceTranscriber("", "/some/model.bin")
+	require.Equal(t, "whisper-cli", vt.binaryPath)
+	require.Equal(t, "/some/model.bin", vt.modelPath)
 }
 
 func TestService_SetSummarizeFunc(t *testing.T) {

@@ -201,9 +201,9 @@ func TestService_Delete_NonEmptyDir(t *testing.T) {
 	err = svc.Delete(ctx, testUserID, created.ID, "delete")
 	require.NoError(t, err)
 
-	// Directory should still exist because it was not empty.
+	// Directory should be removed (RemoveAll cleans up everything).
 	_, err = os.Stat(projectDir)
-	require.NoError(t, err)
+	require.True(t, os.IsNotExist(err))
 }
 
 func TestService_Delete_NotFound(t *testing.T) {

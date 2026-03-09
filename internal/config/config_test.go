@@ -104,7 +104,7 @@ models:
 	require.NoError(t, err)
 
 	require.Equal(t, ":8080", cfg.Listen)
-	require.Equal(t, "http://localhost:11434", cfg.OllamaBaseURL)
+	require.Empty(t, cfg.OllamaBaseURL)
 	require.Equal(t, 15*time.Minute, cfg.Auth.AccessTokenTTL.Duration)
 	require.Equal(t, 168*time.Hour, cfg.Auth.RefreshTokenTTL.Duration)
 	require.Equal(t, 12, cfg.Auth.BcryptCost)
@@ -135,17 +135,17 @@ func TestLoad_MissingRequiredFields(t *testing.T) {
 		},
 		{
 			name:    "missing models.embeddings",
-			config:  `data_dir: "/d"` + "\n" + `jwt_secret: "s"` + "\n" + `models: {background: "b", chat: "c"}`,
+			config:  `data_dir: "/d"` + "\n" + `jwt_secret: "test-secret-key-that-is-32-chars!"` + "\n" + `ollama_base_url: "http://localhost:11434"` + "\n" + `models: {background: "b", chat: "c"}`,
 			wantErr: "models.embeddings is required",
 		},
 		{
 			name:    "missing models.background",
-			config:  `data_dir: "/d"` + "\n" + `jwt_secret: "s"` + "\n" + `models: {embeddings: "e", chat: "c"}`,
+			config:  `data_dir: "/d"` + "\n" + `jwt_secret: "test-secret-key-that-is-32-chars!"` + "\n" + `ollama_base_url: "http://localhost:11434"` + "\n" + `models: {embeddings: "e", chat: "c"}`,
 			wantErr: "models.background is required",
 		},
 		{
 			name:    "missing models.chat",
-			config:  `data_dir: "/d"` + "\n" + `jwt_secret: "s"` + "\n" + `models: {embeddings: "e", background: "b"}`,
+			config:  `data_dir: "/d"` + "\n" + `jwt_secret: "test-secret-key-that-is-32-chars!"` + "\n" + `ollama_base_url: "http://localhost:11434"` + "\n" + `models: {embeddings: "e", background: "b"}`,
 			wantErr: "models.chat is required",
 		},
 	}
@@ -235,7 +235,7 @@ func TestLoad_FileNotFound(t *testing.T) {
 	clearEnv(t)
 	_, err := Load("/nonexistent/path/config.yaml")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "read file")
+	require.Contains(t, err.Error(), "validation failed")
 }
 
 func TestLoad_InvalidYAML(t *testing.T) {

@@ -126,7 +126,7 @@ func TestChromaClient_Query(t *testing.T) {
 		client := NewChromaClient(server.URL)
 		results, err := client.Query(context.Background(), "col-123", []float64{0.1}, 5)
 		require.NoError(t, err)
-		require.Nil(t, results)
+		require.Empty(t, results)
 	})
 }
 

@@ -32,6 +32,7 @@ import type {
   NoteVersion,
   Conversation,
   ChatHistoryMessage,
+  ResolvedLink,
 } from './types';
 
 const BASE_URL = '/api';
@@ -574,4 +575,9 @@ export async function restoreVersion(
   return request<Note>(`/notes/${noteId}/versions/${version}/restore`, {
     method: 'POST',
   });
+}
+
+// Wikilink resolution
+export async function resolveWikilink(title: string): Promise<ResolvedLink> {
+  return request<ResolvedLink>(`/notes/resolve?title=${encodeURIComponent(title)}`);
 }

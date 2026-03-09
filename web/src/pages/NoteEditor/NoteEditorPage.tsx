@@ -35,8 +35,10 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useToastStore } from '../../components/Toast/ToastContainer';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { getRelatedNotes, aiAssist, getTwoHopBacklinks } from '../../api/client';
+import { getRelatedNotes, aiAssist, getTwoHopBacklinks, resolveWikilink, createNote as apiCreateNote } from '../../api/client';
 import { renderMarkdown } from '../../lib/markdown';
+import { getCached, setCache, invalidateCache } from '../../lib/wikilinkCache';
+import { LinkPreviewCard } from '../../components/LinkPreviewCard/LinkPreviewCard';
 import { sanitizeHtml } from '../../lib/sanitize';
 import { timeAgo, formatDateTime } from '../../lib/dates';
 import { saveDraft, getDraft, clearDraft } from '../../lib/drafts';
@@ -57,7 +59,7 @@ import { useRecentNote } from '../../hooks/useRecentNotes';
 import { ZenModeExit } from '../../components/ZenModeExit/ZenModeExit';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { typewriterScrolling } from './typewriterExtension';
-import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
+import type { AIAssistReq, LinkSuggestion, RelatedNote, ResolvedLink, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
 export function NoteEditorPage() {
@@ -104,6 +106,12 @@ export function NoteEditorPage() {
   });
   const [showSlashHint, setShowSlashHint] = useState(false);
   const [draftBanner, setDraftBanner] = useState<{ title: string; body: string; savedAt: number } | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<{
+    link: ResolvedLink;
+    position: { top: number; left: number };
+  } | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const graceTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const titleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const contentRef = useRef('');
@@ -644,26 +652,99 @@ export function NoteEditorPage() {
     };
   }, [showMenu, showAIMenu]);
 
-  // Handle wikilink clicks in the preview pane.
+  // Handle wikilink clicks in the preview pane -- resolve directly to the note.
+  const handleWikilinkClick = useCallback(async (e: MouseEvent) => {
+    const target = (e.target as HTMLElement).closest('a[data-wikilink]');
+    if (!target) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const linkTitle = target.getAttribute('data-wikilink');
+    if (!linkTitle) return;
+
+    try {
+      let resolved = getCached(linkTitle);
+      if (!resolved) {
+        resolved = await resolveWikilink(linkTitle);
+        setCache(linkTitle, resolved);
+      }
+
+      if (!resolved.dangling && resolved.note_id) {
+        navigate(`/notes/${resolved.note_id}`);
+      } else {
+        // Show create-note prompt for dangling link.
+        const rect = target.getBoundingClientRect();
+        setHoverPreview({
+          link: resolved,
+          position: { top: rect.bottom + 8, left: rect.left },
+        });
+      }
+    } catch {
+      // Fall back to search navigation on error.
+      navigate(`/search?q=${encodeURIComponent(linkTitle)}`);
+    }
+  }, [navigate]);
+
+  // Handle wikilink hover preview in the preview pane.
   useEffect(() => {
-    const container = previewRef.current;
-    if (!container) return;
+    const previewEl = previewRef.current;
+    if (!previewEl) return;
+
+    const handleMouseOver = async (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('a[data-wikilink]');
+      if (!target) return;
+
+      clearTimeout(graceTimerRef.current);
+
+      const linkTitle = target.getAttribute('data-wikilink');
+      if (!linkTitle) return;
+
+      hoverTimerRef.current = setTimeout(async () => {
+        try {
+          let resolved = getCached(linkTitle);
+          if (!resolved) {
+            resolved = await resolveWikilink(linkTitle);
+            setCache(linkTitle, resolved);
+          }
+
+          const rect = target.getBoundingClientRect();
+          setHoverPreview({
+            link: resolved,
+            position: { top: rect.bottom + 8, left: rect.left },
+          });
+        } catch {
+          // Silently ignore hover resolution errors.
+        }
+      }, 300);
+    };
+
+    const handleMouseOut = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('a[data-wikilink]');
+      if (!target) return;
+
+      clearTimeout(hoverTimerRef.current);
+      graceTimerRef.current = setTimeout(() => {
+        setHoverPreview(null);
+      }, 150);
+    };
 
     const handleClick = (e: MouseEvent) => {
-      const anchor = (e.target as HTMLElement).closest('a[data-wikilink]');
-      if (!anchor) return;
-      e.preventDefault();
-      const target = anchor.getAttribute('data-wikilink');
-      if (target) {
-        navigate(`/search?q=${encodeURIComponent(target)}`);
-      }
+      handleWikilinkClick(e);
     };
 
-    container.addEventListener('click', handleClick);
+    previewEl.addEventListener('mouseover', handleMouseOver);
+    previewEl.addEventListener('mouseout', handleMouseOut);
+    previewEl.addEventListener('click', handleClick);
+
     return () => {
-      container.removeEventListener('click', handleClick);
+      previewEl.removeEventListener('mouseover', handleMouseOver);
+      previewEl.removeEventListener('mouseout', handleMouseOut);
+      previewEl.removeEventListener('click', handleClick);
+      clearTimeout(hoverTimerRef.current);
+      clearTimeout(graceTimerRef.current);
     };
-  }, [navigate, viewMode]);
+  }, [viewMode, content, handleWikilinkClick]);
 
   const handleRestoreDraft = useCallback(() => {
     if (!draftBanner || !id) return;
@@ -679,6 +760,17 @@ export function NoteEditorPage() {
     if (id) clearDraft(id);
     setDraftBanner(null);
   }, [id]);
+
+  const handleCreateFromDangling = useCallback(async (danglingTitle: string) => {
+    try {
+      const note = await apiCreateNote({ title: danglingTitle, body: '' });
+      invalidateCache();
+      setHoverPreview(null);
+      navigate(`/notes/${note.id}`);
+    } catch {
+      addToast('Failed to create note', 'error');
+    }
+  }, [navigate, addToast]);
 
   const wordStats = useMemo(() => {
     const chars = content.length;
@@ -1287,6 +1379,24 @@ export function NoteEditorPage() {
         )}
         </AnimatePresence>
         </>)}
+
+        {/* Wikilink hover preview card */}
+        {hoverPreview && (
+          <LinkPreviewCard
+            title={hoverPreview.link.title}
+            snippet={hoverPreview.link.snippet}
+            tags={hoverPreview.link.tags}
+            dangling={hoverPreview.link.dangling}
+            position={hoverPreview.position}
+            onCreateNote={handleCreateFromDangling}
+            onMouseEnter={() => clearTimeout(graceTimerRef.current)}
+            onMouseLeave={() => {
+              graceTimerRef.current = setTimeout(() => {
+                setHoverPreview(null);
+              }, 150);
+            }}
+          />
+        )}
       </div>
 
       {/* Save status */}

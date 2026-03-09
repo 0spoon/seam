@@ -54,6 +54,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/{id}", h.get)
 	r.Put("/{id}", h.update)
 	r.Delete("/{id}", h.delete)
+	r.Get("/resolve", h.resolveWikilink)
 	r.Get("/{id}/backlinks", h.backlinks)
 	r.Route("/{id}/versions", func(r chi.Router) {
 		r.Get("/", h.listVersions)
@@ -307,6 +308,54 @@ func (h *Handler) backlinks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, notes)
+}
+
+func (h *Handler) resolveWikilink(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	title := r.URL.Query().Get("title")
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "title parameter is required")
+		return
+	}
+
+	noteID, err := h.service.ResolveWikilink(r.Context(), userID, title)
+	if err != nil {
+		// Dangling link -- no matching note.
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"dangling": true,
+			"title":    title,
+		})
+		return
+	}
+
+	// Found a match -- fetch the note details.
+	note, err := h.service.Get(r.Context(), userID, noteID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"dangling": true,
+			"title":    title,
+		})
+		return
+	}
+
+	// Create a snippet (first ~200 chars of body).
+	snippet := note.Body
+	if len(snippet) > 200 {
+		snippet = snippet[:200] + "..."
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"dangling": false,
+		"note_id":  note.ID,
+		"title":    note.Title,
+		"snippet":  snippet,
+		"tags":     note.Tags,
+	})
 }
 
 // TagsRoutes returns a chi router for the /api/tags endpoint.

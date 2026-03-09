@@ -241,6 +241,15 @@ export interface NoteVersion {
   created_at: string;
 }
 
+// Feature 2: Wikilink resolution
+export interface ResolvedLink {
+  dangling: boolean;
+  note_id?: string;
+  title: string;
+  snippet?: string;
+  tags?: string[];
+}
+
 // Phase 4: Two-hop backlinks (includes the intermediate connecting note)
 export interface TwoHopBacklink {
   id: string;

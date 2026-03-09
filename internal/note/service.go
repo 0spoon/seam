@@ -291,6 +291,15 @@ func (s *Service) GetBacklinks(ctx context.Context, userID, noteID string) ([]*N
 	return notes, nil
 }
 
+// ResolveWikilink resolves a wikilink target string to a note ID.
+func (s *Service) ResolveWikilink(ctx context.Context, userID, title string) (string, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("note.Service.ResolveWikilink: %w", err)
+	}
+	return s.store.ResolveLink(ctx, db, title)
+}
+
 // ListTags returns all tags with note counts.
 func (s *Service) ListTags(ctx context.Context, userID string) ([]TagCount, error) {
 	db, err := s.userDBManager.Open(ctx, userID)

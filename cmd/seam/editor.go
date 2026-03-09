@@ -11,18 +11,20 @@ import (
 
 // editorModel handles the full-screen note editor.
 type editorModel struct {
-	client   *APIClient
-	noteID   string
-	title    string
-	body     textarea.Model
-	err      string
-	status   string
-	loading  bool
-	saving   bool
-	done     bool
-	modified bool
-	width    int
-	height   int
+	client        *APIClient
+	noteID        string
+	title         string
+	body          textarea.Model
+	err           string
+	status        string
+	loading       bool
+	saving        bool
+	done          bool
+	modified      bool
+	width         int
+	height        int
+	showAIAssist  bool
+	aiAssistModel aiAssistModel
 }
 
 // openEditorMsg triggers opening a note in the editor.
@@ -76,6 +78,11 @@ func (m editorModel) Init() tea.Cmd {
 }
 
 func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
+	// If AI assist overlay is open, delegate to it.
+	if m.showAIAssist {
+		return m.updateAIAssist(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -131,6 +138,14 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 				}
 				return noteSavedMsg{}
 			}
+
+		case "ctrl+a":
+			// Open AI assist command palette.
+			// Get the current selection from the textarea (if any).
+			selection := m.getSelection()
+			m.showAIAssist = true
+			m.aiAssistModel = newAIAssistModel(m.client, m.noteID, selection, m.width, m.height)
+			return m, m.aiAssistModel.Init()
 		}
 	}
 
@@ -144,9 +159,39 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 	return m, cmd
 }
 
+func (m editorModel) getSelection() string {
+	// The bubbles textarea does not expose selection state,
+	// so we pass empty string (the API will use the full note body).
+	return ""
+}
+
+func (m editorModel) updateAIAssist(msg tea.Msg) (editorModel, tea.Cmd) {
+	var cmd tea.Cmd
+	m.aiAssistModel, cmd = m.aiAssistModel.Update(msg)
+
+	if m.aiAssistModel.done {
+		m.showAIAssist = false
+		if m.aiAssistModel.applied && m.aiAssistModel.result != "" {
+			// Insert the AI result at the end of the note body.
+			current := m.body.Value()
+			updated := current + "\n\n" + m.aiAssistModel.result
+			m.body.SetValue(updated)
+			m.modified = true
+			m.status = "AI result inserted"
+		}
+		return m, nil
+	}
+
+	return m, cmd
+}
+
 func (m editorModel) View() string {
 	if m.width == 0 {
 		return ""
+	}
+
+	if m.showAIAssist {
+		return m.aiAssistModel.View()
 	}
 
 	// Header with title.
@@ -172,7 +217,7 @@ func (m editorModel) View() string {
 	if m.status != "" {
 		statusParts = append(statusParts, styleSuccess.Render(m.status))
 	}
-	statusParts = append(statusParts, styleMuted.Render("Ctrl+S: save | Esc: back"))
+	statusParts = append(statusParts, styleMuted.Render("Ctrl+S: save | Ctrl+A: AI assist | Esc: back"))
 	statusBar := styleStatusBar.Width(m.width).Render(strings.Join(statusParts, "  |  "))
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, bodyView, statusBar)

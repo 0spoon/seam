@@ -74,7 +74,7 @@ func setupTestHandler(t *testing.T) (*Handler, *mockDBManager) {
 	synth := NewSynthesizer(ollama, mockMgr, "chat-model", nil)
 	linker := NewAutoLinker(ollama, chroma, mockMgr, "embed-model", "chat-model", nil, nil)
 
-	handler := NewHandler(nil, chatSvc, synth, linker, embedder, mockMgr, nil)
+	handler := NewHandler(nil, chatSvc, synth, linker, embedder, nil, mockMgr, nil)
 	return handler, mockMgr
 }
 
@@ -165,6 +165,138 @@ func TestHandler_RelatedNotes_NotFound(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// setupTestHandlerWithWriter creates a Handler with a Writer configured for assist tests.
+func setupTestHandlerWithWriter(t *testing.T) (*Handler, *mockDBManager) {
+	t.Helper()
+
+	ollamaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := ollamaChatResponse{Done: true}
+		resp.Message.Role = "assistant"
+		resp.Message.Content = "Expanded text from AI."
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(ollamaServer.Close)
+
+	ollama := NewOllamaClient(ollamaServer.URL, 30*time.Second, 120*time.Second)
+	mockMgr := newMockDBManager()
+
+	// Seed data.
+	ctx := context.Background()
+	db, _ := mockMgr.Open(ctx, "user1")
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	db.ExecContext(ctx,
+		`INSERT INTO projects (id, name, slug, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		"proj1", "Test Project", "test-project", now, now)
+	db.ExecContext(ctx,
+		`INSERT INTO notes (id, title, project_id, file_path, body, content_hash, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"note1", "Test Note", "proj1", "test.md", "This is test content about caching", "h1", now, now)
+
+	writer := NewWriter(ollama, mockMgr, "chat-model", nil)
+	handler := NewHandler(nil, nil, nil, nil, nil, writer, mockMgr, nil)
+	return handler, mockMgr
+}
+
+func TestHandler_Assist_Success(t *testing.T) {
+	handler, _ := setupTestHandlerWithWriter(t)
+
+	body := `{"action":"expand","selection":"some text"}`
+	req := httptest.NewRequest(http.MethodPost, "/notes/note1/assist", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(reqctx.WithUserID(req.Context(), "user1"))
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Mount("/", handler.Routes())
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&result))
+	require.NotEmpty(t, result["result"])
+}
+
+func TestHandler_Assist_MissingAction(t *testing.T) {
+	handler, _ := setupTestHandlerWithWriter(t)
+
+	body := `{"selection":"some text"}`
+	req := httptest.NewRequest(http.MethodPost, "/notes/note1/assist", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(reqctx.WithUserID(req.Context(), "user1"))
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Mount("/", handler.Routes())
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_Assist_InvalidAction(t *testing.T) {
+	handler, _ := setupTestHandlerWithWriter(t)
+
+	body := `{"action":"invalid-action","selection":"some text"}`
+	req := httptest.NewRequest(http.MethodPost, "/notes/note1/assist", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(reqctx.WithUserID(req.Context(), "user1"))
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Mount("/", handler.Routes())
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&result))
+	require.Contains(t, result["error"], "invalid action")
+}
+
+func TestHandler_Assist_NoteNotFound(t *testing.T) {
+	handler, _ := setupTestHandlerWithWriter(t)
+
+	// No selection -- writer will try to load the note body from DB.
+	body := `{"action":"expand"}`
+	req := httptest.NewRequest(http.MethodPost, "/notes/nonexistent/assist", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(reqctx.WithUserID(req.Context(), "user1"))
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Mount("/", handler.Routes())
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestHandler_Assist_WriterNil(t *testing.T) {
+	handler, _ := setupTestHandler(t)
+
+	body := `{"action":"expand","selection":"some text"}`
+	req := httptest.NewRequest(http.MethodPost, "/notes/note1/assist", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(reqctx.WithUserID(req.Context(), "user1"))
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Mount("/", handler.Routes())
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&result))
+	require.Contains(t, result["error"], "not configured")
 }
 
 func TestHandler_Unauthorized(t *testing.T) {

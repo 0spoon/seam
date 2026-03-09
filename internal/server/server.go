@@ -13,9 +13,11 @@ import (
 
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/auth"
+	"github.com/katata/seam/internal/capture"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/search"
+	"github.com/katata/seam/internal/template"
 	"github.com/katata/seam/internal/ws"
 )
 
@@ -38,6 +40,8 @@ type Config struct {
 	NoteHandler      *note.Handler
 	SearchHandler    *search.Handler
 	AIHandler        *ai.Handler
+	CaptureHandler   *capture.Handler
+	TemplateHandler  *template.Handler
 	WSMessageHandler ws.MessageHandler
 }
 
@@ -106,6 +110,18 @@ func New(cfg Config) *Server {
 		if cfg.AIHandler != nil {
 			r.Route("/api/ai", func(r chi.Router) {
 				r.Mount("/", cfg.AIHandler.Routes())
+			})
+		}
+
+		if cfg.CaptureHandler != nil {
+			r.Route("/api/capture", func(r chi.Router) {
+				r.Mount("/", cfg.CaptureHandler.Routes())
+			})
+		}
+
+		if cfg.TemplateHandler != nil {
+			r.Route("/api/templates", func(r chi.Router) {
+				r.Mount("/", cfg.TemplateHandler.Routes())
 			})
 		}
 	})

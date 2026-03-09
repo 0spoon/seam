@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -19,6 +20,7 @@ type Handler struct {
 	synthesizer *Synthesizer
 	linker      *AutoLinker
 	embedder    *Embedder
+	writer      *Writer
 	dbManager   userdb.Manager
 	logger      *slog.Logger
 }
@@ -30,6 +32,7 @@ func NewHandler(
 	synthesizer *Synthesizer,
 	linker *AutoLinker,
 	embedder *Embedder,
+	writer *Writer,
 	dbManager userdb.Manager,
 	logger *slog.Logger,
 ) *Handler {
@@ -42,6 +45,7 @@ func NewHandler(
 		synthesizer: synthesizer,
 		linker:      linker,
 		embedder:    embedder,
+		writer:      writer,
 		dbManager:   dbManager,
 		logger:      logger,
 	}
@@ -54,6 +58,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/synthesize", h.synthesize)
 	r.Post("/reindex-embeddings", h.reindexEmbeddings)
 	r.Get("/notes/{id}/related", h.relatedNotes)
+	r.Post("/notes/{id}/assist", h.assist)
 	return r
 }
 
@@ -242,6 +247,56 @@ func (h *Handler) reindexEmbeddings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int{"enqueued": count})
+}
+
+// assist handles POST /api/ai/notes/{id}/assist
+func (h *Handler) assist(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	noteID := chi.URLParam(r, "id")
+	if noteID == "" {
+		writeError(w, http.StatusBadRequest, "note ID is required")
+		return
+	}
+
+	if h.writer == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI writing assist not configured")
+		return
+	}
+
+	var req struct {
+		Action    string `json:"action"`
+		Selection string `json:"selection"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Action == "" {
+		writeError(w, http.StatusBadRequest, "action is required")
+		return
+	}
+
+	result, err := h.writer.Assist(r.Context(), userID, noteID, req.Action, req.Selection)
+	if err != nil {
+		if errors.Is(err, ErrInvalidAction) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, ErrEmptyInput) {
+			writeError(w, http.StatusBadRequest, "no text to process")
+			return
+		}
+		h.logger.Error("ai.Handler.assist: failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "writing assist failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"result": result})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

@@ -25,12 +25,13 @@ type WriteSuppressor interface {
 
 // CreateNoteReq is the request payload for creating a note.
 type CreateNoteReq struct {
-	Title     string   `json:"title"`
-	Body      string   `json:"body"`
-	ProjectID string   `json:"project_id,omitempty"`
-	Tags      []string `json:"tags,omitempty"`
-	SourceURL string   `json:"source_url,omitempty"`
-	Template  string   `json:"template,omitempty"` // template name (Phase 3)
+	Title            string   `json:"title"`
+	Body             string   `json:"body"`
+	ProjectID        string   `json:"project_id,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	SourceURL        string   `json:"source_url,omitempty"`
+	Template         string   `json:"template,omitempty"`          // template name (Phase 3)
+	TranscriptSource bool     `json:"transcript_source,omitempty"` // true for voice-captured notes
 }
 
 // UpdateNoteReq is the request payload for updating a note.
@@ -128,7 +129,7 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 		Created:          now,
 		Modified:         now,
 		SourceURL:        req.SourceURL,
-		TranscriptSource: false,
+		TranscriptSource: req.TranscriptSource,
 	}
 
 	content, err := SerializeFrontmatter(fm, req.Body)
@@ -154,15 +155,16 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 	hash := computeHash(content)
 
 	n := &Note{
-		ID:          id,
-		Title:       req.Title,
-		ProjectID:   req.ProjectID,
-		FilePath:    relPath,
-		Body:        req.Body,
-		ContentHash: hash,
-		SourceURL:   req.SourceURL,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:               id,
+		Title:            req.Title,
+		ProjectID:        req.ProjectID,
+		FilePath:         relPath,
+		Body:             req.Body,
+		ContentHash:      hash,
+		SourceURL:        req.SourceURL,
+		TranscriptSource: req.TranscriptSource,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 
 	if err := s.store.Create(ctx, db, n); err != nil {

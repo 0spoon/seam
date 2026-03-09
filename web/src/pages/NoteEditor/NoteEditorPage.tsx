@@ -24,7 +24,7 @@ import {
 import { useNoteStore } from '../../stores/noteStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { getRelatedNotes } from '../../api/client';
+import { getRelatedNotes, aiAssist } from '../../api/client';
 import { renderMarkdown } from '../../lib/markdown';
 import { timeAgo, formatDateTime } from '../../lib/dates';
 import { getTagColor } from '../../lib/tagColor';
@@ -34,7 +34,7 @@ import {
   wikilinkDecorationTheme,
   wikilinkAutocomplete,
 } from './wikilinkExtension';
-import type { LinkSuggestion, RelatedNote, WSMessage } from '../../api/types';
+import type { AIAssistReq, LinkSuggestion, RelatedNote, WSMessage } from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
 type ViewMode = 'editor' | 'split' | 'preview';
@@ -58,6 +58,9 @@ export function NoteEditorPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [relatedNotes, setRelatedNotes] = useState<RelatedNote[]>([]);
+  const [showAIMenu, setShowAIMenu] = useState(false);
+  const [aiLoading, setAILoading] = useState(false);
+  const [aiResult, setAIResult] = useState<{ action: string; text: string } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
 
@@ -227,6 +230,56 @@ export function NoteEditorPage() {
   const handleList = useCallback(() => insertAtLineStart('- '), [insertAtLineStart]);
   const handleChecklist = useCallback(() => insertAtLineStart('- [ ] '), [insertAtLineStart]);
 
+  const getSelectedText = useCallback((): string => {
+    const view = editorRef.current?.view;
+    if (!view) return '';
+    const { from, to } = view.state.selection.main;
+    if (from === to) return '';
+    return view.state.sliceDoc(from, to);
+  }, []);
+
+  const handleAIAssist = useCallback(async (action: AIAssistReq['action']) => {
+    if (!id) return;
+    setShowAIMenu(false);
+    setAILoading(true);
+    setAIResult(null);
+    try {
+      const selection = getSelectedText();
+      const result = await aiAssist(id, action, selection || undefined);
+      setAIResult({ action, text: result.result });
+    } catch {
+      // Failed silently -- could add error state here
+    } finally {
+      setAILoading(false);
+    }
+  }, [id, getSelectedText]);
+
+  const handleInsertAIResult = useCallback(() => {
+    if (!aiResult) return;
+    const view = editorRef.current?.view;
+    if (view) {
+      const { from, to } = view.state.selection.main;
+      // If there was a selection, replace it; otherwise append at cursor.
+      const insert = from === to
+        ? `\n\n${aiResult.text}`
+        : aiResult.text;
+      view.dispatch({
+        changes: { from, to, insert },
+      });
+      view.focus();
+    } else {
+      // Fallback: append to content.
+      const newContent = content + `\n\n${aiResult.text}`;
+      setContent(newContent);
+      handleSave(newContent);
+    }
+    setAIResult(null);
+  }, [aiResult, content, handleSave]);
+
+  const handleDismissAIResult = useCallback(() => {
+    setAIResult(null);
+  }, []);
+
   const renderedHtml = renderMarkdown(content);
 
   return (
@@ -258,6 +311,45 @@ export function NoteEditorPage() {
           <button className={styles.toolButton} title="Checklist" aria-label="Checklist" onClick={handleChecklist}>
             <ListChecks size={16} />
           </button>
+
+          <div className={styles.toolbarSeparator} />
+
+          <div className={styles.menuContainer}>
+            <button
+              className={`${styles.toolButton} ${aiLoading ? styles.activeView : ''}`}
+              onClick={() => setShowAIMenu(!showAIMenu)}
+              title="AI Assist"
+              aria-label="AI Assist"
+              disabled={aiLoading}
+            >
+              <Sparkles size={16} />
+            </button>
+            {showAIMenu && (
+              <div className={styles.menu}>
+                <button
+                  className={styles.menuItemDefault}
+                  onClick={() => handleAIAssist('expand')}
+                >
+                  <Sparkles size={14} />
+                  Expand
+                </button>
+                <button
+                  className={styles.menuItemDefault}
+                  onClick={() => handleAIAssist('summarize')}
+                >
+                  <Sparkles size={14} />
+                  Summarize
+                </button>
+                <button
+                  className={styles.menuItemDefault}
+                  onClick={() => handleAIAssist('extract-actions')}
+                >
+                  <ListChecks size={14} />
+                  Extract Actions
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className={styles.toolbarRight}>
@@ -398,6 +490,50 @@ export function NoteEditorPage() {
                     </button>
                   </div>
                 ))}
+              </section>
+            )}
+
+            {/* AI Assist result */}
+            {(aiLoading || aiResult) && (
+              <section className={styles.panelSection}>
+                <h3 className={styles.panelSectionTitle}>
+                  <Sparkles size={12} />
+                  AI Assist
+                </h3>
+                {aiLoading && (
+                  <p className={styles.panelEmpty}>Generating...</p>
+                )}
+                {aiResult && (
+                  <div className={styles.aiResultBlock}>
+                    <p className={styles.aiResultLabel}>
+                      {aiResult.action === 'expand' && 'Expanded text'}
+                      {aiResult.action === 'summarize' && 'Summary'}
+                      {aiResult.action === 'extract-actions' && 'Action items'}
+                    </p>
+                    <div className={styles.aiResultContent}>
+                      <div
+                        className={styles.renderedMarkdownSmall}
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(aiResult.text) }}
+                      />
+                    </div>
+                    <div className={styles.aiResultActions}>
+                      <button
+                        className={styles.suggestionAccept}
+                        onClick={handleInsertAIResult}
+                      >
+                        Insert
+                      </button>
+                      <button
+                        className={styles.suggestionDismiss}
+                        onClick={handleDismissAIResult}
+                        aria-label="Dismiss"
+                        style={{ width: 'auto', height: 'auto', padding: '2px 8px' }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
               </section>
             )}
 

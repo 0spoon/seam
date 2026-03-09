@@ -11,13 +11,14 @@ import (
 
 // Task types.
 const (
-	TaskTypeEmbed       = "embed"
-	TaskTypeDeleteEmbed = "delete_embed"
-	TaskTypeSynthesize  = "synthesize"
-	TaskTypeAutolink    = "autolink"
-	TaskTypeChat        = "chat"
-	TaskTypeTranscribe  = "transcribe"
-	TaskTypeAssist      = "assist"
+	TaskTypeEmbed               = "embed"
+	TaskTypeDeleteEmbed         = "delete_embed"
+	TaskTypeSynthesize          = "synthesize"
+	TaskTypeAutolink            = "autolink"
+	TaskTypeChat                = "chat"
+	TaskTypeTranscribe          = "transcribe"
+	TaskTypeAssist              = "assist"
+	TaskTypeSummarizeTranscript = "summarize_transcript"
 )
 
 // Task statuses.
@@ -85,6 +86,11 @@ type AutolinkPayload struct {
 type ChatPayload struct {
 	Query   string        `json:"query"`
 	History []ChatMessage `json:"history,omitempty"`
+}
+
+// SummarizeTranscriptPayload is the JSON payload for summarize_transcript tasks.
+type SummarizeTranscriptPayload struct {
+	NoteID string `json:"note_id"`
 }
 
 // Domain errors for tasks.

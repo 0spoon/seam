@@ -145,3 +145,39 @@ export interface WSMessage {
   type: string;
   payload: unknown;
 }
+
+// Phase 3: Capture types
+export interface CaptureURLReq {
+  type: 'url';
+  url: string;
+}
+
+// Phase 3: Template types
+export interface TemplateMeta {
+  name: string;
+  description: string;
+}
+
+export interface Template {
+  name: string;
+  description: string;
+  body: string;
+}
+
+export interface TemplateApplyReq {
+  vars: Record<string, string>;
+}
+
+export interface TemplateApplyResult {
+  body: string;
+}
+
+// Phase 3: AI Writing Assist types
+export interface AIAssistReq {
+  action: 'expand' | 'summarize' | 'extract-actions';
+  selection?: string;
+}
+
+export interface AIAssistResult {
+  result: string;
+}

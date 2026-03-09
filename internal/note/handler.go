@@ -1,6 +1,7 @@
 package note
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +15,19 @@ import (
 	"github.com/katata/seam/internal/reqctx"
 )
 
+// TemplateApplier applies a template by name, returning the rendered body.
+// This interface is implemented by template.Service and injected here
+// to support the single-request template-based note creation flow
+// (POST /api/notes {"template":"meeting-notes"}).
+type TemplateApplier interface {
+	Apply(ctx context.Context, userID, name string, vars map[string]string) (string, error)
+}
+
 // Handler handles HTTP requests for note endpoints.
 type Handler struct {
-	service *Service
-	logger  *slog.Logger
+	service         *Service
+	templateApplier TemplateApplier // nil if templates not configured
+	logger          *slog.Logger
 }
 
 // NewHandler creates a new note Handler.
@@ -26,6 +36,13 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 		logger = slog.Default()
 	}
 	return &Handler{service: service, logger: logger}
+}
+
+// SetTemplateApplier sets the template applier, enabling single-request
+// template-based note creation. Called during server startup after both
+// note and template services are initialized.
+func (h *Handler) SetTemplateApplier(applier TemplateApplier) {
+	h.templateApplier = applier
 }
 
 // Routes returns a chi router with all note routes mounted.
@@ -56,6 +73,22 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
+	}
+
+	// If a template is specified, apply it to pre-fill the body.
+	if req.Template != "" && h.templateApplier != nil {
+		vars := map[string]string{}
+		if req.Title != "" {
+			vars["title"] = req.Title
+		}
+		body, tmplErr := h.templateApplier.Apply(r.Context(), userID, req.Template, vars)
+		if tmplErr != nil {
+			h.logger.Warn("template apply failed, continuing without template",
+				"template", req.Template, "error", tmplErr)
+		} else if req.Body == "" {
+			// Only apply template body if caller did not provide explicit body.
+			req.Body = body
+		}
 	}
 
 	n, err := h.service.Create(r.Context(), userID, req)

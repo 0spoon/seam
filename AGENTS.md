@@ -175,7 +175,7 @@ See [PROGRESS.md](./PROGRESS.md) for detailed task-level tracking.
 |---|---|---|
 | Phase 1 -- Core (Weeks 1-3) | **Done** | All 26 gaps resolved. Backend + frontend fully functional. See PROGRESS.md. |
 | Phase 2 -- Intelligence (Weeks 4-6) | **Done** | Ollama, ChromaDB, embeddings, semantic search, Ask Seam, synthesis, auto-link. All 15 tasks complete. See PROGRESS.md. |
-| Phase 3 -- Rich Capture (Weeks 7-8) | Not started | URL capture, voice transcription, templates, AI writing assist |
+| Phase 3 -- Rich Capture (Weeks 7-8) | **Done** | All 6 tasks complete. URL capture, voice capture, templates, AI writing assist. Backend + frontend + TUI. See PROGRESS.md. |
 | Phase 4 -- Visualization (Weeks 9-10) | Not started | Knowledge graph, timeline, backlink refinement, E2E testing |
 
 ## Key files

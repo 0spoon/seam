@@ -287,6 +287,103 @@ func (c *APIClient) AskSeam(query string, history []ChatMessage) (*ChatResult, e
 	return &result, nil
 }
 
+// -- Capture types -----------------------------------------------------------
+
+// CaptureURLRequest is the request body for URL capture.
+type CaptureURLRequest struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+// -- Capture methods ---------------------------------------------------------
+
+// CaptureURL fetches a URL and creates a note from its content.
+func (c *APIClient) CaptureURL(rawURL string) (*Note, error) {
+	req := CaptureURLRequest{
+		Type: "url",
+		URL:  rawURL,
+	}
+	var n Note
+	if err := c.post("/api/capture", req, &n); err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
+// -- Template types ----------------------------------------------------------
+
+// TemplateMeta is the metadata for a template.
+type TemplateMeta struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// TemplateDetail is a full template with body.
+type TemplateDetail struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Body        string `json:"body"`
+}
+
+// TemplateApplyResult is the response from applying a template.
+type TemplateApplyResult struct {
+	Body string `json:"body"`
+}
+
+// -- Template methods --------------------------------------------------------
+
+// ListTemplates returns all available templates.
+func (c *APIClient) ListTemplates() ([]TemplateMeta, error) {
+	var templates []TemplateMeta
+	if err := c.get("/api/templates", nil, &templates); err != nil {
+		return nil, err
+	}
+	if templates == nil {
+		templates = []TemplateMeta{}
+	}
+	return templates, nil
+}
+
+// ApplyTemplate applies a template with variable substitution and returns the rendered body.
+func (c *APIClient) ApplyTemplate(name string, vars map[string]string) (*TemplateApplyResult, error) {
+	req := map[string]interface{}{
+		"vars": vars,
+	}
+	var result TemplateApplyResult
+	if err := c.post("/api/templates/"+name+"/apply", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// -- AI Assist types ---------------------------------------------------------
+
+// AIAssistRequest is the request body for AI writing assist.
+type AIAssistRequest struct {
+	Action    string `json:"action"`
+	Selection string `json:"selection,omitempty"`
+}
+
+// AIAssistResult is the response from AI writing assist.
+type AIAssistResult struct {
+	Result string `json:"result"`
+}
+
+// -- AI Assist methods -------------------------------------------------------
+
+// Assist calls the AI writing assist endpoint.
+func (c *APIClient) Assist(noteID, action, selection string) (*AIAssistResult, error) {
+	req := AIAssistRequest{
+		Action:    action,
+		Selection: selection,
+	}
+	var result AIAssistResult
+	if err := c.post("/api/ai/notes/"+noteID+"/assist", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // -- HTTP helpers ------------------------------------------------------------
 
 func (c *APIClient) get(path string, params url.Values, out interface{}) error {

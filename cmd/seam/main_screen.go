@@ -24,20 +24,26 @@ type projectItem struct {
 
 // mainScreenModel is the main two-pane view showing projects and notes.
 type mainScreenModel struct {
-	client       *APIClient
-	width        int
-	height       int
-	activePane   pane
-	projects     []projectItem
-	projectIdx   int
-	notes        []*Note
-	noteIdx      int
-	totalNotes   int
-	err          string
-	loading      bool
-	username     string
-	showCapture  bool
-	captureModel captureModel
+	client              *APIClient
+	width               int
+	height              int
+	activePane          pane
+	projects            []projectItem
+	projectIdx          int
+	notes               []*Note
+	noteIdx             int
+	totalNotes          int
+	err                 string
+	loading             bool
+	username            string
+	showCapture         bool
+	captureModel        captureModel
+	showURLCapture      bool
+	urlCaptureModel     urlCaptureModel
+	showVoiceCapture    bool
+	voiceCaptureModel   voiceCaptureModel
+	showTemplatePicker  bool
+	templatePickerModel templatePickerModel
 }
 
 // -- Messages ----------------------------------------------------------------
@@ -100,9 +106,18 @@ func (m mainScreenModel) loadNotes() tea.Cmd {
 }
 
 func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
-	// If capture modal is open, delegate to it.
+	// If any overlay is open, delegate to it.
 	if m.showCapture {
 		return m.updateCapture(msg)
+	}
+	if m.showURLCapture {
+		return m.updateURLCapture(msg)
+	}
+	if m.showVoiceCapture {
+		return m.updateVoiceCapture(msg)
+	}
+	if m.showTemplatePicker {
+		return m.updateTemplatePicker(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -198,14 +213,26 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			return m, m.captureModel.Init()
 
 		case "n":
-			// Create note: same as capture but with focused project.
+			// Create note from template: open template picker.
 			projectID := ""
 			if m.projectIdx < len(m.projects) {
 				projectID = m.projects[m.projectIdx].id
 			}
-			m.showCapture = true
-			m.captureModel = newCaptureModel(m.client, projectID, m.width, m.height)
-			return m, m.captureModel.Init()
+			m.showTemplatePicker = true
+			m.templatePickerModel = newTemplatePickerModel(m.client, projectID, m.width, m.height)
+			return m, m.templatePickerModel.Init()
+
+		case "u":
+			// URL capture: open URL input modal.
+			m.showURLCapture = true
+			m.urlCaptureModel = newURLCaptureModel(m.client, m.width, m.height)
+			return m, m.urlCaptureModel.Init()
+
+		case "v":
+			// Voice capture: open voice recording modal.
+			m.showVoiceCapture = true
+			m.voiceCaptureModel = newVoiceCaptureModel(m.client, m.width, m.height)
+			return m, m.voiceCaptureModel.Init()
 
 		case "/":
 			return m, func() tea.Msg {
@@ -254,6 +281,51 @@ func (m mainScreenModel) updateCapture(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 	return m, cmd
 }
 
+func (m mainScreenModel) updateURLCapture(msg tea.Msg) (mainScreenModel, tea.Cmd) {
+	var cmd tea.Cmd
+	m.urlCaptureModel, cmd = m.urlCaptureModel.Update(msg)
+
+	if m.urlCaptureModel.done {
+		m.showURLCapture = false
+		if m.urlCaptureModel.created {
+			return m, m.loadNotes()
+		}
+		return m, nil
+	}
+
+	return m, cmd
+}
+
+func (m mainScreenModel) updateVoiceCapture(msg tea.Msg) (mainScreenModel, tea.Cmd) {
+	var cmd tea.Cmd
+	m.voiceCaptureModel, cmd = m.voiceCaptureModel.Update(msg)
+
+	if m.voiceCaptureModel.done {
+		m.showVoiceCapture = false
+		if m.voiceCaptureModel.created {
+			return m, m.loadNotes()
+		}
+		return m, nil
+	}
+
+	return m, cmd
+}
+
+func (m mainScreenModel) updateTemplatePicker(msg tea.Msg) (mainScreenModel, tea.Cmd) {
+	var cmd tea.Cmd
+	m.templatePickerModel, cmd = m.templatePickerModel.Update(msg)
+
+	if m.templatePickerModel.done {
+		m.showTemplatePicker = false
+		if m.templatePickerModel.created {
+			return m, m.loadNotes()
+		}
+		return m, nil
+	}
+
+	return m, cmd
+}
+
 func (m mainScreenModel) View() string {
 	if m.width == 0 {
 		return ""
@@ -262,6 +334,15 @@ func (m mainScreenModel) View() string {
 	if m.showCapture {
 		return m.captureModel.View()
 	}
+	if m.showURLCapture {
+		return m.urlCaptureModel.View()
+	}
+	if m.showVoiceCapture {
+		return m.voiceCaptureModel.View()
+	}
+	if m.showTemplatePicker {
+		return m.templatePickerModel.View()
+	}
 
 	// Header.
 	header := styleHeader.Width(m.width).Render(
@@ -269,7 +350,7 @@ func (m mainScreenModel) View() string {
 	)
 
 	// Status bar.
-	statusText := "j/k: navigate | Tab: pane | Enter: open | c: capture | /: search | a: ask | d: del | q: quit"
+	statusText := "j/k: nav | Tab: pane | Enter: open | c: capture | n: template | u: URL | v: voice | /: search | a: ask | d: del | q: quit"
 	if m.err != "" {
 		statusText = styleError.Render(m.err)
 	}

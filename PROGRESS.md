@@ -85,12 +85,15 @@ All 26 gaps identified during Phase 1 implementation have been fixed.
 
 ### Test summary
 
-- Go: 12 packages tested, all passing
-  - `internal/ai` (41 tests): Ollama client, ChromaDB client, task store, queue (10 tests incl. fair scheduling, context cancellation), embedder, chat, synthesizer, linker, handler
+- Go: 14 packages tested, all passing
+  - `internal/ai` (49 tests): Ollama client, ChromaDB client, task store, queue (10 tests incl. fair scheduling, context cancellation), embedder, chat, synthesizer, linker, handler (incl. 5 assist handler tests), writer
+  - `internal/capture` (35 tests): URL fetcher (17 incl. og:title, encoding, redirect, timeout), SSRF (4 functions / 20 subcases), voice (7), handler (7)
   - `internal/search` (20 tests): FTS store (7), sanitize (9), handler HTTP tests (8), semantic search (2), snippet extraction (4)
+  - `internal/template` (17 tests): service (10), handler (7)
   - `internal/auth`, `internal/config`, `internal/note`, `internal/project`, `internal/server`, `internal/userdb`, `internal/watcher`, `internal/ws`: all passing
-- Frontend: 13 test files, 113 tests, all passing
-  - `api/client.test.ts` (22 tests): token management, register, login, logout, CRUD, search, searchSemantic, askSeam, synthesize, 401 handling
+- Frontend: 16 test files, 136 tests, all passing
+  - `api/client.test.ts` (32 tests): token management, register, login, logout, CRUD, search, searchSemantic, askSeam, synthesize, captureURL, listTemplates, applyTemplate, aiAssist, 401 handling
+  - `api/captureVoice.test.ts` (4 tests): multipart form, auth header, 401 retry, error handling
   - `stores/authStore.test.ts` (6 tests): state management, login/register/logout flows
   - `stores/noteStore.test.ts` (7 tests): CRUD, backlinks, state updates
   - `stores/projectStore.test.ts` (5 tests): CRUD, state updates
@@ -100,7 +103,9 @@ All 26 gaps identified during Phase 1 implementation have been fixed.
   - `pages/Login/LoginPage.test.tsx` (8 tests): rendering, form interaction, mode toggle
   - `pages/Search/SearchPage.test.tsx` (10 tests): rendering, fulltext/semantic toggle, debounced search, result navigation, empty states
   - `pages/Ask/AskPage.test.tsx` (12 tests): rendering, message display, streaming state, input behavior, empty state
+  - `pages/NoteEditor/NoteEditorPage.test.tsx` (3 tests): AI assist button, dropdown, no-note state
   - `components/SynthesisModal/SynthesisModal.test.tsx` (14 tests): rendering, generate flow, loading/error states, backdrop click, keyboard interaction
+  - `components/Modal/CaptureModal.test.tsx` (6 tests): render states, URL mode, template picker, cancel, disabled save
   - `components/NoteCard/NoteCard.test.tsx` (9 tests): rendering, navigation, markdown stripping
   - `components/EmptyState/EmptyState.test.tsx` (3 tests): rendering, action button
 
@@ -175,16 +180,77 @@ All gaps identified during Phase 2 have been fixed.
 
 ---
 
-## Phase 3 -- Rich Capture (Weeks 7-8): Not started
+## Phase 3 -- Rich Capture (Weeks 7-8): **Done** (all 6 tasks completed, all gaps resolved)
 
-| Task | Description | Status |
-|------|-------------|--------|
-| 5.1 | URL capture (`internal/capture/url.go`) | Not started |
-| 5.2 | Voice capture (`internal/capture/voice.go`) | Not started |
-| 5.3 | React + TUI: capture integration | Not started |
-| 5.4 | Templates system (`internal/template`) | Not started |
-| 5.5 | AI writing assist (`internal/ai/writer.go`) | Not started |
-| 5.6 | React + TUI: templates and AI assist | Not started |
+### Week 7: Voice + URL Capture
+
+| Task | Description | Status | Notes |
+|------|-------------|--------|-------|
+| 5.1 | URL capture (`internal/capture/url.go`) | Done | SSRF-safe URL fetcher, HTML parsing via `golang.org/x/net/html`, og:title fallback, charset detection via `x/net/html/charset`, title/article/body extraction, `POST /api/capture` with `{"type":"url"}`, 21 unit tests + 7 handler tests |
+| 5.2 | Voice capture (`internal/capture/voice.go`) | Done | Whisper transcription via Ollama `/v1/audio/transcriptions`, multipart upload, creates note with `transcript_source: true` persisted through DB and file, background summarization via AI task queue, 7 tests |
+| 5.3 | React + TUI: capture integration | Done | React: URL paste detection in CaptureModal (`isURL()` auto-triggers capture endpoint), voice recording via MediaRecorder API with mic button. TUI: `u` key opens URL capture modal, `v` key opens voice capture modal (records via sox/arecord/ffmpeg) |
+
+### Week 8: Templates + AI Writing Assist
+
+| Task | Description | Status | Notes |
+|------|-------------|--------|-------|
+| 5.4 | Templates system (`internal/template`) | Done | Shared + per-user template dirs, 4 defaults (meeting-notes, project-kickoff, research-summary, daily-log), `{{var}}` substitution with builtins (date/time/year/month/day), `GET /api/templates`, `POST /api/templates/{name}/apply`, 10 service tests + 7 handler tests |
+| 5.5 | AI writing assist (`internal/ai/writer.go`) | Done | expand/summarize/extract-actions via Ollama ChatCompletion, loads note body via NoteBodyLoader interface (respects layering), `POST /api/ai/notes/{id}/assist` with `errors.Is` for proper error mapping, 7 unit tests + 5 handler tests |
+| 5.6 | React + TUI: templates and AI assist | Done | React: template picker in CaptureModal (loads templates on open, applies with vars, pre-fills body), AI assist toolbar dropdown in NoteEditorPage (Sparkles icon, expand/summarize/extract-actions, result preview with Insert/Dismiss). TUI: `n` key opens template picker (list/select/title phases), `Ctrl+A` in editor opens AI assist command palette (3 actions, result preview with insert/dismiss) |
+
+### Server wiring
+
+- `internal/server/server.go`: Added `CaptureHandler` + `TemplateHandler` to Config, mounted routes at `/api/capture` and `/api/templates`
+- `cmd/seamd/main.go`: Creates capture service with SSRF-safe fetcher, voice transcriber conditional on `models.transcription`, template service with `EnsureDefaults()`, AI writer with NoteBodyLoader/Updater adapters, wires template applier to note handler, wires summarize callback to capture service
+- `internal/ai/handler.go`: Added `writer` field, `POST /api/ai/notes/{id}/assist` route, uses `errors.Is` for proper error matching
+
+### Test summary
+
+- Go: All existing tests pass, plus new/expanded packages:
+  - `internal/capture` (35 tests): URL fetcher (17 incl. og:title, encoding, redirect, timeout, large page), SSRF security (4 test functions / 20 subcases), voice transcriber (7 incl. empty audio, summarize callback), handler (7)
+  - `internal/template` (17 tests): service (10), handler (7)
+  - `internal/ai` (49 tests): writer (7), handler assist tests (5: success, missing action, invalid action, note not found, writer nil), plus all existing tests
+- Frontend: 136 tests passing (123 existing + 13 new)
+  - `api/client.test.ts`: captureURL (2), listTemplates (1), applyTemplate (3), aiAssist (4)
+  - `api/captureVoice.test.ts` (4 tests): multipart form, auth header, 401 retry, error handling
+  - `components/Modal/CaptureModal.test.tsx` (6 tests): render states, URL mode, template picker, cancel, disabled save
+  - `pages/NoteEditor/NoteEditorPage.test.tsx` (3 tests): AI assist button, dropdown, no-note state
+
+### TUI additions
+
+- `cmd/seam/client.go`: Added `CaptureURL`, `ListTemplates`, `ApplyTemplate`, `Assist` API methods
+- `cmd/seam/url_capture.go`: URL capture modal (`u` key), text input for URL, Enter to fetch
+- `cmd/seam/voice_capture.go`: Voice capture modal (`v` key), records via sox/arecord/ffmpeg, uploads multipart
+- `cmd/seam/template_picker.go`: Template picker modal (`n` key), three phases (loading/list/title), applies template and creates note
+- `cmd/seam/ai_assist.go`: AI assist command palette (`Ctrl+A` in editor), three actions, result preview with insert/dismiss
+
+## Phase 3 -- Known Gaps (all resolved)
+
+All gaps identified during Phase 3 have been fixed.
+
+| Gap ID | Description | Severity | Resolution |
+|--------|-------------|----------|------------|
+| 5.2-A | `TranscriptSource` never persisted | High | Added `TranscriptSource` field to `CreateNoteReq`, `note.Service.Create` now honors `req.TranscriptSource` in frontmatter and DB row. `capture.Service.CaptureVoice` passes `TranscriptSource: true` through the request instead of setting it post-create. |
+| 5.5-A | `errors.Is` vs `==` in assist handler | High | Changed bare `==` comparisons to `errors.Is()` for `ErrInvalidAction` and `ErrEmptyInput` in `internal/ai/handler.go`. Added `errors` import. Wrapped errors now correctly match, returning 400 instead of falling through to 500. |
+| 5.4-A | `CreateNoteReq.Template` field is dead code | Medium | Added `TemplateApplier` interface to note handler, wired `template.Service` via `noteHandler.SetTemplateApplier(templateSvc)` in `main.go`. Handler's `create` method now applies the template to pre-fill body when `req.Template` is set and body is empty. |
+| 5.1-A | No `og:title` fallback | Medium | Added `extractOGTitle()` function that parses `<meta property="og:title" content="...">` tags. `FetchURL` now checks og:title when `<title>` is empty, falling back to hostname only if both are absent. |
+| 5.2-B | No background summarization for voice captures | Low | Added `SummarizeFunc` callback to capture `Service`, `TaskTypeSummarizeTranscript` constant, `SummarizeTranscriptPayload` type, and `Writer.HandleSummarizeTranscriptTask` handler. Wired in `main.go`: capture service enqueues a background task that reads the note body, generates a 2-4 sentence summary via LLM, and prepends it. |
+| 5.1-B | No charset detection / encoding conversion | Low | Added `golang.org/x/net/html/charset` import. `FetchURL` now calls `charset.NewReader()` with the Content-Type header before parsing, automatically converting Latin-1, Windows-1252, and other encodings to UTF-8. Falls back to raw reader if detection fails. |
+| 5.X-A3 | AI Writer bypasses note.Service, queries DB directly | Low | Added `NoteBodyLoader` and `NoteBodyUpdater` interfaces to the writer. Created `noteBodyAdapter` in `main.go` that uses `note.SQLStore.Get` via the proper layering. Writer uses the interfaces when set, with fallback to direct DB query for backward compatibility. |
+| 5.1-T | Missing URL capture tests (10) | Test gap | Added 10 tests: `ExtractTitleFromOG`, `ExtractOGTitle`, `StripHTML`, `Timeout`, `LargePage`, `EncodingUTF8`, `EncodingLatin1`, `RedirectFollowed`, `PrivateIP_Handler`, `OGTitlePreference`. |
+| 5.2-T | Missing voice capture tests (3) | Test gap | Added 3 tests: `Transcribe_EmptyAudio`, `Service_SetSummarizeFunc`, `Handler_VoiceCapture_TranscriberNotConfigured`. |
+| 5.5-T | Missing AI assist handler tests (5) | Test gap | Added 5 handler tests: `Assist_Success`, `Assist_MissingAction`, `Assist_InvalidAction`, `Assist_NoteNotFound`, `Assist_WriterNil`. Created `setupTestHandlerWithWriter` helper. |
+| 5.X-T1 | Missing SSRF security tests (4) | Test gap | Added 4 test functions: `SSRF_MetadataEndpoint`, `SSRF_IPv6Loopback`, `SSRF_UnsafeSchemes` (ftp/javascript/data/gopher), `SSRF_PrivateRanges_Comprehensive` (16 cases covering all private ranges and boundary IPs). |
+| 5.X-T2 | Missing frontend component tests (3 files) | Test gap | Added `captureVoice.test.ts` (4 tests), `CaptureModal.test.tsx` (6 tests), `NoteEditorPage.test.tsx` (3 tests). |
+
+### Remaining design choices (not bugs)
+
+| ID | Description | Notes |
+|----|-------------|-------|
+| 5.X-A1 | Capture service uses concrete types, not interfaces | Design choice -- could extract interface later for better testability |
+| 5.X-A2 | Template service uses concrete types, not interfaces | Design choice -- could extract interface later for better testability |
+
+---
 
 ## Phase 4 -- Visualization (Weeks 9-10): Not started
 
@@ -199,4 +265,4 @@ All gaps identified during Phase 2 have been fixed.
 
 ---
 
-*Last updated: 2026-03-08 (Phase 2 complete -- all gaps resolved)*
+*Last updated: 2026-03-08 (Phase 3 all gaps resolved)*

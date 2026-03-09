@@ -18,6 +18,13 @@ import type {
   ChatMessage,
   SynthesizeReq,
   SynthesisResult,
+  CaptureURLReq,
+  TemplateMeta,
+  Template,
+  TemplateApplyReq,
+  TemplateApplyResult,
+  AIAssistReq,
+  AIAssistResult,
 } from './types';
 
 const BASE_URL = '/api';
@@ -307,6 +314,86 @@ export async function synthesize(
   req: SynthesizeReq,
 ): Promise<SynthesisResult> {
   return request<SynthesisResult>('/ai/synthesize', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+// Capture endpoints
+export async function captureURL(url: string): Promise<Note> {
+  const req: CaptureURLReq = { type: 'url', url };
+  return request<Note>('/capture/', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export async function captureVoice(audioBlob: Blob, filename = 'audio.wav'): Promise<Note> {
+  const formData = new FormData();
+  formData.append('audio', audioBlob, filename);
+
+  const headers: Record<string, string> = {};
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+
+  const res = await fetch(`${BASE_URL}/capture/`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (res.status === 401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      return captureVoice(audioBlob, filename);
+    }
+    onAuthFailure?.();
+    throw new ApiError(401, 'Authentication failed');
+  }
+
+  if (!res.ok) {
+    let message = res.statusText;
+    try {
+      const body = await res.json();
+      message = body.error || body.message || message;
+    } catch {
+      // Use status text
+    }
+    throw new ApiError(res.status, message);
+  }
+
+  return res.json();
+}
+
+// Template endpoints
+export async function listTemplates(): Promise<TemplateMeta[]> {
+  return request<TemplateMeta[]>('/templates/');
+}
+
+export async function getTemplate(name: string): Promise<Template> {
+  return request<Template>(`/templates/${name}`);
+}
+
+export async function applyTemplate(
+  name: string,
+  vars: Record<string, string> = {},
+): Promise<TemplateApplyResult> {
+  const req: TemplateApplyReq = { vars };
+  return request<TemplateApplyResult>(`/templates/${name}/apply`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+// AI Writing Assist endpoints
+export async function aiAssist(
+  noteId: string,
+  action: AIAssistReq['action'],
+  selection?: string,
+): Promise<AIAssistResult> {
+  const req: AIAssistReq = { action, selection };
+  return request<AIAssistResult>(`/ai/notes/${noteId}/assist`, {
     method: 'POST',
     body: JSON.stringify(req),
   });

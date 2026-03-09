@@ -16,6 +16,10 @@ import {
   searchSemantic,
   askSeam,
   synthesize,
+  captureURL,
+  listTemplates,
+  applyTemplate,
+  aiAssist,
   ApiError,
 } from './client';
 
@@ -413,6 +417,197 @@ describe('API Client', () => {
       const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
       expect(body.scope).toBe('project');
       expect(body.project_id).toBe('proj1');
+    });
+  });
+
+  describe('captureURL', () => {
+    beforeEach(() => {
+      setTokens({ access_token: 'valid_token', refresh_token: 'rt' });
+    });
+
+    it('sends URL capture request and returns note', async () => {
+      const mockNote = {
+        id: 'cap1',
+        title: 'Example Page',
+        body: 'Page content extracted from URL.',
+        file_path: 'inbox/example-page.md',
+        source_url: 'https://example.com/article',
+        tags: [],
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockNote), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const result = await captureURL('https://example.com/article');
+      expect(result.id).toBe('cap1');
+      expect(result.title).toBe('Example Page');
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+      expect(body.type).toBe('url');
+      expect(body.url).toBe('https://example.com/article');
+    });
+
+    it('throws ApiError on failure', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'SSRF blocked' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      await expect(captureURL('http://localhost/secret')).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('listTemplates', () => {
+    beforeEach(() => {
+      setTokens({ access_token: 'valid_token', refresh_token: 'rt' });
+    });
+
+    it('returns list of templates', async () => {
+      const mockTemplates = [
+        { name: 'meeting-notes', description: 'Meeting notes template' },
+        { name: 'daily-log', description: 'Daily log template' },
+      ];
+
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockTemplates), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const result = await listTemplates();
+      expect(result).toHaveLength(2);
+      expect(result[0].name).toBe('meeting-notes');
+      expect(result[1].description).toBe('Daily log template');
+    });
+  });
+
+  describe('applyTemplate', () => {
+    beforeEach(() => {
+      setTokens({ access_token: 'valid_token', refresh_token: 'rt' });
+    });
+
+    it('applies template with vars and returns body', async () => {
+      const mockResult = { body: '# Meeting Notes\n\nDate: 2026-03-08\n\n## Agenda\n\n' };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockResult), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const result = await applyTemplate('meeting-notes', { title: 'Sprint Review' });
+      expect(result.body).toContain('Meeting Notes');
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+      expect(body.vars.title).toBe('Sprint Review');
+    });
+
+    it('applies template with empty vars', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ body: '# Daily Log\n' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const result = await applyTemplate('daily-log');
+      expect(result.body).toContain('Daily Log');
+    });
+
+    it('throws ApiError when template not found', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'template not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      await expect(applyTemplate('nonexistent')).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('aiAssist', () => {
+    beforeEach(() => {
+      setTokens({ access_token: 'valid_token', refresh_token: 'rt' });
+    });
+
+    it('sends expand action with selection', async () => {
+      const mockResult = { result: 'Expanded paragraph about caching strategies...' };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockResult), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const result = await aiAssist('note1', 'expand', '- caching is important');
+      expect(result.result).toContain('Expanded paragraph');
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        '/api/ai/notes/note1/assist',
+        expect.objectContaining({ method: 'POST' }),
+      );
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+      expect(body.action).toBe('expand');
+      expect(body.selection).toBe('- caching is important');
+    });
+
+    it('sends summarize action without selection', async () => {
+      const mockResult = { result: 'This note covers three main topics...' };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockResult), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const result = await aiAssist('note2', 'summarize');
+      expect(result.result).toContain('three main topics');
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+      expect(body.action).toBe('summarize');
+      expect(body.selection).toBeUndefined();
+    });
+
+    it('sends extract-actions action', async () => {
+      const mockResult = { result: '- [ ] Review PR\n- [ ] Update docs' };
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockResult), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const result = await aiAssist('note3', 'extract-actions', 'We need to review the PR and update the docs.');
+      expect(result.result).toContain('Review PR');
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+      expect(body.action).toBe('extract-actions');
+    });
+
+    it('throws ApiError on failure', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'model unavailable' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      await expect(aiAssist('note1', 'expand')).rejects.toThrow(ApiError);
     });
   });
 

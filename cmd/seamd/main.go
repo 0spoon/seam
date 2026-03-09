@@ -15,11 +15,13 @@ import (
 
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/auth"
+	"github.com/katata/seam/internal/capture"
 	"github.com/katata/seam/internal/config"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/server"
+	"github.com/katata/seam/internal/template"
 	"github.com/katata/seam/internal/userdb"
 	"github.com/katata/seam/internal/watcher"
 	"github.com/katata/seam/internal/ws"
@@ -30,6 +32,40 @@ func main() {
 		fmt.Fprintf(os.Stderr, "seamd: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// noteBodyAdapter adapts note.SQLStore to the ai.NoteBodyLoader and
+// ai.NoteBodyUpdater interfaces, respecting the layering rule.
+type noteBodyAdapter struct {
+	store     *note.SQLStore
+	dbManager userdb.Manager
+}
+
+func (a *noteBodyAdapter) LoadNoteBody(ctx context.Context, userID, noteID string) (string, error) {
+	db, err := a.dbManager.Open(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("noteBodyAdapter.LoadNoteBody: open db: %w", err)
+	}
+	n, err := a.store.Get(ctx, db, noteID)
+	if err != nil {
+		return "", fmt.Errorf("noteBodyAdapter.LoadNoteBody: %w", err)
+	}
+	return n.Body, nil
+}
+
+func (a *noteBodyAdapter) UpdateNoteBody(ctx context.Context, userID, noteID, body string) error {
+	db, err := a.dbManager.Open(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("noteBodyAdapter.UpdateNoteBody: open db: %w", err)
+	}
+	_, err = db.ExecContext(ctx,
+		`UPDATE notes SET body = ?, updated_at = ? WHERE id = ?`,
+		body, time.Now().UTC().Format(time.RFC3339), noteID,
+	)
+	if err != nil {
+		return fmt.Errorf("noteBodyAdapter.UpdateNoteBody: %w", err)
+	}
+	return nil
 }
 
 func run() error {
@@ -101,7 +137,26 @@ func run() error {
 	searchSvc := search.NewService(ftsStore, userDBMgr, logger)
 	searchHandler := search.NewHandler(searchSvc, logger)
 
-	// Create AI components (Ollama, ChromaDB, embedder, chat, synthesizer, linker).
+	// Create capture components.
+	urlFetcher := capture.NewURLFetcher()
+	var voiceTranscriber *capture.VoiceTranscriber
+	if cfg.Models.Transcription != "" {
+		voiceTranscriber = capture.NewVoiceTranscriber(cfg.OllamaBaseURL, cfg.Models.Transcription)
+	}
+	captureSvc := capture.NewService(noteSvc, urlFetcher, voiceTranscriber, logger)
+	captureHandler := capture.NewHandler(captureSvc, logger)
+
+	// Create template components.
+	templateSvc := template.NewService(cfg.DataDir, userDBMgr, logger)
+	if err := templateSvc.EnsureDefaults(); err != nil {
+		logger.Warn("failed to create default templates", "error", err)
+	}
+	templateHandler := template.NewHandler(templateSvc, logger)
+
+	// Wire template service into note handler for single-request template-based creation.
+	noteHandler.SetTemplateApplier(templateSvc)
+
+	// Create AI components (Ollama, ChromaDB, embedder, chat, synthesizer, linker, writer).
 	ollamaClient := ai.NewOllamaClient(
 		cfg.OllamaBaseURL,
 		cfg.AI.EmbeddingTimeout.Duration,
@@ -135,14 +190,41 @@ func run() error {
 		aiQueue.RegisterHandler(ai.TaskTypeSynthesize, synthesizer.HandleSynthesizeTask)
 		aiQueue.RegisterHandler(ai.TaskTypeAutolink, linker.HandleAutolinkTask)
 
+		// Create AI writer (uses chat model for writing assist).
+		aiWriter := ai.NewWriter(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
+		bodyAdapter := &noteBodyAdapter{store: noteStore, dbManager: userDBMgr}
+		aiWriter.SetNoteBodyLoader(bodyAdapter)
+		aiWriter.SetNoteBodyUpdater(bodyAdapter)
+		aiQueue.RegisterHandler(ai.TaskTypeAssist, aiWriter.HandleAssistTask)
+		aiQueue.RegisterHandler(ai.TaskTypeSummarizeTranscript, aiWriter.HandleSummarizeTranscriptTask)
+
+		// Wire background summarization for voice captures.
+		captureSvc.SetSummarizeFunc(func(ctx context.Context, userID, noteID string) {
+			payload, _ := json.Marshal(ai.SummarizeTranscriptPayload{NoteID: noteID})
+			if err := aiQueue.Enqueue(ctx, &ai.Task{
+				UserID:   userID,
+				Type:     ai.TaskTypeSummarizeTranscript,
+				Priority: ai.PriorityBackground,
+				Payload:  payload,
+			}); err != nil {
+				logger.Warn("failed to enqueue transcript summarization", "note_id", noteID, "error", err)
+			}
+		})
+
 		// Enable semantic search.
 		semanticSearcher := search.NewSemanticSearcher(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
 		searchSvc.SetSemanticSearcher(semanticSearcher)
 
-		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthesizer, linker, embedder, userDBMgr, logger)
+		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthesizer, linker, embedder, aiWriter, userDBMgr, logger)
 		logger.Info("AI features enabled", "ollama_url", cfg.OllamaBaseURL, "chromadb_url", cfg.ChromaDBURL)
 	} else {
-		logger.Info("AI features disabled (chromadb_url not configured)")
+		// Even without ChromaDB, writer can work with just Ollama.
+		aiWriter := ai.NewWriter(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
+		bodyAdapter := &noteBodyAdapter{store: noteStore, dbManager: userDBMgr}
+		aiWriter.SetNoteBodyLoader(bodyAdapter)
+		aiWriter.SetNoteBodyUpdater(bodyAdapter)
+		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, aiWriter, userDBMgr, logger)
+		logger.Info("AI features: ChromaDB not configured; only writing assist available")
 	}
 
 	// Create file watcher with note.Reindex as the event handler.
@@ -350,6 +432,8 @@ func run() error {
 		NoteHandler:      noteHandler,
 		SearchHandler:    searchHandler,
 		AIHandler:        aiHandler,
+		CaptureHandler:   captureHandler,
+		TemplateHandler:  templateHandler,
 		WSMessageHandler: wsHandler,
 	})
 

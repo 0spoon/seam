@@ -23,6 +23,7 @@ import (
 	"github.com/katata/seam/internal/graph"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
+	"github.com/katata/seam/internal/review"
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/server"
 	"github.com/katata/seam/internal/settings"
@@ -277,16 +278,20 @@ func run() error {
 		semanticSearcher := search.NewSemanticSearcher(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
 		searchSvc.SetSemanticSearcher(semanticSearcher)
 
-		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthSvc, linker, embedder, aiWriter, userDBMgr, logger)
+		// Create AI suggester for tag/project suggestions.
+		suggester := ai.NewSuggester(ollamaClient, cfg.Models.Chat, logger)
+
+		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthSvc, linker, embedder, aiWriter, suggester, userDBMgr, logger)
 		logger.Info("AI features enabled", "ollama_url", cfg.OllamaBaseURL, "chromadb_url", cfg.ChromaDBURL)
 	} else {
-		// Even without ChromaDB, writer can work with just Ollama.
+		// Even without ChromaDB, writer and suggester can work with just Ollama.
 		aiWriter := ai.NewWriter(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
 		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
-		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, aiWriter, userDBMgr, logger)
-		logger.Info("AI features: ChromaDB not configured; only writing assist available")
+		suggester := ai.NewSuggester(ollamaClient, cfg.Models.Chat, logger)
+		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, aiWriter, suggester, userDBMgr, logger)
+		logger.Info("AI features: ChromaDB not configured; only writing assist and suggestions available")
 	}
 
 	// Create file watcher with note.Reindex as the event handler.
@@ -574,6 +579,10 @@ func run() error {
 		}
 	}
 
+	// Create review queue components (knowledge gardening).
+	reviewSvc := review.NewService(userDBMgr, graphSvc, logger)
+	reviewHandler := review.NewHandler(reviewSvc, logger)
+
 	// Create and start the HTTP server.
 	srv := server.New(server.Config{
 		Listen:           cfg.Listen,
@@ -592,6 +601,7 @@ func run() error {
 		GraphHandler:     graphHandler,
 		SettingsHandler:  settingsHandler,
 		ChatHandler:      chatHistoryHandler,
+		ReviewHandler:    reviewHandler,
 		WSMessageHandler: wsHandler,
 	})
 

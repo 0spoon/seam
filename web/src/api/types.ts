@@ -248,3 +248,30 @@ export interface TwoHopBacklink {
   via_id: string;    // intermediate note ID
   via_title: string; // intermediate note title
 }
+
+// Feature 3: Knowledge Gardening types
+export interface ReviewItem {
+  type: 'orphan' | 'untagged' | 'inbox' | 'similar_pair';
+  note_id: string;
+  note_title: string;
+  note_snippet: string;
+  suggestions: ReviewSuggestion[];
+  created_at: string;
+}
+
+export interface ReviewSuggestion {
+  action: string;
+  target: string;
+  reason: string;
+}
+
+export interface TagSuggestion {
+  name: string;
+  confidence: number;
+}
+
+export interface ProjectSuggestion {
+  id: string;
+  name: string;
+  confidence: number;
+}

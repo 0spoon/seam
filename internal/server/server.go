@@ -20,6 +20,7 @@ import (
 	"github.com/katata/seam/internal/graph"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
+	"github.com/katata/seam/internal/review"
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/settings"
 	"github.com/katata/seam/internal/template"
@@ -52,6 +53,7 @@ type Config struct {
 	GraphHandler     *graph.Handler
 	SettingsHandler  *settings.Handler
 	ChatHandler      *chat.Handler
+	ReviewHandler    *review.Handler
 	WSMessageHandler ws.MessageHandler
 }
 
@@ -161,6 +163,12 @@ func New(cfg Config) *Server {
 		if cfg.ChatHandler != nil {
 			r.Route("/api/chat", func(r chi.Router) {
 				r.Mount("/", cfg.ChatHandler.Routes())
+			})
+		}
+
+		if cfg.ReviewHandler != nil {
+			r.Route("/api/review", func(r chi.Router) {
+				r.Mount("/", cfg.ReviewHandler.Routes())
 			})
 		}
 	})

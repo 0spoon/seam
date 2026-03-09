@@ -32,6 +32,9 @@ import type {
   NoteVersion,
   Conversation,
   ChatHistoryMessage,
+  ReviewItem,
+  TagSuggestion,
+  ProjectSuggestion,
 } from './types';
 
 const BASE_URL = '/api';
@@ -573,5 +576,31 @@ export async function restoreVersion(
 ): Promise<Note> {
   return request<Note>(`/notes/${noteId}/versions/${version}/restore`, {
     method: 'POST',
+  });
+}
+
+// Review queue endpoints (Knowledge Gardening)
+
+export async function getReviewQueue(
+  limit = 20,
+): Promise<ReviewItem[]> {
+  return request<ReviewItem[]>(`/review/queue?limit=${limit}`);
+}
+
+export async function suggestTags(
+  noteId: string,
+): Promise<{ tags: TagSuggestion[] }> {
+  return request<{ tags: TagSuggestion[] }>('/ai/suggest-tags', {
+    method: 'POST',
+    body: JSON.stringify({ note_id: noteId }),
+  });
+}
+
+export async function suggestProject(
+  noteId: string,
+): Promise<{ projects: ProjectSuggestion[] }> {
+  return request<{ projects: ProjectSuggestion[] }>('/ai/suggest-project', {
+    method: 'POST',
+    body: JSON.stringify({ note_id: noteId }),
   });
 }

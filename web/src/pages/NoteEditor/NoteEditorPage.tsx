@@ -43,6 +43,9 @@ import {
   wikilinkDecorationTheme,
   wikilinkAutocomplete,
 } from './wikilinkExtension';
+import { createSlashExtension, dismissSlashMenu, type SlashMenuState } from './slashExtension';
+import { SlashMenu } from './SlashMenu';
+import type { SlashCommand } from '../../lib/slashCommands';
 import { EditorSkeleton } from '../../components/Skeleton/Skeleton';
 import { ConfirmModal } from '../../components/ConfirmModal/ConfirmModal';
 import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
@@ -79,6 +82,13 @@ export function NoteEditorPage() {
   const addToast = useToastStore((s) => s.addToast);
   const [aiLoading, setAILoading] = useState(false);
   const [aiResult, setAIResult] = useState<{ action: string; text: string } | null>(null);
+  const [slashMenuState, setSlashMenuState] = useState<SlashMenuState>({
+    active: false,
+    query: '',
+    from: 0,
+    pos: null,
+  });
+  const [showSlashHint, setShowSlashHint] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const titleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const contentRef = useRef('');
@@ -413,6 +423,35 @@ export function NoteEditorPage() {
     };
   }, []);
 
+  // Slash command select handler
+  const handleSlashSelect = useCallback((command: SlashCommand) => {
+    const view = editorRef.current?.view;
+    if (!view) return;
+    command.action(view);
+    dismissSlashMenu(view);
+  }, []);
+
+  const handleSlashDismiss = useCallback(() => {
+    const view = editorRef.current?.view;
+    if (!view) return;
+    dismissSlashMenu(view);
+  }, []);
+
+  // First-use discovery hint for slash commands
+  useEffect(() => {
+    const key = 'seam_slash_hint_shown';
+    if (localStorage.getItem(key)) return;
+
+    setShowSlashHint(true);
+    localStorage.setItem(key, '1');
+
+    const timer = setTimeout(() => {
+      setShowSlashHint(false);
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
@@ -580,9 +619,14 @@ export function NoteEditorPage() {
     [content, viewMode],
   );
 
-  const cmExtensions = useMemo(
-    () => [markdown(), wikilinkDecorationPlugin, wikilinkDecorationTheme, wikilinkAutocomplete],
+  const slashExtension = useMemo(
+    () => createSlashExtension(setSlashMenuState),
     [],
+  );
+
+  const cmExtensions = useMemo(
+    () => [markdown(), wikilinkDecorationPlugin, wikilinkDecorationTheme, wikilinkAutocomplete, ...slashExtension],
+    [slashExtension],
   );
 
   return (
@@ -782,19 +826,36 @@ export function NoteEditorPage() {
                 placeholder="Untitled"
                 aria-label="Note title"
               />
-              <CodeMirror
-                ref={editorRef}
-                value={content}
-                onChange={handleChange}
-                extensions={cmExtensions}
-                theme={seamEditorTheme}
-                basicSetup={{
-                  lineNumbers: true,
-                  highlightActiveLine: true,
-                  foldGutter: false,
-                }}
-                className={styles.codeMirror}
-              />
+              <div style={{ position: 'relative' }}>
+                <CodeMirror
+                  ref={editorRef}
+                  value={content}
+                  onChange={handleChange}
+                  extensions={cmExtensions}
+                  theme={seamEditorTheme}
+                  basicSetup={{
+                    lineNumbers: true,
+                    highlightActiveLine: true,
+                    foldGutter: false,
+                  }}
+                  className={styles.codeMirror}
+                />
+                <SlashMenu
+                  active={slashMenuState.active}
+                  query={slashMenuState.query}
+                  position={slashMenuState.pos}
+                  onSelect={handleSlashSelect}
+                  onDismiss={handleSlashDismiss}
+                />
+              </div>
+              {showSlashHint && (
+                <div
+                  className={styles.slashHint}
+                  onClick={() => setShowSlashHint(false)}
+                >
+                  Tip: Type / for commands
+                </div>
+              )}
               <div className={styles.wordCountBar}>
                 <span>{wordStats.words.toLocaleString()} words</span>
                 <span className={styles.wordCountSeparator}>/</span>

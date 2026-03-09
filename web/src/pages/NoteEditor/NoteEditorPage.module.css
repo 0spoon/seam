@@ -749,6 +749,23 @@
   }
 }
 
+/* Slash command hint */
+.slashHint {
+  padding: var(--space-1) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  animation: slashHintFade 5s ease-out forwards;
+}
+
+@keyframes slashHintFade {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* Save status */
 .saveStatus {
   position: absolute;

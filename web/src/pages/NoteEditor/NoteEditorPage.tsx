@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { AnimatePresence, motion } from 'motion/react';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, addDays, subDays, format as formatDate, parse as parseDate } from 'date-fns';
 import {
   Bold,
   Italic,
@@ -29,6 +29,8 @@ import {
   FolderInput,
   Maximize2,
   Minimize2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -510,6 +512,19 @@ export function NoteEditorPage() {
     updateSetting('zen_mode_typewriter', next);
   }, [typewriterEnabled, updateSetting]);
 
+  const isDaily = currentNote?.tags?.includes('daily');
+
+  const navigateToDailyNote = useCallback((offset: number) => {
+    if (!currentNote) return;
+    // Parse the date from the note title (YYYY-MM-DD prefix).
+    const match = currentNote.title.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (!match) return;
+    const currentDate = parseDate(match[1], 'yyyy-MM-dd', new Date());
+    const targetDate = offset > 0 ? addDays(currentDate, offset) : subDays(currentDate, Math.abs(offset));
+    const targetDateStr = formatDate(targetDate, 'yyyy-MM-dd');
+    navigate(`/today?date=${targetDateStr}`);
+  }, [currentNote, navigate]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
@@ -929,15 +944,37 @@ export function NoteEditorPage() {
               className={styles.editorPane}
               style={{ flex: viewMode === 'split' ? '1' : undefined }}
             >
-              <input
-                ref={titleInputRef}
-                type="text"
-                className={styles.titleInput}
-                value={title}
-                onChange={(e) => handleTitleChange(e.target.value)}
-                placeholder="Untitled"
-                aria-label="Note title"
-              />
+              <div className={styles.titleRow}>
+                <input
+                  ref={titleInputRef}
+                  type="text"
+                  className={styles.titleInput}
+                  value={title}
+                  onChange={(e) => handleTitleChange(e.target.value)}
+                  placeholder="Untitled"
+                  aria-label="Note title"
+                />
+                {isDaily && (
+                  <div className={styles.dailyNav}>
+                    <button
+                      className={styles.dailyNavButton}
+                      onClick={() => navigateToDailyNote(-1)}
+                      title="Previous day"
+                      aria-label="Previous day"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button
+                      className={styles.dailyNavButton}
+                      onClick={() => navigateToDailyNote(1)}
+                      title="Next day"
+                      aria-label="Next day"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
               <div style={{ position: 'relative' }}>
                 <CodeMirror
                   ref={editorRef}

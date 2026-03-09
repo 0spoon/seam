@@ -171,6 +171,41 @@
   outline: none;
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.titleRow .titleInput {
+  flex: 1;
+}
+
+.dailyNav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-4);
+  flex-shrink: 0;
+}
+
+.dailyNavButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.dailyNavButton:hover {
+  background: var(--bg-elevated);
+  color: var(--accent-primary);
+}
+
 .codeMirror {
   flex: 1;
   overflow: auto;

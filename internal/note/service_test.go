@@ -26,9 +26,10 @@ func setupService(t *testing.T) (*Service, userdb.Manager, string) {
 	t.Cleanup(func() { mgr.CloseAll() })
 
 	noteStore := NewSQLStore()
+	versionStore := NewVersionStore()
 	projStore := project.NewStore()
 
-	svc := NewService(noteStore, projStore, mgr, nil, logger)
+	svc := NewService(noteStore, versionStore, projStore, mgr, nil, logger)
 	return svc, mgr, dataDir
 }
 

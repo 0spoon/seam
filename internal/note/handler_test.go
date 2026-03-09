@@ -31,8 +31,9 @@ func setupHandler(t *testing.T) (http.Handler, *Service) {
 	t.Cleanup(func() { mgr.CloseAll() })
 
 	noteStore := NewSQLStore()
+	versionStore := NewVersionStore()
 	projStore := project.NewStore()
-	svc := NewService(noteStore, projStore, mgr, nil, logger)
+	svc := NewService(noteStore, versionStore, projStore, mgr, nil, logger)
 	handler := NewHandler(svc, logger)
 
 	r := chi.NewRouter()
@@ -344,8 +345,9 @@ func TestHandler_MissingAuth(t *testing.T) {
 	t.Cleanup(func() { mgr.CloseAll() })
 
 	noteStore := NewSQLStore()
+	versionStore := NewVersionStore()
 	projStore := project.NewStore()
-	svc := NewService(noteStore, projStore, mgr, nil, logger)
+	svc := NewService(noteStore, versionStore, projStore, mgr, nil, logger)
 	handler := NewHandler(svc, logger)
 
 	// Router WITHOUT auth middleware.

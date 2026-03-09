@@ -154,7 +154,8 @@ func run() error {
 
 	// Create note components.
 	noteStore := note.NewSQLStore()
-	noteSvc := note.NewService(noteStore, projectStore, userDBMgr, nil, logger) // suppressor set below
+	versionStore := note.NewVersionStore()
+	noteSvc := note.NewService(noteStore, versionStore, projectStore, userDBMgr, nil, logger) // suppressor set below
 	noteHandler := note.NewHandler(noteSvc, logger)
 
 	// C-19: Wire frontmatter updater so project cascade-to-inbox clears

@@ -1,0 +1,67 @@
+.container {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.labelOld {
+  color: var(--status-error);
+}
+
+.labelNew {
+  color: var(--status-success);
+}
+
+.arrow {
+  color: var(--text-tertiary);
+}
+
+.lines {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+  background: var(--bg-base);
+}
+
+.line {
+  padding: 1px var(--space-3);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.lineAdded {
+  background: color-mix(in srgb, var(--status-success) 10%, transparent);
+  color: var(--status-success);
+}
+
+.lineRemoved {
+  background: color-mix(in srgb, var(--status-error) 10%, transparent);
+  color: var(--status-error);
+}
+
+.lineContext {
+  color: var(--text-tertiary);
+}
+
+.noDiff {
+  padding: var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  text-align: center;
+}

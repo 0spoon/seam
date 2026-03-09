@@ -29,6 +29,7 @@ import type {
   GraphFilter,
   GraphNode,
   TwoHopBacklink,
+  NoteVersion,
   Conversation,
   ChatHistoryMessage,
 } from './types';
@@ -543,5 +544,34 @@ export async function addChatMessage(
   await request<void>(`/chat/conversations/${conversationId}/messages`, {
     method: 'POST',
     body: JSON.stringify(message),
+  });
+}
+
+// Version history endpoints
+
+export async function listVersions(
+  noteId: string,
+  limit = 20,
+  offset = 0,
+): Promise<{ versions: NoteVersion[]; total: number }> {
+  const res = await requestRaw(`/notes/${noteId}/versions?limit=${limit}&offset=${offset}`);
+  const total = parseInt(res.headers.get('X-Total-Count') || '0', 10);
+  const versions = await res.json();
+  return { versions: versions || [], total };
+}
+
+export async function getVersion(
+  noteId: string,
+  version: number,
+): Promise<NoteVersion> {
+  return request<NoteVersion>(`/notes/${noteId}/versions/${version}`);
+}
+
+export async function restoreVersion(
+  noteId: string,
+  version: number,
+): Promise<Note> {
+  return request<Note>(`/notes/${noteId}/versions/${version}/restore`, {
+    method: 'POST',
   });
 }

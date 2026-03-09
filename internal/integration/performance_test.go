@@ -48,7 +48,8 @@ func setupPerfServer(t *testing.T) (*httptest.Server, *auth.JWTManager, userdb.M
 	projectHandler := project.NewHandler(projectSvc, logger)
 
 	noteStore := note.NewSQLStore()
-	noteSvc := note.NewService(noteStore, projectStore, userDBMgr, nil, logger)
+	versionStore := note.NewVersionStore()
+	noteSvc := note.NewService(noteStore, versionStore, projectStore, userDBMgr, nil, logger)
 	noteHandler := note.NewHandler(noteSvc, logger)
 
 	ftsStore := search.NewFTSStore()

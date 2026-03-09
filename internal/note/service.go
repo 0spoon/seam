@@ -47,6 +47,7 @@ type UpdateNoteReq struct {
 // Service implements note business logic including filesystem operations.
 type Service struct {
 	store         *SQLStore
+	versionStore  *VersionStore
 	projectStore  *project.Store
 	userDBManager userdb.Manager
 	suppressorMu  sync.RWMutex
@@ -57,6 +58,7 @@ type Service struct {
 // NewService creates a new note Service.
 func NewService(
 	store *SQLStore,
+	versionStore *VersionStore,
 	projectStore *project.Store,
 	userDBManager userdb.Manager,
 	suppressor WriteSuppressor,
@@ -67,6 +69,7 @@ func NewService(
 	}
 	return &Service{
 		store:         store,
+		versionStore:  versionStore,
 		projectStore:  projectStore,
 		userDBManager: userDBManager,
 		suppressor:    suppressor,
@@ -323,6 +326,11 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 		return nil, fmt.Errorf("note.Service.Update: %w", err)
 	}
 
+	// Capture pre-update state for version history.
+	oldTitle := existing.Title
+	oldBody := existing.Body
+	oldContentHash := existing.ContentHash
+
 	notesDir := s.userDBManager.UserNotesDir(userID)
 
 	// Apply changes.
@@ -502,6 +510,33 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 		return nil, fmt.Errorf("note.Service.Update: commit: %w", err)
 	}
 
+	// Create a version snapshot from the pre-update content if the hash changed.
+	if s.versionStore != nil && existing.ContentHash != oldContentHash {
+		nextVer, verErr := s.versionStore.NextVersion(ctx, db, noteID)
+		if verErr != nil {
+			s.logger.Error("note.Service.Update: failed to get next version number",
+				"note_id", noteID, "error", verErr)
+		} else {
+			v := &NoteVersion{
+				NoteID:      noteID,
+				Version:     nextVer,
+				Title:       oldTitle,
+				Body:        oldBody,
+				ContentHash: oldContentHash,
+			}
+			if createErr := s.versionStore.Create(ctx, db, v); createErr != nil {
+				s.logger.Error("note.Service.Update: failed to create version",
+					"note_id", noteID, "version", nextVer, "error", createErr)
+			} else {
+				// Cleanup old versions, keeping at most 50.
+				if cleanupErr := s.versionStore.Cleanup(ctx, db, noteID, 50); cleanupErr != nil {
+					s.logger.Error("note.Service.Update: version cleanup failed",
+						"note_id", noteID, "error", cleanupErr)
+				}
+			}
+		}
+	}
+
 	s.logger.Info("note updated", "user_id", userID, "note_id", noteID)
 	return existing, nil
 }
@@ -534,6 +569,44 @@ func (s *Service) Delete(ctx context.Context, userID, noteID string) error {
 
 	s.logger.Info("note deleted", "user_id", userID, "note_id", noteID)
 	return nil
+}
+
+// ListVersions returns version history for a note.
+func (s *Service) ListVersions(ctx context.Context, userID, noteID string, limit, offset int) ([]*NoteVersion, int, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("note.Service.ListVersions: open db: %w", err)
+	}
+
+	// Verify note exists.
+	if _, err := s.store.Get(ctx, db, noteID); err != nil {
+		return nil, 0, fmt.Errorf("note.Service.ListVersions: %w", err)
+	}
+
+	versions, total, err := s.versionStore.List(ctx, db, noteID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("note.Service.ListVersions: %w", err)
+	}
+	return versions, total, nil
+}
+
+// GetVersion returns a specific version of a note.
+func (s *Service) GetVersion(ctx context.Context, userID, noteID string, version int) (*NoteVersion, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.GetVersion: open db: %w", err)
+	}
+
+	// Verify note exists.
+	if _, err := s.store.Get(ctx, db, noteID); err != nil {
+		return nil, fmt.Errorf("note.Service.GetVersion: %w", err)
+	}
+
+	v, err := s.versionStore.Get(ctx, db, noteID, version)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.GetVersion: %w", err)
+	}
+	return v, nil
 }
 
 // Reindex is called by the file watcher when an external edit is detected.

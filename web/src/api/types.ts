@@ -230,6 +230,17 @@ export interface ChatHistoryMessage {
   created_at: string;
 }
 
+// Feature 9: Note version history
+export interface NoteVersion {
+  id: string;
+  note_id: string;
+  version: number;
+  title: string;
+  body: string;
+  content_hash: string;
+  created_at: string;
+}
+
 // Phase 4: Two-hop backlinks (includes the intermediate connecting note)
 export interface TwoHopBacklink {
   id: string;

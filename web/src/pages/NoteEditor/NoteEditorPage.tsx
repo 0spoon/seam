@@ -45,6 +45,7 @@ import {
 } from './wikilinkExtension';
 import { EditorSkeleton } from '../../components/Skeleton/Skeleton';
 import { ConfirmModal } from '../../components/ConfirmModal/ConfirmModal';
+import { VersionHistory } from '../../components/VersionHistory/VersionHistory';
 import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
@@ -1101,6 +1102,15 @@ export function NoteEditorPage() {
                 </div>
               </div>
             </section>
+
+            {/* Version History */}
+            {currentNote && (
+              <VersionHistory
+                noteId={currentNote.id}
+                currentBody={content}
+                onRestore={() => fetchNote(id!)}
+              />
+            )}
           </motion.aside>
         )}
         </AnimatePresence>

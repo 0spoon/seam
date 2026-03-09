@@ -55,6 +55,11 @@ func (h *Handler) Routes() chi.Router {
 	r.Put("/{id}", h.update)
 	r.Delete("/{id}", h.delete)
 	r.Get("/{id}/backlinks", h.backlinks)
+	r.Route("/{id}/versions", func(r chi.Router) {
+		r.Get("/", h.listVersions)
+		r.Get("/{version}", h.getVersion)
+		r.Post("/{version}/restore", h.restoreVersion)
+	})
 	return r
 }
 

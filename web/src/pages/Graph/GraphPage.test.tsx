@@ -29,10 +29,18 @@ vi.mock('../../stores/uiStore', () => ({
 
 // Mock cytoscape to avoid canvas issues in JSDOM.
 vi.mock('cytoscape', () => {
+  const mockElement = {
+    length: 0,
+    position: vi.fn(),
+    style: vi.fn(),
+  };
   const mockCy = {
     on: vi.fn(),
     destroy: vi.fn(),
     fit: vi.fn(),
+    extent: vi.fn(() => ({ x1: 0, y1: 0, x2: 100, y2: 100 })),
+    getElementById: vi.fn(() => mockElement),
+    add: vi.fn(),
     nodes: vi.fn(() => ({
       forEach: vi.fn(),
       show: vi.fn(),

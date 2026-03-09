@@ -749,6 +749,42 @@
   }
 }
 
+/* Zen mode */
+.zenMode .contentArea {
+  transition: all var(--duration-slow) var(--ease-out);
+}
+
+.zenMode .editorWrapper {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-12);
+  transition: max-width var(--duration-slow) var(--ease-out),
+    padding var(--duration-slow) var(--ease-out);
+}
+
+.zenMode .editorPane {
+  border-right: none;
+}
+
+.zenMode .titleInput {
+  border: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.zenMode .wordCountBar {
+  padding-left: 0;
+  padding-right: 0;
+  border-top-color: var(--border-subtle);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenMode .contentArea,
+  .zenMode .editorWrapper {
+    transition: none;
+  }
+}
+
 /* Save status */
 .saveStatus {
   position: absolute;

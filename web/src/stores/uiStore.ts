@@ -15,6 +15,7 @@ interface UIState {
   captureDefaultProjectId: string;
   tags: TagCount[];
   settingsBridged: boolean;
+  zenMode: boolean;
 
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -26,6 +27,8 @@ interface UIState {
   setCaptureModalOpen: (open: boolean, defaultProjectId?: string) => void;
   fetchTags: () => Promise<void>;
   bridgeFromSettings: () => void;
+  toggleZenMode: () => void;
+  setZenMode: (active: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -38,6 +41,7 @@ export const useUIStore = create<UIState>((set) => ({
   captureDefaultProjectId: '',
   tags: [],
   settingsBridged: false,
+  zenMode: false,
 
   toggleSidebar: () =>
     set((state) => {
@@ -81,6 +85,9 @@ export const useUIStore = create<UIState>((set) => ({
       // Ignore tag fetch errors
     }
   },
+
+  toggleZenMode: () => set((state) => ({ zenMode: !state.zenMode })),
+  setZenMode: (active) => set({ zenMode: active }),
 
   // Bridge settings into runtime UI state. Called once after settings load.
   bridgeFromSettings: () => {

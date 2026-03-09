@@ -14,6 +14,12 @@
   margin-left: var(--sidebar-collapsed);
 }
 
+.zenMode .main,
+.mainZen {
+  margin-left: 0;
+  transition: margin-left var(--duration-slow) var(--ease-out);
+}
+
 .pageTransition {
   height: 100%;
 }
@@ -82,5 +88,11 @@
     inset: 0;
     z-index: calc(var(--z-sidebar) - 1);
     background: color-mix(in srgb, var(--bg-deep) 50%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mainZen {
+    transition: none;
   }
 }

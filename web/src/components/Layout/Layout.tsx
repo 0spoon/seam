@@ -18,24 +18,42 @@ export function Layout() {
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const setCaptureModalOpen = useUIStore((s) => s.setCaptureModalOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+  const zenMode = useUIStore((s) => s.zenMode);
+  const setZenMode = useUIStore((s) => s.setZenMode);
+  const toggleZenMode = useUIStore((s) => s.toggleZenMode);
 
-  const keyBindings = useMemo(() => [
-    {
-      key: 'k',
-      meta: true,
-      handler: () => setCommandPaletteOpen(true),
-    },
-    {
-      key: 'n',
-      meta: true,
-      handler: () => setCaptureModalOpen(true),
-    },
-    {
-      key: '\\',
-      meta: true,
-      handler: () => toggleSidebar(),
-    },
-  ], [setCommandPaletteOpen, setCaptureModalOpen, toggleSidebar]);
+  const keyBindings = useMemo(() => {
+    const bindings = [
+      {
+        key: 'k',
+        meta: true,
+        handler: () => setCommandPaletteOpen(true),
+      },
+      {
+        key: 'n',
+        meta: true,
+        handler: () => setCaptureModalOpen(true),
+      },
+      {
+        key: '\\',
+        meta: true,
+        shift: true,
+        handler: () => toggleZenMode(),
+      },
+      {
+        key: '\\',
+        meta: true,
+        handler: () => toggleSidebar(),
+      },
+    ];
+    if (zenMode) {
+      bindings.push({
+        key: 'Escape',
+        handler: () => setZenMode(false),
+      });
+    }
+    return bindings;
+  }, [setCommandPaletteOpen, setCaptureModalOpen, toggleSidebar, toggleZenMode, setZenMode, zenMode]);
 
   useKeyboard(keyBindings);
 
@@ -61,22 +79,24 @@ export function Layout() {
   }, [location.pathname]);
 
   return (
-    <div className={styles.layout}>
+    <div className={`${styles.layout} ${zenMode ? styles.zenMode : ''}`}>
       <a href="#main-content" className="skipToContent">
         Skip to content
       </a>
 
       {/* Hamburger button for mobile (visible <640px) */}
-      <button
-        className={styles.hamburger}
-        onClick={() => setSidebarOpen(true)}
-        aria-label="Open navigation"
-      >
-        <Menu size={20} />
-      </button>
+      {!zenMode && (
+        <button
+          className={styles.hamburger}
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Open navigation"
+        >
+          <Menu size={20} />
+        </button>
+      )}
 
       {/* Mobile backdrop (visible <640px when sidebar open) */}
-      {sidebarOpen && (
+      {sidebarOpen && !zenMode && (
         <div
           className={styles.mobileBackdrop}
           onClick={() => setSidebarOpen(false)}
@@ -89,11 +109,11 @@ export function Layout() {
         {routeAnnouncement}
       </div>
 
-      <Sidebar />
+      {!zenMode && <Sidebar />}
       <main
         ref={mainRef}
         id="main-content"
-        className={`${styles.main} ${sidebarCollapsed ? styles.mainCollapsed : ''}`}
+        className={`${styles.main} ${sidebarCollapsed && !zenMode ? styles.mainCollapsed : ''} ${zenMode ? styles.mainZen : ''}`}
         tabIndex={-1}
       >
         <AnimatePresence mode="wait">

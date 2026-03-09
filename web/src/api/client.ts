@@ -32,6 +32,7 @@ import type {
   NoteVersion,
   Conversation,
   ChatHistoryMessage,
+  BulkActionResult,
 } from './types';
 
 const BASE_URL = '/api';
@@ -286,6 +287,17 @@ export async function listNotes(
 
 export async function getBacklinks(noteId: string): Promise<Note[]> {
   return request<Note[]>(`/notes/${noteId}/backlinks`);
+}
+
+export async function bulkUpdateNotes(
+  noteIds: string[],
+  action: string,
+  params: Record<string, string> = {},
+): Promise<BulkActionResult> {
+  return request<BulkActionResult>('/notes/bulk', {
+    method: 'PATCH',
+    body: JSON.stringify({ note_ids: noteIds, action, params }),
+  });
 }
 
 // Project endpoints

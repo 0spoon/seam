@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -568,6 +569,176 @@ func (s *Service) Delete(ctx context.Context, userID, noteID string) error {
 	}
 
 	s.logger.Info("note deleted", "user_id", userID, "note_id", noteID)
+	return nil
+}
+
+// BulkAction performs a bulk operation on multiple notes within a single
+// transaction. Supported actions: add_tag, remove_tag, move, delete.
+func (s *Service) BulkAction(ctx context.Context, userID string, req BulkActionReq) (*BulkActionResult, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.BulkAction: open db: %w", err)
+	}
+
+	result := &BulkActionResult{}
+
+	// Validate action and params.
+	switch req.Action {
+	case "add_tag", "remove_tag":
+		if req.Params.Tag == "" {
+			return nil, fmt.Errorf("note.Service.BulkAction: tag parameter is required")
+		}
+		if err := validate.Name(req.Params.Tag); err != nil {
+			return nil, fmt.Errorf("note.Service.BulkAction: invalid tag name: %w", err)
+		}
+	case "move":
+		// project_id can be empty (= inbox)
+	case "delete":
+		// no params needed
+	default:
+		return nil, fmt.Errorf("note.Service.BulkAction: unknown action %q", req.Action)
+	}
+
+	// Execute within a transaction.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.BulkAction: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
+
+	// For delete, collect file paths to remove after the DB transaction commits.
+	var filesToDelete []string
+	notesDir := s.userDBManager.UserNotesDir(userID)
+
+	for _, noteID := range req.NoteIDs {
+		if err := s.executeBulkAction(ctx, tx, db, userID, noteID, req, notesDir, &filesToDelete); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", noteID, err.Error()))
+			continue
+		}
+		result.Success++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("note.Service.BulkAction: commit: %w", err)
+	}
+
+	// After successful commit, delete files from disk for bulk delete.
+	for _, absPath := range filesToDelete {
+		if sup := s.getSuppressor(); sup != nil {
+			sup.IgnoreNext(absPath)
+		}
+		if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+			s.logger.Error("note.Service.BulkAction: remove file after delete",
+				"path", absPath, "error", err)
+		}
+	}
+
+	s.logger.Info("bulk action completed",
+		"user_id", userID, "action", req.Action,
+		"success", result.Success, "failed", result.Failed)
+	return result, nil
+}
+
+// executeBulkAction handles a single note within a bulk operation transaction.
+func (s *Service) executeBulkAction(
+	ctx context.Context,
+	tx *sql.Tx,
+	db *sql.DB,
+	userID, noteID string,
+	req BulkActionReq,
+	notesDir string,
+	filesToDelete *[]string,
+) error {
+	switch req.Action {
+	case "add_tag":
+		existing, err := s.store.Get(ctx, tx, noteID)
+		if err != nil {
+			return err
+		}
+		// Check if tag already present.
+		for _, t := range existing.Tags {
+			if t == req.Params.Tag {
+				return nil // Already has the tag, no-op.
+			}
+		}
+		tags := append(existing.Tags, req.Params.Tag)
+		return s.store.UpdateTags(ctx, tx, noteID, tags)
+
+	case "remove_tag":
+		existing, err := s.store.Get(ctx, tx, noteID)
+		if err != nil {
+			return err
+		}
+		tags := make([]string, 0, len(existing.Tags))
+		for _, t := range existing.Tags {
+			if t != req.Params.Tag {
+				tags = append(tags, t)
+			}
+		}
+		return s.store.UpdateTags(ctx, tx, noteID, tags)
+
+	case "move":
+		existing, err := s.store.Get(ctx, tx, noteID)
+		if err != nil {
+			return err
+		}
+
+		newProjectID := req.Params.ProjectID
+		if existing.ProjectID == newProjectID {
+			return nil // Already in the target project, no-op.
+		}
+
+		// Compute new file path for the moved note.
+		newSubDir := ""
+		if newProjectID != "" {
+			p, pErr := s.projectStore.Get(ctx, db, newProjectID)
+			if pErr != nil {
+				return fmt.Errorf("resolve project: %w", pErr)
+			}
+			newSubDir = p.Slug
+		}
+
+		filename := filepath.Base(existing.FilePath)
+		var newRelPath string
+		if newSubDir != "" {
+			newRelPath = newSubDir + "/" + filename
+		} else {
+			newRelPath = filename
+		}
+
+		oldAbs := filepath.Join(notesDir, existing.FilePath)
+		newAbs := filepath.Join(notesDir, newRelPath)
+
+		// Move the file on disk.
+		if newRelPath != existing.FilePath {
+			if err := os.MkdirAll(filepath.Dir(newAbs), 0o755); err != nil {
+				return fmt.Errorf("mkdir for move: %w", err)
+			}
+			if sup := s.getSuppressor(); sup != nil {
+				sup.IgnoreNext(oldAbs)
+				sup.IgnoreNext(newAbs)
+			}
+			if err := os.Rename(oldAbs, newAbs); err != nil {
+				return fmt.Errorf("rename file: %w", err)
+			}
+		}
+
+		existing.ProjectID = newProjectID
+		existing.FilePath = newRelPath
+		existing.UpdatedAt = time.Now().UTC()
+		return s.store.Update(ctx, tx, existing)
+
+	case "delete":
+		existing, err := s.store.Get(ctx, tx, noteID)
+		if err != nil {
+			return err
+		}
+		absPath := filepath.Join(notesDir, existing.FilePath)
+		*filesToDelete = append(*filesToDelete, absPath)
+		return s.store.Delete(ctx, tx, noteID)
+	}
+
 	return nil
 }
 

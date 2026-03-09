@@ -46,11 +46,33 @@ func (h *Handler) SetTemplateApplier(applier TemplateApplier) {
 	h.templateApplier = applier
 }
 
+// BulkActionReq is the request payload for bulk note operations.
+type BulkActionReq struct {
+	NoteIDs []string         `json:"note_ids"`
+	Action  string           `json:"action"`
+	Params  BulkActionParams `json:"params"`
+}
+
+// BulkActionParams holds optional parameters for bulk actions.
+type BulkActionParams struct {
+	Tag       string `json:"tag,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+}
+
+// BulkActionResult reports the outcome of a bulk operation.
+type BulkActionResult struct {
+	Success int      `json:"success"`
+	Failed  int      `json:"failed"`
+	Errors  []string `json:"errors,omitempty"`
+}
+
 // Routes returns a chi router with all note routes mounted.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)
 	r.Get("/", h.list)
+	// /bulk must be registered before /{id} to avoid chi treating "bulk" as an id param.
+	r.Patch("/bulk", h.bulkAction)
 	r.Get("/{id}", h.get)
 	r.Put("/{id}", h.update)
 	r.Delete("/{id}", h.delete)
@@ -61,6 +83,58 @@ func (h *Handler) Routes() chi.Router {
 		r.Post("/{version}/restore", h.restoreVersion)
 	})
 	return r
+}
+
+func (h *Handler) bulkAction(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req BulkActionReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.NoteIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "note_ids is required")
+		return
+	}
+	if len(req.NoteIDs) > 100 {
+		writeError(w, http.StatusBadRequest, "maximum 100 notes per bulk operation")
+		return
+	}
+
+	switch req.Action {
+	case "add_tag", "remove_tag":
+		if req.Params.Tag == "" {
+			writeError(w, http.StatusBadRequest, "params.tag is required for tag actions")
+			return
+		}
+		if err := validate.Name(req.Params.Tag); err != nil {
+			writeError(w, http.StatusBadRequest, "tag name contains unsafe characters")
+			return
+		}
+	case "move":
+		// project_id can be empty (= inbox)
+	case "delete":
+		// no params needed
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown action %q", req.Action))
+		return
+	}
+
+	result, err := h.service.BulkAction(r.Context(), userID, req)
+	if err != nil {
+		h.logger.Error("bulk action failed", "action", req.Action, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {

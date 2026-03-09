@@ -1,5 +1,6 @@
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Check } from 'lucide-react';
 import type { Note } from '../../api/types';
 import { timeAgo } from '../../lib/dates';
 import { getTagColor } from '../../lib/tagColor';
@@ -9,9 +10,19 @@ interface NoteCardProps {
   note: Note;
   projectName?: string;
   projectColor?: string;
+  selected?: boolean;
+  selectionMode?: boolean;
+  onSelect?: (id: string) => void;
 }
 
-export const NoteCard = memo(function NoteCard({ note, projectName, projectColor }: NoteCardProps) {
+export const NoteCard = memo(function NoteCard({
+  note,
+  projectName,
+  projectColor,
+  selected = false,
+  selectionMode = false,
+  onSelect,
+}: NoteCardProps) {
   const navigate = useNavigate();
 
   const preview = note.body
@@ -23,17 +34,64 @@ export const NoteCard = memo(function NoteCard({ note, projectName, projectColor
     .trim()
     .slice(0, 200);
 
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      // Cmd/Ctrl+Click toggles selection regardless of mode.
+      if ((e.metaKey || e.ctrlKey) && onSelect) {
+        e.preventDefault();
+        onSelect(note.id);
+        return;
+      }
+      // In selection mode, any click toggles selection.
+      if (selectionMode && onSelect) {
+        onSelect(note.id);
+        return;
+      }
+      navigate(`/notes/${note.id}`);
+    },
+    [navigate, note.id, selectionMode, onSelect],
+  );
+
+  const handleCheckboxClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onSelect?.(note.id);
+    },
+    [note.id, onSelect],
+  );
+
+  const cardClass = [styles.card, selected ? styles.selected : '']
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <article
-      className={styles.card}
-      onClick={() => navigate(`/notes/${note.id}`)}
+      className={cardClass}
+      onClick={handleClick}
       role="listitem"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') navigate(`/notes/${note.id}`);
+        if (e.key === 'Enter') {
+          if (selectionMode && onSelect) {
+            onSelect(note.id);
+          } else {
+            navigate(`/notes/${note.id}`);
+          }
+        }
       }}
     >
       <div className={styles.header}>
+        {(selectionMode || selected) && (
+          <div
+            className={`${styles.checkbox} ${selected ? styles.checked : ''}`}
+            onClick={handleCheckboxClick}
+            role="checkbox"
+            aria-checked={selected}
+            tabIndex={-1}
+          >
+            {selected && <Check size={12} strokeWidth={3} />}
+          </div>
+        )}
         <h3 className={styles.title}>{note.title}</h3>
         <time className={styles.timestamp}>{timeAgo(note.updated_at)}</time>
       </div>

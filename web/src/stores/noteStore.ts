@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Note, NoteFilter, CreateNoteReq, UpdateNoteReq } from '../api/types';
+import type { Note, NoteFilter, CreateNoteReq, UpdateNoteReq, BulkActionResult } from '../api/types';
 import * as api from '../api/client';
 import { useToastStore } from '../components/Toast/ToastContainer';
 
@@ -14,6 +14,10 @@ interface NoteState {
   // the list with the same parameters after a remote change.
   lastFilter: NoteFilter | undefined;
 
+  // Selection state for bulk operations.
+  selectedNoteIds: Set<string>;
+  isSelectionMode: boolean;
+
   fetchNotes: (filter?: NoteFilter) => Promise<void>;
   fetchNote: (id: string) => Promise<void>;
   createNote: (req: CreateNoteReq) => Promise<Note>;
@@ -23,6 +27,12 @@ interface NoteState {
   handleNoteChanged: (noteId: string) => Promise<void>;
   clearCurrentNote: () => void;
   clearError: () => void;
+
+  // Bulk operation actions.
+  toggleNoteSelection: (id: string) => void;
+  selectAll: (ids: string[]) => void;
+  clearSelection: () => void;
+  bulkAction: (action: string, params?: Record<string, string>) => Promise<BulkActionResult | null>;
 }
 
 export const useNoteStore = create<NoteState>((set, get) => ({
@@ -33,6 +43,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   isLoading: false,
   error: null,
   lastFilter: undefined,
+  selectedNoteIds: new Set<string>(),
+  isSelectionMode: false,
 
   fetchNotes: async (filter?: NoteFilter) => {
     set({ isLoading: true, error: null, lastFilter: filter });
@@ -144,4 +156,50 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   clearCurrentNote: () => set({ currentNote: null, backlinks: [] }),
   clearError: () => set({ error: null }),
+
+  toggleNoteSelection: (id: string) => {
+    set((state) => {
+      const newSet = new Set(state.selectedNoteIds);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return {
+        selectedNoteIds: newSet,
+        isSelectionMode: newSet.size > 0,
+      };
+    });
+  },
+
+  selectAll: (ids: string[]) => {
+    set({ selectedNoteIds: new Set(ids), isSelectionMode: ids.length > 0 });
+  },
+
+  clearSelection: () => {
+    set({ selectedNoteIds: new Set<string>(), isSelectionMode: false });
+  },
+
+  bulkAction: async (action: string, params: Record<string, string> = {}) => {
+    const { selectedNoteIds, lastFilter } = get();
+    if (selectedNoteIds.size === 0) return null;
+
+    try {
+      const result = await api.bulkUpdateNotes(
+        Array.from(selectedNoteIds),
+        action,
+        params,
+      );
+      // Clear selection and refresh the note list.
+      set({ selectedNoteIds: new Set<string>(), isSelectionMode: false });
+      const { notes, total } = await api.listNotes(lastFilter);
+      set({ notes, total });
+      return result;
+    } catch (err) {
+      const msg = err instanceof api.ApiError ? err.message : 'Bulk action failed';
+      set({ error: msg });
+      useToastStore.getState().addToast(msg, 'error');
+      return null;
+    }
+  },
 }));

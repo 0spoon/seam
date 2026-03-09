@@ -241,6 +241,13 @@ export interface NoteVersion {
   created_at: string;
 }
 
+// Feature 8: Bulk operations
+export interface BulkActionResult {
+  success: number;
+  failed: number;
+  errors?: string[];
+}
+
 // Phase 4: Two-hop backlinks (includes the intermediate connecting note)
 export interface TwoHopBacklink {
   id: string;

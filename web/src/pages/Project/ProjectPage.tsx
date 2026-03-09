@@ -2,10 +2,11 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowUpDown, Plus, Sparkles } from 'lucide-react';
+import { ArrowUpDown, CheckSquare, Plus, Sparkles } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { NoteCard } from '../../components/NoteCard/NoteCard';
+import { BulkActionBar } from '../../components/BulkActionBar/BulkActionBar';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { SynthesisModal } from '../../components/SynthesisModal/SynthesisModal';
 import { getProjectColor } from '../../lib/tagColor';
@@ -21,6 +22,11 @@ export function ProjectPage() {
   const total = useNoteStore((s) => s.total);
   const isLoading = useNoteStore((s) => s.isLoading);
   const fetchNotes = useNoteStore((s) => s.fetchNotes);
+  const selectedNoteIds = useNoteStore((s) => s.selectedNoteIds);
+  const isSelectionMode = useNoteStore((s) => s.isSelectionMode);
+  const toggleNoteSelection = useNoteStore((s) => s.toggleNoteSelection);
+  const selectAll = useNoteStore((s) => s.selectAll);
+  const clearSelection = useNoteStore((s) => s.clearSelection);
   const projects = useProjectStore((s) => s.projects);
   const currentProject = useProjectStore((s) => s.currentProject);
   const fetchProject = useProjectStore((s) => s.fetchProject);
@@ -29,6 +35,7 @@ export function ProjectPage() {
   const [showSynthesis, setShowSynthesis] = useState(false);
   const [loadedNotes, setLoadedNotes] = useState<Note[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSelectedIndexRef = useRef<number | null>(null);
 
   const projectIndex = projects.findIndex((p) => p.id === id);
   const projectColor = getProjectColor(
@@ -64,6 +71,46 @@ export function ProjectPage() {
     });
   }, [id, fetchNotes, sort, loadedNotes.length]);
 
+  // Handle Escape to exit selection mode and Cmd+A to select all.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && isSelectionMode) {
+        clearSelection();
+      }
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === 'a' &&
+        isSelectionMode &&
+        loadedNotes.length > 0
+      ) {
+        e.preventDefault();
+        selectAll(loadedNotes.map((n) => n.id));
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isSelectionMode, clearSelection, selectAll, loadedNotes]);
+
+  // Clear selection when navigating away.
+  useEffect(() => {
+    return () => clearSelection();
+  }, [clearSelection]);
+
+  const handleNoteSelect = useCallback(
+    (noteId: string, index: number, shiftKey: boolean) => {
+      if (shiftKey && lastSelectedIndexRef.current !== null) {
+        const start = Math.min(lastSelectedIndexRef.current, index);
+        const end = Math.max(lastSelectedIndexRef.current, index);
+        const ids = loadedNotes.slice(start, end + 1).map((n) => n.id);
+        selectAll(ids);
+      } else {
+        toggleNoteSelection(noteId);
+        lastSelectedIndexRef.current = index;
+      }
+    },
+    [loadedNotes, selectAll, toggleNoteSelection],
+  );
+
   // Include "load more" as an extra row if there are more notes.
   const hasMore = loadedNotes.length < total;
   const itemCount = loadedNotes.length + (hasMore ? 1 : 0);
@@ -90,30 +137,66 @@ export function ProjectPage() {
       <header className={styles.header}>
         <h1 className={styles.title}>{currentProject?.name}</h1>
         <div className={styles.controls}>
-          <button
-            className={styles.sortButton}
-            onClick={() =>
-              setSort(sort === 'modified' ? 'created' : 'modified')
-            }
-          >
-            <ArrowUpDown size={14} />
-            <span>{sort === 'modified' ? 'Modified' : 'Created'}</span>
-          </button>
-          <button
-            className={styles.sortButton}
-            onClick={() => setShowSynthesis(true)}
-            title="Summarize this project"
-          >
-            <Sparkles size={14} />
-            <span>Summarize</span>
-          </button>
-          <button
-            className={styles.newNoteButton}
-            onClick={() => setCaptureModalOpen(true, id)}
-          >
-            <Plus size={14} />
-            <span>New note</span>
-          </button>
+          {isSelectionMode ? (
+            <>
+              <button
+                className={styles.sortButton}
+                onClick={() =>
+                  selectAll(loadedNotes.map((n) => n.id))
+                }
+              >
+                Select all
+              </button>
+              <button
+                className={styles.sortButton}
+                onClick={clearSelection}
+              >
+                Deselect
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className={styles.sortButton}
+                onClick={() =>
+                  setSort(sort === 'modified' ? 'created' : 'modified')
+                }
+              >
+                <ArrowUpDown size={14} />
+                <span>{sort === 'modified' ? 'Modified' : 'Created'}</span>
+              </button>
+              {loadedNotes.length > 0 && (
+                <button
+                  className={styles.sortButton}
+                  onClick={() => {
+                    if (loadedNotes.length > 0) {
+                      toggleNoteSelection(loadedNotes[0].id);
+                      lastSelectedIndexRef.current = 0;
+                    }
+                  }}
+                  title="Select notes for bulk operations"
+                >
+                  <CheckSquare size={14} />
+                  <span>Select</span>
+                </button>
+              )}
+              <button
+                className={styles.sortButton}
+                onClick={() => setShowSynthesis(true)}
+                title="Summarize this project"
+              >
+                <Sparkles size={14} />
+                <span>Summarize</span>
+              </button>
+              <button
+                className={styles.newNoteButton}
+                onClick={() => setCaptureModalOpen(true, id)}
+              >
+                <Plus size={14} />
+                <span>New note</span>
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -165,6 +248,7 @@ export function ProjectPage() {
             }
 
             const note = loadedNotes[virtualRow.index];
+            const noteIndex = virtualRow.index;
             return (
               <motion.div
                 key={note.id}
@@ -184,17 +268,30 @@ export function ProjectPage() {
                   ease: [0.16, 1, 0.3, 1],
                   delay: virtualRow.index < 20 ? virtualRow.index * 0.03 : 0,
                 }}
+                onClick={(e) => {
+                  if (e.shiftKey && isSelectionMode) {
+                    e.preventDefault();
+                    handleNoteSelect(note.id, noteIndex, true);
+                  }
+                }}
               >
                 <NoteCard
                   note={note}
                   projectName={currentProject?.name}
                   projectColor={projectColor}
+                  selected={selectedNoteIds.has(note.id)}
+                  selectionMode={isSelectionMode}
+                  onSelect={(noteId) =>
+                    handleNoteSelect(noteId, noteIndex, false)
+                  }
                 />
               </motion.div>
             );
           })}
         </div>
       )}
+
+      <BulkActionBar />
 
       {showSynthesis && id && (
         <SynthesisModal

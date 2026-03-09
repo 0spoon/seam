@@ -36,6 +36,7 @@ import type {
   ReviewItem,
   TagSuggestion,
   ProjectSuggestion,
+  BulkActionResult,
 } from './types';
 
 const BASE_URL = '/api';
@@ -301,6 +302,17 @@ export async function appendToNote(noteId: string, text: string): Promise<Note> 
   return request<Note>(`/notes/${noteId}/append`, {
     method: 'POST',
     body: JSON.stringify({ text }),
+  });
+}
+
+export async function bulkUpdateNotes(
+  noteIds: string[],
+  action: string,
+  params: Record<string, string> = {},
+): Promise<BulkActionResult> {
+  return request<BulkActionResult>('/notes/bulk', {
+    method: 'PATCH',
+    body: JSON.stringify({ note_ids: noteIds, action, params }),
   });
 }
 

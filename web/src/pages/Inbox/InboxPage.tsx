@@ -2,10 +2,11 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowUpDown, Sparkles } from 'lucide-react';
+import { ArrowUpDown, CheckSquare, Sparkles } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
 import { useUIStore } from '../../stores/uiStore';
 import { NoteCard } from '../../components/NoteCard/NoteCard';
+import { BulkActionBar } from '../../components/BulkActionBar/BulkActionBar';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { SynthesisModal } from '../../components/SynthesisModal/SynthesisModal';
 import { NoteListSkeleton } from '../../components/Skeleton/Skeleton';
@@ -17,6 +18,11 @@ export function InboxPage() {
   const total = useNoteStore((s) => s.total);
   const isLoading = useNoteStore((s) => s.isLoading);
   const fetchNotes = useNoteStore((s) => s.fetchNotes);
+  const selectedNoteIds = useNoteStore((s) => s.selectedNoteIds);
+  const isSelectionMode = useNoteStore((s) => s.isSelectionMode);
+  const toggleNoteSelection = useNoteStore((s) => s.toggleNoteSelection);
+  const selectAll = useNoteStore((s) => s.selectAll);
+  const clearSelection = useNoteStore((s) => s.clearSelection);
   const setCaptureModalOpen = useUIStore((s) => s.setCaptureModalOpen);
   const fetchTags = useUIStore((s) => s.fetchTags);
   const [searchParams] = useSearchParams();
@@ -25,6 +31,7 @@ export function InboxPage() {
   const [showSynthesis, setShowSynthesis] = useState(false);
   const [loadedNotes, setLoadedNotes] = useState<Note[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSelectedIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     fetchNotes({
@@ -59,6 +66,46 @@ export function InboxPage() {
     });
   }, [fetchNotes, tagFilter, sort, loadedNotes.length]);
 
+  // Handle Escape to exit selection mode and Cmd+A to select all.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && isSelectionMode) {
+        clearSelection();
+      }
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === 'a' &&
+        isSelectionMode &&
+        loadedNotes.length > 0
+      ) {
+        e.preventDefault();
+        selectAll(loadedNotes.map((n) => n.id));
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isSelectionMode, clearSelection, selectAll, loadedNotes]);
+
+  // Clear selection when navigating away (tag filter changes, etc).
+  useEffect(() => {
+    return () => clearSelection();
+  }, [clearSelection]);
+
+  const handleNoteSelect = useCallback(
+    (id: string, index: number, shiftKey: boolean) => {
+      if (shiftKey && lastSelectedIndexRef.current !== null) {
+        const start = Math.min(lastSelectedIndexRef.current, index);
+        const end = Math.max(lastSelectedIndexRef.current, index);
+        const ids = loadedNotes.slice(start, end + 1).map((n) => n.id);
+        selectAll(ids);
+      } else {
+        toggleNoteSelection(id);
+        lastSelectedIndexRef.current = index;
+      }
+    },
+    [loadedNotes, selectAll, toggleNoteSelection],
+  );
+
   // Include "load more" as an extra row if there are more notes.
   const hasMore = loadedNotes.length < total;
   const itemCount = loadedNotes.length + (hasMore ? 1 : 0);
@@ -75,25 +122,64 @@ export function InboxPage() {
       <header className={styles.header}>
         <h1 className={styles.title}>Inbox</h1>
         <div className={styles.controls}>
-          <button
-            className={styles.sortButton}
-            onClick={() =>
-              setSort(sort === 'modified' ? 'created' : 'modified')
-            }
-            title={`Sort by ${sort === 'modified' ? 'created' : 'modified'}`}
-          >
-            <ArrowUpDown size={14} />
-            <span>{sort === 'modified' ? 'Modified' : 'Created'}</span>
-          </button>
-          {tagFilter && (
-            <button
-              className={styles.sortButton}
-              onClick={() => setShowSynthesis(true)}
-              title={`Summarize notes tagged #${tagFilter}`}
-            >
-              <Sparkles size={14} />
-              <span>Summarize</span>
-            </button>
+          {isSelectionMode ? (
+            <>
+              <button
+                className={styles.sortButton}
+                onClick={() =>
+                  selectAll(loadedNotes.map((n) => n.id))
+                }
+              >
+                Select all
+              </button>
+              <button
+                className={styles.sortButton}
+                onClick={clearSelection}
+              >
+                Deselect
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className={styles.sortButton}
+                onClick={() =>
+                  setSort(sort === 'modified' ? 'created' : 'modified')
+                }
+                title={`Sort by ${sort === 'modified' ? 'created' : 'modified'}`}
+              >
+                <ArrowUpDown size={14} />
+                <span>{sort === 'modified' ? 'Modified' : 'Created'}</span>
+              </button>
+              {loadedNotes.length > 0 && (
+                <button
+                  className={styles.sortButton}
+                  onClick={() => {
+                    // Enter selection mode by selecting nothing (shows checkboxes)
+                    // User can then click cards to select.
+                    // Start by selecting the first note to make it obvious.
+                    if (loadedNotes.length > 0) {
+                      toggleNoteSelection(loadedNotes[0].id);
+                      lastSelectedIndexRef.current = 0;
+                    }
+                  }}
+                  title="Select notes for bulk operations"
+                >
+                  <CheckSquare size={14} />
+                  <span>Select</span>
+                </button>
+              )}
+              {tagFilter && (
+                <button
+                  className={styles.sortButton}
+                  onClick={() => setShowSynthesis(true)}
+                  title={`Summarize notes tagged #${tagFilter}`}
+                >
+                  <Sparkles size={14} />
+                  <span>Summarize</span>
+                </button>
+              )}
+            </>
           )}
         </div>
       </header>
@@ -148,6 +234,7 @@ export function InboxPage() {
             }
 
             const note = loadedNotes[virtualRow.index];
+            const noteIndex = virtualRow.index;
             return (
               <motion.div
                 key={note.id}
@@ -167,13 +254,28 @@ export function InboxPage() {
                   ease: [0.16, 1, 0.3, 1],
                   delay: virtualRow.index < 20 ? virtualRow.index * 0.03 : 0,
                 }}
+                onClick={(e) => {
+                  if (e.shiftKey && isSelectionMode) {
+                    e.preventDefault();
+                    handleNoteSelect(note.id, noteIndex, true);
+                  }
+                }}
               >
-                <NoteCard note={note} />
+                <NoteCard
+                  note={note}
+                  selected={selectedNoteIds.has(note.id)}
+                  selectionMode={isSelectionMode}
+                  onSelect={(id) =>
+                    handleNoteSelect(id, noteIndex, false)
+                  }
+                />
               </motion.div>
             );
           })}
         </div>
       )}
+
+      <BulkActionBar />
 
       {showSynthesis && tagFilter && (
         <SynthesisModal

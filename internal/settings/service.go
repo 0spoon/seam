@@ -17,6 +17,7 @@ var allowedKeys = map[string][]string{
 	"sidebar_collapsed":         {"true", "false"},
 	"sidebar_projects_expanded": {"true", "false"},
 	"sidebar_tags_expanded":     {"true", "false"},
+	"zen_mode_typewriter":       {"true", "false"},
 }
 
 // defaultValues maps setting keys to their default values. These are
@@ -27,6 +28,7 @@ var defaultValues = map[string]string{
 	"sidebar_collapsed":         "false",
 	"sidebar_projects_expanded": "true",
 	"sidebar_tags_expanded":     "true",
+	"zen_mode_typewriter":       "false",
 }
 
 // ErrInvalidKey is returned when a setting key is not in the allowlist.

@@ -9,6 +9,7 @@ const DEFAULTS: Record<string, string> = {
   sidebar_collapsed: 'false',
   sidebar_projects_expanded: 'true',
   sidebar_tags_expanded: 'true',
+  zen_mode_typewriter: 'false',
 };
 
 interface SettingsState {

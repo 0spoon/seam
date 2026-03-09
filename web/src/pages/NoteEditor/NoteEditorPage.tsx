@@ -26,6 +26,8 @@ import {
   Files,
   Download,
   FolderInput,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -50,6 +52,9 @@ import { EditorSkeleton } from '../../components/Skeleton/Skeleton';
 import { ConfirmModal } from '../../components/ConfirmModal/ConfirmModal';
 import { VersionHistory } from '../../components/VersionHistory/VersionHistory';
 import { useRecentNote } from '../../hooks/useRecentNotes';
+import { ZenModeExit } from '../../components/ZenModeExit/ZenModeExit';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { typewriterScrolling } from './typewriterExtension';
 import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
@@ -68,6 +73,11 @@ export function NoteEditorPage() {
   const toggleRightPanel = useUIStore((s) => s.toggleRightPanel);
   const viewMode = useUIStore((s) => s.editorViewMode);
   const setViewMode = useUIStore((s) => s.setEditorViewMode);
+  const zenMode = useUIStore((s) => s.zenMode);
+  const toggleZenMode = useUIStore((s) => s.toggleZenMode);
+  const setZenMode = useUIStore((s) => s.setZenMode);
+  const typewriterEnabled = useSettingsStore((s) => s.get('zen_mode_typewriter')) === 'true';
+  const updateSetting = useSettingsStore((s) => s.updateSetting);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [noteLoading, setNoteLoading] = useState(true);
@@ -457,6 +467,11 @@ export function NoteEditorPage() {
     return () => clearTimeout(timer);
   }, []);
 
+  const handleToggleTypewriter = useCallback(() => {
+    const next = typewriterEnabled ? 'false' : 'true';
+    updateSetting('zen_mode_typewriter', next);
+  }, [typewriterEnabled, updateSetting]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
@@ -629,15 +644,18 @@ export function NoteEditorPage() {
     [],
   );
 
-  const cmExtensions = useMemo(
-    () => [markdown(), wikilinkDecorationPlugin, wikilinkDecorationTheme, wikilinkAutocomplete, ...slashExtension],
-    [slashExtension],
-  );
+  const cmExtensions = useMemo(() => {
+    const exts = [markdown(), wikilinkDecorationPlugin, wikilinkDecorationTheme, wikilinkAutocomplete, ...slashExtension];
+    if (zenMode && typewriterEnabled) {
+      exts.push(typewriterScrolling);
+    }
+    return exts;
+  }, [slashExtension, zenMode, typewriterEnabled]);
 
   return (
-    <div className={styles.page} onKeyDown={handleKeyDown}>
+    <div className={`${styles.page} ${zenMode ? styles.zenMode : ''}`} onKeyDown={handleKeyDown}>
       {/* Toolbar */}
-      <div className={styles.toolbar}>
+      {!zenMode && <div className={styles.toolbar}>
         <div className={styles.toolbarLeft}>
           <button className={styles.toolButton} title="Bold (Cmd+B)" aria-label="Bold" onClick={handleBold}>
             <Bold size={16} />
@@ -710,6 +728,17 @@ export function NoteEditorPage() {
         </div>
 
         <div className={styles.toolbarRight}>
+          <button
+            className={styles.toolButton}
+            onClick={toggleZenMode}
+            title="Zen mode (Cmd+Shift+\)"
+            aria-label="Zen mode"
+          >
+            {zenMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+
+          <div className={styles.toolbarSeparator} />
+
           <button
             className={`${styles.toolButton} ${viewMode === 'editor' ? styles.activeView : ''}`}
             onClick={() => setViewMode('editor')}
@@ -808,7 +837,16 @@ export function NoteEditorPage() {
             )}
           </div>
         </div>
-      </div>
+      </div>}
+
+      {/* Zen mode floating exit control */}
+      {zenMode && (
+        <ZenModeExit
+          onExit={() => setZenMode(false)}
+          typewriterEnabled={typewriterEnabled}
+          onToggleTypewriter={handleToggleTypewriter}
+        />
+      )}
 
       {/* Content area */}
       <div className={styles.contentArea}>
@@ -891,7 +929,7 @@ export function NoteEditorPage() {
 
         {/* Right panel */}
         <AnimatePresence>
-        {rightPanelOpen && (
+        {rightPanelOpen && !zenMode && (
           <motion.aside
             className={styles.rightPanel}
             initial={{ x: '100%', opacity: 0 }}

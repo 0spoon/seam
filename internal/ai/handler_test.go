@@ -74,7 +74,7 @@ func setupTestHandler(t *testing.T) (*Handler, *mockDBManager) {
 	synth := NewSynthesizer(ollama, mockMgr, "chat-model", nil)
 	linker := NewAutoLinker(ollama, chroma, mockMgr, "embed-model", "chat-model", nil, nil)
 
-	handler := NewHandler(nil, chatSvc, synth, linker, embedder, nil, mockMgr, nil)
+	handler := NewHandler(nil, chatSvc, synth, linker, embedder, nil, nil, mockMgr, nil)
 	return handler, mockMgr
 }
 
@@ -197,7 +197,7 @@ func setupTestHandlerWithWriter(t *testing.T) (*Handler, *mockDBManager) {
 		"note1", "Test Note", "proj1", "test.md", "This is test content about caching", "h1", now, now)
 
 	writer := NewWriter(ollama, mockMgr, "chat-model", nil)
-	handler := NewHandler(nil, nil, nil, nil, nil, writer, mockMgr, nil)
+	handler := NewHandler(nil, nil, nil, nil, nil, writer, nil, mockMgr, nil)
 	return handler, mockMgr
 }
 

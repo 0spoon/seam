@@ -24,6 +24,7 @@ const SearchPage = lazy(() => import('./pages/Search/SearchPage').then((m) => ({
 const AskPage = lazy(() => import('./pages/Ask/AskPage').then((m) => ({ default: m.AskPage })));
 const GraphPage = lazy(() => import('./pages/Graph/GraphPage').then((m) => ({ default: m.GraphPage })));
 const TimelinePage = lazy(() => import('./pages/Timeline/TimelinePage').then((m) => ({ default: m.TimelinePage })));
+const ReviewPage = lazy(() => import('./pages/Review/ReviewPage').then((m) => ({ default: m.ReviewPage })));
 const SettingsPage = lazy(() => import('./pages/Settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 
 function NoteListFallback() {
@@ -130,6 +131,7 @@ export function App() {
         <Route path="ask" element={<Suspense fallback={<GenericFallback />}><AskPage /></Suspense>} />
         <Route path="graph" element={<Suspense fallback={<GraphFallback />}><GraphPage /></Suspense>} />
         <Route path="timeline" element={<Suspense fallback={<NoteListFallback />}><TimelinePage /></Suspense>} />
+        <Route path="review" element={<Suspense fallback={<GenericFallback />}><ReviewPage /></Suspense>} />
         <Route path="settings" element={<Suspense fallback={<GenericFallback />}><SettingsPage /></Suspense>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

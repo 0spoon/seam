@@ -33,6 +33,9 @@ import type {
   Conversation,
   ChatHistoryMessage,
   ResolvedLink,
+  ReviewItem,
+  TagSuggestion,
+  ProjectSuggestion,
 } from './types';
 
 const BASE_URL = '/api';
@@ -592,4 +595,30 @@ export async function restoreVersion(
 // Wikilink resolution
 export async function resolveWikilink(title: string): Promise<ResolvedLink> {
   return request<ResolvedLink>(`/notes/resolve?title=${encodeURIComponent(title)}`);
+}
+
+// Review queue endpoints (Knowledge Gardening)
+
+export async function getReviewQueue(
+  limit = 20,
+): Promise<ReviewItem[]> {
+  return request<ReviewItem[]>(`/review/queue?limit=${limit}`);
+}
+
+export async function suggestTags(
+  noteId: string,
+): Promise<{ tags: TagSuggestion[] }> {
+  return request<{ tags: TagSuggestion[] }>('/ai/suggest-tags', {
+    method: 'POST',
+    body: JSON.stringify({ note_id: noteId }),
+  });
+}
+
+export async function suggestProject(
+  noteId: string,
+): Promise<{ projects: ProjectSuggestion[] }> {
+  return request<{ projects: ProjectSuggestion[] }>('/ai/suggest-project', {
+    method: 'POST',
+    body: JSON.stringify({ note_id: noteId }),
+  });
 }

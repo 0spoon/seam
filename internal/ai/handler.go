@@ -35,6 +35,7 @@ type Handler struct {
 	linker      *AutoLinker
 	embedder    *Embedder
 	writer      *Writer
+	suggester   *Suggester
 	dbManager   userdb.Manager
 	logger      *slog.Logger
 
@@ -51,6 +52,7 @@ func NewHandler(
 	linker *AutoLinker,
 	embedder *Embedder,
 	writer *Writer,
+	suggester *Suggester,
 	dbManager userdb.Manager,
 	logger *slog.Logger,
 ) *Handler {
@@ -64,6 +66,7 @@ func NewHandler(
 		linker:      linker,
 		embedder:    embedder,
 		writer:      writer,
+		suggester:   suggester,
 		dbManager:   dbManager,
 		logger:      logger,
 		limiters:    make(map[string]*rate.Limiter),
@@ -109,6 +112,8 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/reindex-embeddings", h.reindexEmbeddings)
 	r.Get("/notes/{id}/related", h.relatedNotes)
 	r.Post("/notes/{id}/assist", h.assist)
+	r.Post("/suggest-tags", h.suggestTags)
+	r.Post("/suggest-project", h.suggestProject)
 	return r
 }
 
@@ -418,6 +423,174 @@ func (h *Handler) assist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"result": result})
+}
+
+// suggestTags handles POST /api/ai/suggest-tags
+func (h *Handler) suggestTags(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	if h.suggester == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI services not configured")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		NoteID string `json:"note_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.NoteID == "" {
+		writeError(w, http.StatusBadRequest, "note_id is required")
+		return
+	}
+
+	db, err := h.dbManager.Open(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("ai.Handler.suggestTags: open db", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Load the note.
+	var noteTitle, noteBody string
+	err = db.QueryRowContext(r.Context(),
+		`SELECT title, body FROM notes WHERE id = ?`, req.NoteID,
+	).Scan(&noteTitle, &noteBody)
+	if err != nil {
+		if strings.Contains(err.Error(), "no rows") {
+			writeError(w, http.StatusNotFound, "note not found")
+			return
+		}
+		h.logger.Error("ai.Handler.suggestTags: query note", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Load existing tags.
+	rows, err := db.QueryContext(r.Context(),
+		`SELECT DISTINCT t.name FROM tags t JOIN note_tags nt ON nt.tag_id = t.id ORDER BY t.name`)
+	if err != nil {
+		h.logger.Error("ai.Handler.suggestTags: query tags", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer rows.Close()
+
+	var existingTags []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			h.logger.Error("ai.Handler.suggestTags: scan tag", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		existingTags = append(existingTags, name)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("ai.Handler.suggestTags: rows error", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	tags, err := h.suggester.SuggestTags(r.Context(), noteTitle, noteBody, existingTags)
+	if err != nil {
+		h.logger.Error("ai.Handler.suggestTags: suggest failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "tag suggestion failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tags": tags})
+}
+
+// suggestProject handles POST /api/ai/suggest-project
+func (h *Handler) suggestProject(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	if h.suggester == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI services not configured")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		NoteID string `json:"note_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.NoteID == "" {
+		writeError(w, http.StatusBadRequest, "note_id is required")
+		return
+	}
+
+	db, err := h.dbManager.Open(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("ai.Handler.suggestProject: open db", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Load the note.
+	var noteTitle, noteBody string
+	err = db.QueryRowContext(r.Context(),
+		`SELECT title, body FROM notes WHERE id = ?`, req.NoteID,
+	).Scan(&noteTitle, &noteBody)
+	if err != nil {
+		if strings.Contains(err.Error(), "no rows") {
+			writeError(w, http.StatusNotFound, "note not found")
+			return
+		}
+		h.logger.Error("ai.Handler.suggestProject: query note", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Load projects.
+	projectRows, err := db.QueryContext(r.Context(),
+		`SELECT id, name, description FROM projects ORDER BY name`)
+	if err != nil {
+		h.logger.Error("ai.Handler.suggestProject: query projects", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer projectRows.Close()
+
+	var projects []ProjectInfo
+	for projectRows.Next() {
+		var p ProjectInfo
+		if err := projectRows.Scan(&p.ID, &p.Name, &p.Description); err != nil {
+			h.logger.Error("ai.Handler.suggestProject: scan project", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		projects = append(projects, p)
+	}
+	if err := projectRows.Err(); err != nil {
+		h.logger.Error("ai.Handler.suggestProject: rows error", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	suggestions, err := h.suggester.SuggestProject(r.Context(), noteTitle, noteBody, projects)
+	if err != nil {
+		h.logger.Error("ai.Handler.suggestProject: suggest failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "project suggestion failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"projects": suggestions})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

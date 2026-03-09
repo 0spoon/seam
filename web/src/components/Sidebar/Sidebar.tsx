@@ -11,6 +11,7 @@ import {
   Network,
   Calendar,
   CalendarDays,
+  Sprout,
   Check,
   MoreHorizontal,
   Pencil,
@@ -430,6 +431,16 @@ export function Sidebar() {
         >
           <Calendar size={16} />
           <span className={styles.fadeLabel}>Timeline</span>
+        </button>
+
+        {/* Garden */}
+        <button
+          className={`${styles.navItem} ${isActive('/review') ? styles.active : ''}`}
+          onClick={() => navTo('/review')}
+          title="Garden"
+        >
+          <Sprout size={16} />
+          <span className={styles.fadeLabel}>Garden</span>
         </button>
 
         {/* Projects */}

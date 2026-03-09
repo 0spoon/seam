@@ -46,6 +46,30 @@ func (h *Handler) ProtectedRoutes() chi.Router {
 	return r
 }
 
+// CombinedRoutes returns a single chi router containing both public auth
+// routes and protected routes. The authMiddleware is applied only to the
+// protected subset. This avoids mounting two sub-routers on the same path,
+// which chi does not allow.
+func (h *Handler) CombinedRoutes(authMiddleware func(http.Handler) http.Handler) chi.Router {
+	r := chi.NewRouter()
+
+	// Public routes (no auth required).
+	r.Post("/register", h.register)
+	r.Post("/login", h.login)
+	r.Post("/refresh", h.refresh)
+	r.Post("/logout", h.logout)
+
+	// Protected routes (auth required).
+	r.Group(func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Get("/me", h.getMe)
+		r.Put("/password", h.changePassword)
+		r.Put("/email", h.updateEmail)
+	})
+
+	return r
+}
+
 func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {
 	userID := reqctx.UserIDFromContext(r.Context())
 	if userID == "" {

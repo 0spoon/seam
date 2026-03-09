@@ -36,8 +36,11 @@ vi.mock('cytoscape', () => {
   };
   const mockCy = {
     on: vi.fn(),
+    one: vi.fn(),
     destroy: vi.fn(),
     fit: vi.fn(),
+    zoom: vi.fn(() => 1),
+    center: vi.fn(),
     extent: vi.fn(() => ({ x1: 0, y1: 0, x2: 100, y2: 100 })),
     getElementById: vi.fn(() => mockElement),
     add: vi.fn(),

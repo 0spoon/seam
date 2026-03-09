@@ -144,6 +144,8 @@
 }
 
 .editorPane {
+  flex: 1;
+  min-width: 0;
   overflow: auto;
   border-right: 1px solid var(--border-subtle);
   display: flex;
@@ -807,7 +809,7 @@
 }
 
 .zenMode .editorWrapper {
-  max-width: 720px;
+  max-width: 900px;
   margin: 0 auto;
   padding: var(--space-8) var(--space-12);
   transition: max-width var(--duration-slow) var(--ease-out),

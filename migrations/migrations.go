@@ -44,7 +44,22 @@ type Migration struct {
 // already-applied migrations and handle future ALTER TABLE statements.
 func UserMigrations() []Migration {
 	return []Migration{
-		{Version: 1, SQL: userInitialSQL},
+		{
+			Version: 1,
+			SQL:     userInitialSQL,
+			PreHook: func(db *sql.DB) error {
+				// If the notes table already exists from a pre-migration
+				// database but lacks the slug column, add it before the
+				// migration SQL runs. Otherwise CREATE TABLE IF NOT EXISTS
+				// is a no-op and the CREATE INDEX on slug fails.
+				if HasColumn(db, "notes", "id") && !HasColumn(db, "notes", "slug") {
+					if _, err := db.Exec("ALTER TABLE notes ADD COLUMN slug TEXT NOT NULL DEFAULT ''"); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+		},
 		{
 			Version: 2,
 			SQL:     userAddSlugSQL,

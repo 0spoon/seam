@@ -184,8 +184,8 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "ctrl+s":
-			// Submit the question with Ctrl+S (Enter inserts newlines).
+		case "alt+s":
+			// Submit the question with Alt+S (Enter inserts newlines).
 			if m.loading {
 				return m, nil
 			}
@@ -482,7 +482,7 @@ func (m askModel) View() string {
 
 	// Status bar.
 	statusBar := styleStatusBar.Width(m.width).Render(
-		"Ctrl+S: send | Enter: newline | Ctrl+Up/Down: scroll | Esc: back",
+		"Alt+S: send | Enter: newline | Ctrl+Up/Down: scroll | Esc: back",
 	)
 
 	return lipgloss.JoinVertical(lipgloss.Left,

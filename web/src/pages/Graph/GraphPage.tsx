@@ -27,7 +27,11 @@ const COLORS = {
   accentMuted: 'rgba(196, 145, 92, 0.10)',
   borderDefault: '#2a3045',
   borderSubtle: '#1e2233',
+  // Warm-tinted edge color (between border-default and accent-primary).
+  edgeDefault: '#3d4560',
   textPrimary: '#e8e2d9',
+  textSecondary: '#a9a49b',
+  bgDeep: '#08090d',
   bgSurface: '#161922',
 } as const;
 
@@ -103,7 +107,11 @@ export function GraphPage() {
       const color = node.project_id
         ? (colors.get(node.project_id) ?? COLORS.accentPrimary)
         : COLORS.accentPrimary;
-      const size = Math.min(24 + (node.link_count ?? 0) * 4, 48);
+      const linkCount = node.link_count ?? 0;
+      // Circle diameter: 12px base, +3px per link, capped at 32px.
+      // These are model-space values; layoutstop handler ensures
+      // the zoom level keeps them appropriately sized on screen.
+      const size = Math.min(12 + linkCount * 3, 32);
       return {
         data: {
           id: node.id,
@@ -140,47 +148,55 @@ export function GraphPage() {
       container: containerRef.current,
       elements: [...nodes, ...edges],
       style: [
+        // -- Nodes: filled circles with project color -----------------------
         {
           selector: 'node',
           style: {
             'background-color': ((ele: cytoscape.NodeSingular) =>
-              hexToRgba(ele.data('color'), 0.15)) as unknown as string,
-            'border-width': 1.5,
-            'border-color': ((ele: cytoscape.NodeSingular) =>
-              hexToRgba(ele.data('color'), 0.6)) as unknown as string,
+              ele.data('color')) as unknown as string,
+            'background-opacity': 0.7,
+            'border-width': 0,
+            shape: 'ellipse',
+            width: 'data(size)',
+            height: 'data(size)',
+            // Label
             label: 'data(label)',
             'font-family': 'Outfit, system-ui, sans-serif',
-            'font-size': '12px',
+            'font-size': '10px',
             'font-weight': 400,
-            color: COLORS.textPrimary,
+            color: COLORS.textSecondary,
             'text-valign': 'bottom',
             'text-halign': 'center',
-            'text-margin-y': 6,
-            width: 'data(size)',
-            height: ((ele: cytoscape.NodeSingular) =>
-              Math.max(ele.data('size') * 0.6, 20)) as unknown as number,
-            shape: 'round-rectangle',
-            'text-max-width': '100px',
+            'text-margin-y': 8,
+            'text-max-width': '110px',
             'text-wrap': 'ellipsis',
+            'text-outline-color': COLORS.bgDeep,
+            'text-outline-width': 2,
+            'text-outline-opacity': 0.9,
+            'overlay-padding': 6,
           } as cytoscape.Css.Node,
         },
         {
           selector: 'node:selected',
           style: {
-            'border-color': COLORS.accentPrimary,
-            'background-color': COLORS.accentMuted,
+            'background-opacity': 1,
             'border-width': 2,
+            'border-color': COLORS.accentPrimary,
+            'border-opacity': 1,
+            color: COLORS.textPrimary,
+            'font-weight': 500,
           } as cytoscape.Css.Node,
         },
+        // -- Edges: warm subtle lines with small arrows ---------------------
         {
           selector: 'edge',
           style: {
-            'line-color': COLORS.borderDefault,
+            'line-color': COLORS.edgeDefault,
             width: 1,
-            opacity: 0.4,
+            opacity: 0.6,
             'curve-style': 'bezier',
             'target-arrow-shape': 'triangle',
-            'target-arrow-color': COLORS.borderDefault,
+            'target-arrow-color': COLORS.edgeDefault,
             'arrow-scale': 0.6,
           } as cytoscape.Css.Edge,
         },
@@ -197,12 +213,13 @@ export function GraphPage() {
       layout: {
         name: 'fcose',
         animate: !prefersReducedMotion,
-        animationDuration: 500,
+        animationDuration: 600,
         quality: 'default',
-        nodeSeparation: 100,
-        idealEdgeLength: 120,
-        nodeRepulsion: () => 8000,
-        gravity: 0.3,
+        nodeSeparation: 120,
+        idealEdgeLength: 150,
+        nodeRepulsion: () => 10000,
+        gravity: 0.15,
+        gravityRange: 2.0,
       } as cytoscape.LayoutOptions,
       minZoom: 0.2,
       maxZoom: 4,
@@ -222,44 +239,75 @@ export function GraphPage() {
       navigate(`/notes/${nodeId}`);
     });
 
-    // Hover: highlight connected edges and show tooltip.
+    // Hover: brighten hovered node, highlight edges, dim the rest.
     cy.on('mouseover', 'node', (evt) => {
       const node = evt.target;
+      // Make hovered node fully opaque and bright.
       node.style({
+        'background-opacity': 1,
+        'border-width': 2,
         'border-color': node.data('color'),
-        'background-color': hexToRgba(node.data('color'), 0.25),
+        'border-opacity': 0.8,
+        color: COLORS.textPrimary,
         'font-weight': 500,
       } as cytoscape.Css.Node);
+      // Highlight connected edges with accent color.
       node.connectedEdges().style({
         'line-color': COLORS.accentPrimary,
         'target-arrow-color': COLORS.accentPrimary,
         width: 2,
         opacity: 1,
       } as cytoscape.Css.Edge);
-      // Show tooltip with note title and link count.
+      // Dim non-neighboring nodes and their edges.
+      const neighbors = node.neighborhood('node');
+      cy.nodes().not(node).not(neighbors).style({
+        'background-opacity': 0.2,
+      } as cytoscape.Css.Node);
+      cy.edges().not(node.connectedEdges()).style({
+        opacity: 0.15,
+      } as cytoscape.Css.Edge);
+      // Tooltip above node.
       const pos = node.renderedPosition();
+      const renderedH = node.renderedHeight();
       const linkCount = node.connectedEdges().length;
       setTooltip({
         text: `${node.data('label')} (${linkCount} ${linkCount === 1 ? 'link' : 'links'})`,
         x: pos.x,
-        y: pos.y - 30,
+        y: pos.y - renderedH / 2 - 14,
       });
     });
 
     cy.on('mouseout', 'node', (evt) => {
       const node = evt.target;
+      // Restore hovered node.
       node.style({
-        'border-color': hexToRgba(node.data('color'), 0.6),
-        'background-color': hexToRgba(node.data('color'), 0.15),
+        'background-opacity': 0.7,
+        'border-width': 0,
+        color: COLORS.textSecondary,
         'font-weight': 400,
       } as cytoscape.Css.Node);
+      // Restore edges.
       node.connectedEdges().style({
-        'line-color': COLORS.borderDefault,
-        'target-arrow-color': COLORS.borderDefault,
+        'line-color': COLORS.edgeDefault,
+        'target-arrow-color': COLORS.edgeDefault,
         width: 1,
-        opacity: 0.4,
+        opacity: 0.6,
       } as cytoscape.Css.Edge);
+      // Restore all dimmed elements.
+      cy.nodes().style({ 'background-opacity': 0.7 } as cytoscape.Css.Node);
+      cy.edges().style({ opacity: 0.6 } as cytoscape.Css.Edge);
       setTooltip(null);
+    });
+
+    // After layout, fit with generous padding and clamp zoom so that
+    // sparse graphs (few nodes) don't appear oversized.
+    cy.one('layoutstop', () => {
+      cy.fit(undefined, 60);
+      const maxZoom = 2.2;
+      if (cy.zoom() > maxZoom) {
+        cy.zoom(maxZoom);
+        cy.center();
+      }
     });
 
     cyRef.current = cy;
@@ -274,8 +322,10 @@ export function GraphPage() {
             selector: 'node',
             style: {
               'background-color': COLORS.accentPrimary,
+              'background-opacity': 0.7,
               width: 4,
               height: 4,
+              shape: 'ellipse',
               label: '',
             } as cytoscape.Css.Node,
           },
@@ -284,7 +334,8 @@ export function GraphPage() {
             style: {
               'line-color': COLORS.borderSubtle,
               width: 0.5,
-              opacity: 0.3,
+              opacity: 0.25,
+              'target-arrow-shape': 'none',
             } as cytoscape.Css.Edge,
           },
         ],

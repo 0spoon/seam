@@ -1034,7 +1034,6 @@ export function NoteEditorPage() {
           {viewMode !== 'preview' && (
             <div
               className={styles.editorPane}
-              style={{ flex: viewMode === 'split' ? '1' : undefined }}
             >
               <div className={styles.titleRow}>
                 <input

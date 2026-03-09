@@ -101,7 +101,7 @@ func (m captureModel) Update(msg tea.Msg) (captureModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "ctrl+s":
+		case "alt+s":
 			if m.loading {
 				return m, nil
 			}
@@ -169,7 +169,7 @@ func (m captureModel) View() string {
 	}
 
 	b.WriteString("\n")
-	help := styleMuted.Render("Ctrl+S: save | Tab: switch field | Esc: cancel")
+	help := styleMuted.Render("Alt+S: save | Tab: switch field | Esc: cancel")
 	b.WriteString(help)
 
 	content := b.String()

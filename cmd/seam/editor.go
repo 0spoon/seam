@@ -137,10 +137,10 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 		m.err = ""
 		m.status = ""
 
-		// Match save shortcut by type (more reliable than string matching
-		// across terminal emulators). Also accept F2 as an alternative
-		// when the terminal intercepts Ctrl+S for flow control.
-		if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyF2 {
+		// Match save shortcut. Alt+S (Option+S on Mac) is used instead of
+		// Ctrl+S because Ctrl+S is intercepted by tmux and terminal flow
+		// control. F2 is kept as a fallback.
+		if msg.String() == "alt+s" || msg.Type == tea.KeyF2 {
 			if m.saving {
 				return m, nil
 			}
@@ -295,7 +295,7 @@ func (m editorModel) View() string {
 	if m.status != "" {
 		statusParts = append(statusParts, styleSuccess.Render(m.status))
 	}
-	statusParts = append(statusParts, styleMuted.Render("Ctrl+S/F2: save | Ctrl+T: title | Ctrl+A: AI | Esc: back"))
+	statusParts = append(statusParts, styleMuted.Render("Alt+S/F2: save | Ctrl+T: title | Ctrl+A: AI | Esc: back"))
 	statusBar := styleStatusBar.Width(m.width).Render(strings.Join(statusParts, "  |  "))
 
 	parts := []string{titleView, bodyView}

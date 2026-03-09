@@ -89,9 +89,12 @@ func New(cfg Config) *Server {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Auth routes (no auth required).
+	// Auth routes: public (no auth) and protected (auth required) are
+	// combined under a single /api/auth mount to avoid chi duplicate-path
+	// panics. The AuthHandler.CombinedRoutes method wires both sets and
+	// applies the auth middleware only to the protected subset.
 	r.Route("/api/auth", func(r chi.Router) {
-		r.Mount("/", cfg.AuthHandler.Routes())
+		r.Mount("/", cfg.AuthHandler.CombinedRoutes(AuthMiddleware(cfg.JWTManager)))
 	})
 
 	// WebSocket endpoint (auth handled in the WS handshake).
@@ -103,11 +106,7 @@ func New(cfg Config) *Server {
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(cfg.JWTManager))
 
-		if cfg.AuthHandler != nil {
-			r.Route("/api/auth", func(r chi.Router) {
-				r.Mount("/", cfg.AuthHandler.ProtectedRoutes())
-			})
-		}
+		// Protected auth routes are mounted via CombinedRoutes above.
 
 		if cfg.ProjectHandler != nil {
 			r.Route("/api/projects", func(r chi.Router) {

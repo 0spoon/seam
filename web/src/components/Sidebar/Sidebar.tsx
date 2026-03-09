@@ -10,12 +10,14 @@ import {
   MessageCircle,
   Network,
   Calendar,
+  CalendarDays,
   Check,
   MoreHorizontal,
   Pencil,
   Trash2,
   FilePlus,
 } from 'lucide-react';
+import { format } from 'date-fns';
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -26,7 +28,7 @@ import { useNoteStore } from '../../stores/noteStore';
 import { ConfirmModal } from '../ConfirmModal/ConfirmModal';
 import { ConnectionStatus } from '../ConnectionStatus/ConnectionStatus';
 import { getProjectColor } from '../../lib/tagColor';
-import { searchFTS } from '../../api/client';
+import { searchFTS, getDailyNote } from '../../api/client';
 import type { FTSResult } from '../../api/types';
 import { sanitizeHtml } from '../../lib/sanitize';
 import styles from './Sidebar.module.css';
@@ -76,6 +78,10 @@ export function Sidebar() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; projectId: string; projectName: string }>({ open: false, projectId: '', projectName: '' });
   const [deleteCascade, setDeleteCascade] = useState<'inbox' | 'delete'>('inbox');
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const appendToNote = useNoteStore((s) => s.appendToNote);
+  const [quickAppendOpen, setQuickAppendOpen] = useState(false);
+  const [quickAppendText, setQuickAppendText] = useState('');
+  const quickAppendRef = useRef<HTMLInputElement>(null);
 
   // Subscribe to WS note.changed events so the note list stays fresh.
   useNoteWebSocket();
@@ -84,9 +90,31 @@ export function Sidebar() {
     searchRef.current?.focus();
   }, []);
 
+  const toggleQuickAppend = useCallback(() => {
+    setQuickAppendOpen((prev) => {
+      if (!prev) {
+        setTimeout(() => quickAppendRef.current?.focus(), 50);
+      }
+      return !prev;
+    });
+  }, []);
+
+  const handleQuickAppend = useCallback(async () => {
+    if (!quickAppendText.trim()) return;
+    try {
+      const note = await getDailyNote('today');
+      await appendToNote(note.id, quickAppendText.trim());
+      setQuickAppendText('');
+      addToast('Added to today\'s note', 'success');
+    } catch {
+      addToast('Failed to append to daily note', 'error');
+    }
+  }, [quickAppendText, appendToNote, addToast]);
+
   const keyBindings = useMemo(() => [
     { key: '/', global: true, handler: focusSearch },
-  ], [focusSearch]);
+    { key: '.', meta: true, handler: toggleQuickAppend },
+  ], [focusSearch, toggleQuickAppend]);
 
   useKeyboard(keyBindings);
 
@@ -343,6 +371,27 @@ export function Sidebar() {
           </form>
         )}
 
+        {/* Today */}
+        {collapsed ? (
+          <button
+            className={styles.navItem}
+            onClick={() => navTo('/today')}
+            title="Today's daily note"
+            aria-label="Today's daily note"
+          >
+            <CalendarDays size={16} />
+          </button>
+        ) : (
+          <button
+            className={styles.todayButton}
+            onClick={() => navTo('/today')}
+            title="Go to today's daily note"
+          >
+            <CalendarDays size={16} />
+            <span>{format(new Date(), 'EEE, MMM d')}</span>
+          </button>
+        )}
+
         {/* Inbox */}
         <button
           className={`${styles.navItem} ${isActive('/') ? styles.active : ''}`}
@@ -565,6 +614,28 @@ export function Sidebar() {
             </>
           )}
         </div>
+
+        {/* Quick-append input */}
+        {!collapsed && quickAppendOpen && (
+          <div className={styles.quickAppend}>
+            <input
+              ref={quickAppendRef}
+              type="text"
+              className={styles.quickAppendInput}
+              placeholder="Quick note to today..."
+              value={quickAppendText}
+              onChange={(e) => setQuickAppendText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleQuickAppend();
+                if (e.key === 'Escape') {
+                  setQuickAppendOpen(false);
+                  setQuickAppendText('');
+                }
+              }}
+              aria-label="Quick append to daily note"
+            />
+          </div>
+        )}
 
         {/* Capture button */}
         <button

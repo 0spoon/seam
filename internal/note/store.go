@@ -669,6 +669,42 @@ func (s *SQLStore) loadTags(ctx context.Context, db DBTX, noteID string) ([]stri
 	return tags, rows.Err()
 }
 
+// FindByTitlePrefix returns the first note whose title starts with prefix
+// and has the given tag. Returns ErrNotFound if no match.
+func (s *SQLStore) FindByTitlePrefix(ctx context.Context, db DBTX, prefix string, tag string) (*Note, error) {
+	escaped := escapeLIKE(prefix)
+	query := `SELECT n.id, n.title, n.project_id, n.file_path, n.body, n.content_hash,
+		 n.source_url, n.transcript_source, n.created_at, n.updated_at
+		 FROM notes n`
+	args := []interface{}{escaped + "%"}
+
+	if tag != "" {
+		query += ` JOIN note_tags nt ON nt.note_id = n.id
+		 JOIN tags t ON t.id = nt.tag_id`
+		args = append(args, tag)
+		query += ` WHERE n.title LIKE ? ESCAPE '\' AND t.name = ?`
+	} else {
+		query += ` WHERE n.title LIKE ? ESCAPE '\'`
+	}
+	query += ` ORDER BY n.created_at DESC LIMIT 1`
+
+	row := db.QueryRowContext(ctx, query, args...)
+	n, err := s.scanNote(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("note.SQLStore.FindByTitlePrefix: %w", ErrNotFound)
+		}
+		return nil, fmt.Errorf("note.SQLStore.FindByTitlePrefix: %w", err)
+	}
+
+	tags, err := s.loadTags(ctx, db, n.ID)
+	if err != nil {
+		return nil, fmt.Errorf("note.SQLStore.FindByTitlePrefix: load tags: %w", err)
+	}
+	n.Tags = tags
+	return n, nil
+}
+
 // nullString converts a Go string to sql.NullString (empty -> NULL).
 func nullString(s string) sql.NullString {
 	if s == "" {

@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, isToday, parseISO } from 'date-fns';
-import { listNotes } from '../../api/client';
+import { listNotes, getDailyNote } from '../../api/client';
 import { useToastStore } from '../../components/Toast/ToastContainer';
 import { NoteListSkeleton } from '../../components/Skeleton/Skeleton';
+import { MiniCalendar } from '../../components/MiniCalendar/MiniCalendar';
 import type { Note } from '../../api/types';
 import styles from './TimelinePage.module.css';
 
@@ -58,6 +59,15 @@ export function TimelinePage() {
   const [jumpDate, setJumpDate] = useState('');
 
   const hasMore = notes.length < totalNotes;
+
+  const handleCalendarDateSelect = useCallback(async (dateStr: string) => {
+    try {
+      const note = await getDailyNote(dateStr);
+      navigate(`/notes/${note.id}`);
+    } catch {
+      addToast('Failed to open daily note', 'error');
+    }
+  }, [navigate, addToast]);
 
   const fetchNotes = useCallback(async () => {
     setLoading(true);
@@ -187,6 +197,10 @@ export function TimelinePage() {
             aria-label="Jump to date"
           />
         </div>
+      </div>
+
+      <div className={styles.calendarSection}>
+        <MiniCalendar onDateSelect={handleCalendarDateSelect} />
       </div>
 
       <div className={styles.timeline}>

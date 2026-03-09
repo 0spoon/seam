@@ -51,10 +51,13 @@ func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)
 	r.Get("/", h.list)
+	// /daily must be registered before /{id} so "daily" is not captured as an ID.
+	r.Get("/daily", h.getDailyNote)
 	r.Get("/{id}", h.get)
 	r.Put("/{id}", h.update)
 	r.Delete("/{id}", h.delete)
 	r.Get("/resolve", h.resolveWikilink)
+	r.Post("/{id}/append", h.appendToNote)
 	r.Get("/{id}/backlinks", h.backlinks)
 	r.Route("/{id}/versions", func(r chi.Router) {
 		r.Get("/", h.listVersions)
@@ -62,6 +65,71 @@ func (h *Handler) Routes() chi.Router {
 		r.Post("/{version}/restore", h.restoreVersion)
 	})
 	return r
+}
+
+func (h *Handler) getDailyNote(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	dateStr := r.URL.Query().Get("date")
+	if dateStr == "" || dateStr == "today" {
+		dateStr = time.Now().Format("2006-01-02")
+	}
+
+	date, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid date format, expected YYYY-MM-DD")
+		return
+	}
+
+	note, err := h.service.GetOrCreateDaily(r.Context(), userID, date)
+	if err != nil {
+		h.logger.Error("get daily note failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, note)
+}
+
+func (h *Handler) appendToNote(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
+
+	noteID := chi.URLParam(r, "id")
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Text == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+
+	note, err := h.service.AppendToNote(r.Context(), userID, noteID, req.Text)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "note not found")
+			return
+		}
+		h.logger.Error("append to note failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, note)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {

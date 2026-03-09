@@ -826,6 +826,75 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 	return nil
 }
 
+// AppendToNote appends a timestamped line to an existing note's body.
+func (s *Service) AppendToNote(ctx context.Context, userID, noteID, text string) (*Note, error) {
+	existing, err := s.Get(ctx, userID, noteID)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.AppendToNote: %w", err)
+	}
+
+	timestamp := time.Now().Format("15:04")
+	appendLine := "\n- " + timestamp + " -- " + text
+	newBody := existing.Body + appendLine
+
+	updated, err := s.Update(ctx, userID, noteID, UpdateNoteReq{
+		Body: &newBody,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.AppendToNote: %w", err)
+	}
+
+	return updated, nil
+}
+
+// GetOrCreateDaily returns the daily note for the given date, creating one
+// if it does not yet exist.
+func (s *Service) GetOrCreateDaily(ctx context.Context, userID string, date time.Time) (*Note, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.GetOrCreateDaily: open db: %w", err)
+	}
+
+	// Search for existing daily note by date prefix and tag.
+	datePrefix := date.Format("2006-01-02")
+	existing, err := s.store.FindByTitlePrefix(ctx, db, datePrefix, "daily")
+	if err == nil {
+		// Read body from disk (source of truth).
+		notesDir := s.userDBManager.UserNotesDir(userID)
+		absPath := filepath.Join(notesDir, existing.FilePath)
+		content, readErr := os.ReadFile(absPath)
+		if readErr == nil {
+			_, body, parseErr := ParseFrontmatter(string(content))
+			if parseErr == nil {
+				existing.Body = body
+			}
+		}
+		return existing, nil
+	}
+
+	// Not found -- create a new daily note.
+	title := date.Format("2006-01-02 Monday")
+	dateStr := date.Format("2006-01-02")
+	weekdayStr := date.Format("Monday")
+
+	body := fmt.Sprintf("# %s %s\n\n## Notes\n\n## Tasks\n\n- [ ] \n", dateStr, weekdayStr)
+
+	// Try the daily-log template if the handler has a template applier.
+	// The service does not have direct access to the template applier, so we
+	// use the hardcoded default above. The handler can override this if needed.
+
+	n, err := s.Create(ctx, userID, CreateNoteReq{
+		Title: title,
+		Body:  body,
+		Tags:  []string{"daily"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("note.Service.GetOrCreateDaily: %w", err)
+	}
+
+	return n, nil
+}
+
 // uniqueFilename generates a unique filename in the given directory, appending
 // a numeric suffix if a file with that name already exists. Falls back to a
 // ULID-based name if no unique name is found within 10000 attempts.

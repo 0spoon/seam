@@ -1,7 +1,8 @@
 import { useEffect, lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { useProjectStore } from './stores/projectStore';
+import { useNoteStore } from './stores/noteStore';
 import { useUIStore } from './stores/uiStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { setOnAuthFailure } from './api/client';
@@ -47,6 +48,29 @@ function GraphFallback() {
 
 function GenericFallback() {
   return <GenericPageSkeleton />;
+}
+
+function TodayRedirect() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const fetchOrCreateDaily = useNoteStore((s) => s.fetchOrCreateDaily);
+  const dateParam = searchParams.get('date') || undefined;
+
+  useEffect(() => {
+    fetchOrCreateDaily(dateParam).then((note) => {
+      if (note) {
+        navigate(`/notes/${note.id}`, { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
+    });
+  }, [dateParam]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ padding: 'var(--space-6)' }}>
+      <EditorSkeleton />
+    </div>
+  );
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -99,6 +123,7 @@ export function App() {
         }
       >
         <Route index element={<Suspense fallback={<NoteListFallback />}><InboxPage /></Suspense>} />
+        <Route path="today" element={<TodayRedirect />} />
         <Route path="projects/:id" element={<Suspense fallback={<NoteListFallback />}><ProjectPage /></Suspense>} />
         <Route path="notes/:id" element={<Suspense fallback={<EditorFallback />}><NoteEditorPage /></Suspense>} />
         <Route path="search" element={<Suspense fallback={<NoteListFallback />}><SearchPage /></Suspense>} />

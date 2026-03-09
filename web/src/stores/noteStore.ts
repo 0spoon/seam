@@ -21,6 +21,8 @@ interface NoteState {
   deleteNote: (id: string) => Promise<void>;
   fetchBacklinks: (noteId: string) => Promise<void>;
   handleNoteChanged: (noteId: string) => Promise<void>;
+  fetchOrCreateDaily: (date?: string) => Promise<Note | null>;
+  appendToNote: (noteId: string, text: string) => Promise<Note | null>;
   clearCurrentNote: () => void;
   clearError: () => void;
 }
@@ -139,6 +141,35 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       } catch {
         // Silently ignore -- the next user action will retry.
       }
+    }
+  },
+
+  fetchOrCreateDaily: async (date?: string) => {
+    try {
+      const note = await api.getDailyNote(date);
+      set({ currentNote: note });
+      return note;
+    } catch (err) {
+      const msg = err instanceof api.ApiError ? err.message : 'Failed to load daily note';
+      set({ error: msg });
+      useToastStore.getState().addToast(msg, 'error');
+      return null;
+    }
+  },
+
+  appendToNote: async (noteId: string, text: string) => {
+    try {
+      const note = await api.appendToNote(noteId, text);
+      set((state) => ({
+        notes: state.notes.map((n) => (n.id === noteId ? note : n)),
+        currentNote: state.currentNote?.id === noteId ? note : state.currentNote,
+      }));
+      return note;
+    } catch (err) {
+      const msg = err instanceof api.ApiError ? err.message : 'Failed to append to note';
+      set({ error: msg });
+      useToastStore.getState().addToast(msg, 'error');
+      return null;
     }
   },
 

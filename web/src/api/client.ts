@@ -289,6 +289,18 @@ export async function getBacklinks(noteId: string): Promise<Note[]> {
   return request<Note[]>(`/notes/${noteId}/backlinks`);
 }
 
+export async function getDailyNote(date?: string): Promise<Note> {
+  const param = date || 'today';
+  return request<Note>(`/notes/daily?date=${encodeURIComponent(param)}`);
+}
+
+export async function appendToNote(noteId: string, text: string): Promise<Note> {
+  return request<Note>(`/notes/${noteId}/append`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
 // Project endpoints
 export async function createProject(req: CreateProjectReq): Promise<Project> {
   return request<Project>('/projects/', {

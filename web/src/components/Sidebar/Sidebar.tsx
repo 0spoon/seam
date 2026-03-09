@@ -24,6 +24,7 @@ import { useKeyboard } from '../../hooks/useKeyboard';
 import { useNoteWebSocket } from '../../hooks/useWebSocket';
 import { useNoteStore } from '../../stores/noteStore';
 import { ConfirmModal } from '../ConfirmModal/ConfirmModal';
+import { ConnectionStatus } from '../ConnectionStatus/ConnectionStatus';
 import { getProjectColor } from '../../lib/tagColor';
 import { searchFTS } from '../../api/client';
 import type { FTSResult } from '../../api/types';
@@ -552,6 +553,7 @@ export function Sidebar() {
           {!collapsed && (
             <>
               <span className={styles.username}>{user?.username}</span>
+              <ConnectionStatus />
               <button
                 className={styles.iconButton}
                 onClick={handleSettings}

@@ -1,0 +1,61 @@
+.indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  position: relative;
+  cursor: default;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.connected {
+  background: var(--status-success);
+}
+
+.reconnecting {
+  background: var(--status-warning);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.disconnected {
+  background: var(--status-error);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.statusText {
+  white-space: nowrap;
+}
+
+.tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-ui);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  z-index: var(--z-dropdown);
+  pointer-events: none;
+}
+
+.tooltipLine {
+  display: block;
+  line-height: var(--line-height-normal);
+}

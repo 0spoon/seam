@@ -1,0 +1,53 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  position: relative;
+  text-align: center;
+  padding: var(--space-8);
+}
+
+.bgPattern {
+  position: absolute;
+  inset: 0;
+  opacity: 0.3;
+  background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 0 80 Q 50 60 100 80 T 200 80' fill='none' stroke='%231e2233' stroke-width='1'/%3E%3Cpath d='M 0 120 Q 50 100 100 120 T 200 120' fill='none' stroke='%231e2233' stroke-width='1'/%3E%3Cpath d='M 0 160 Q 50 140 100 160 T 200 160' fill='none' stroke='%231e2233' stroke-width='0.5'/%3E%3Cpath d='M 0 40 Q 50 20 100 40 T 200 40' fill='none' stroke='%231e2233' stroke-width='0.5'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  pointer-events: none;
+}
+
+.heading {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--font-size-2xl);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-2);
+  position: relative;
+}
+
+.subtext {
+  font-family: var(--font-ui);
+  font-weight: 300;
+  font-size: var(--font-size-base);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-6);
+  position: relative;
+}
+
+.action {
+  position: relative;
+  padding: var(--space-2) var(--space-4);
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.action:hover {
+  background: var(--accent-hover);
+}

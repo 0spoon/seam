@@ -1,0 +1,22 @@
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  transition: margin-left var(--duration-normal) var(--ease-out);
+}
+
+@media (max-width: 1024px) {
+  .main {
+    margin-left: var(--sidebar-collapsed) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .main {
+    margin-left: 0 !important;
+  }
+}

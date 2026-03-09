@@ -1,0 +1,109 @@
+package server
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/katata/seam/internal/auth"
+	"github.com/katata/seam/internal/reqctx"
+)
+
+// RequestIDMiddleware generates a unique request ID and injects it into the context.
+func RequestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := generateRequestID()
+		ctx := reqctx.WithRequestID(r.Context(), id)
+		w.Header().Set("X-Request-ID", id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// LoggingMiddleware logs each request with structured fields.
+func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+
+			next.ServeHTTP(sw, r)
+
+			logger.Debug("request",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", sw.status,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"request_id", reqctx.RequestIDFromContext(r.Context()),
+			)
+		})
+	}
+}
+
+// AuthMiddleware validates the JWT access token and injects user info into context.
+func AuthMiddleware(jwtManager *auth.JWTManager) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+				return
+			}
+
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+				http.Error(w, `{"error":"invalid authorization header format"}`, http.StatusUnauthorized)
+				return
+			}
+
+			claims, err := jwtManager.VerifyAccessToken(parts[1])
+			if err != nil {
+				http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+				return
+			}
+
+			ctx := reqctx.WithUserID(r.Context(), claims.UserID)
+			ctx = reqctx.WithUsername(ctx, claims.Username)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// RecoveryMiddleware catches panics and returns a 500 error.
+func RecoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.Error("panic recovered",
+						"error", rec,
+						"method", r.Method,
+						"path", r.URL.Path,
+						"request_id", reqctx.RequestIDFromContext(r.Context()),
+					)
+					http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// statusWriter wraps http.ResponseWriter to capture the status code.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (sw *statusWriter) WriteHeader(code int) {
+	sw.status = code
+	sw.ResponseWriter.WriteHeader(code)
+}
+
+func generateRequestID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}

@@ -1,0 +1,200 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 9, 13, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  animation: backdropIn var(--duration-slow) var(--ease-out);
+}
+
+@keyframes backdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  width: 90%;
+  padding: var(--space-6);
+  animation: modalIn var(--duration-slow) var(--ease-out);
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.modalTitle {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--font-size-lg);
+  color: var(--text-primary);
+}
+
+.closeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.closeButton:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.titleInput {
+  width: 100%;
+  height: 36px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+}
+
+.titleInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+.titleInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.bodyTextarea {
+  width: 100%;
+  min-height: 160px;
+  padding: var(--space-3);
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+  line-height: var(--line-height-normal);
+  resize: vertical;
+}
+
+.bodyTextarea::placeholder {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.bodyTextarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.captureOptions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.projectSelect,
+.tagInput {
+  flex: 1;
+  height: 32px;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.projectSelect:focus,
+.tagInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.tagInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.primaryButton {
+  padding: var(--space-2) var(--space-4);
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-md);
+  height: 36px;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.primaryButton:hover {
+  background: var(--accent-hover);
+}
+
+.primaryButton:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.ghostButton {
+  padding: var(--space-2) var(--space-4);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-md);
+  height: 36px;
+  transition: background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.ghostButton:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}

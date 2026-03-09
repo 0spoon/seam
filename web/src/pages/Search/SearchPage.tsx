@@ -1,0 +1,154 @@
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { searchFTS, searchSemantic } from '../../api/client';
+import type { FTSResult, SemanticResult } from '../../api/types';
+import { EmptyState } from '../../components/EmptyState/EmptyState';
+import styles from './SearchPage.module.css';
+
+type SearchMode = 'fulltext' | 'semantic';
+
+type SearchResult = {
+  note_id: string;
+  title: string;
+  snippet: string;
+  score?: number;
+};
+
+export function SearchPage() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const initialQuery = searchParams.get('q') ?? '';
+  const [query, setQuery] = useState(initialQuery);
+  const [mode, setMode] = useState<SearchMode>('fulltext');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      setIsLoading(true);
+      try {
+        if (mode === 'semantic') {
+          const semanticResults = await searchSemantic(query, 20);
+          setResults(
+            semanticResults.map((r: SemanticResult) => ({
+              note_id: r.note_id,
+              title: r.title,
+              snippet: r.snippet,
+              score: r.score,
+            })),
+          );
+        } else {
+          const { results: ftsResults } = await searchFTS(query, 20);
+          setResults(
+            ftsResults.map((r: FTSResult) => ({
+              note_id: r.note_id,
+              title: r.title,
+              snippet: r.snippet,
+            })),
+          );
+        }
+      } catch {
+        setResults([]);
+      } finally {
+        setIsLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, [query, mode]);
+
+  const handleModeChange = (newMode: SearchMode) => {
+    setMode(newMode);
+    setResults([]);
+  };
+
+  return (
+    <div className={styles.page}>
+      <div className={styles.searchBar}>
+        <input
+          ref={inputRef}
+          type="text"
+          className={styles.searchInput}
+          placeholder={
+            mode === 'semantic'
+              ? 'Ask a question about your notes...'
+              : 'Search notes...'
+          }
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search notes"
+        />
+      </div>
+
+      <div className={styles.tabs}>
+        <button
+          className={`${styles.tab} ${mode === 'fulltext' ? styles.activeTab : ''}`}
+          onClick={() => handleModeChange('fulltext')}
+        >
+          Full-text
+        </button>
+        <button
+          className={`${styles.tab} ${mode === 'semantic' ? styles.activeTab : ''}`}
+          onClick={() => handleModeChange('semantic')}
+        >
+          Semantic
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className={styles.loading}>Searching...</div>
+      ) : results.length === 0 && query.trim() ? (
+        <EmptyState
+          heading="No matches"
+          subtext={
+            mode === 'semantic'
+              ? 'Try rephrasing your question'
+              : 'Try different keywords'
+          }
+        />
+      ) : (
+        <div className={styles.results}>
+          {results.map((result) => (
+            <button
+              key={result.note_id}
+              className={styles.resultItem}
+              onClick={() => navigate(`/notes/${result.note_id}`)}
+            >
+              <div className={styles.resultHeader}>
+                <h3 className={styles.resultTitle}>{result.title}</h3>
+                {result.score !== undefined && (
+                  <span className={styles.resultScore}>
+                    {Math.round(result.score * 100)}%
+                  </span>
+                )}
+              </div>
+              <p
+                className={styles.resultSnippet}
+                dangerouslySetInnerHTML={{ __html: result.snippet }}
+              />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

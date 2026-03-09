@@ -1,0 +1,394 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// pane identifies which pane is active.
+type pane int
+
+const (
+	paneProjects pane = iota
+	paneNotes
+)
+
+// projectItem is either "Inbox" or a real project.
+type projectItem struct {
+	id   string // empty for inbox
+	name string
+}
+
+// mainScreenModel is the main two-pane view showing projects and notes.
+type mainScreenModel struct {
+	client       *APIClient
+	width        int
+	height       int
+	activePane   pane
+	projects     []projectItem
+	projectIdx   int
+	notes        []*Note
+	noteIdx      int
+	totalNotes   int
+	err          string
+	loading      bool
+	username     string
+	showCapture  bool
+	captureModel captureModel
+}
+
+// -- Messages ----------------------------------------------------------------
+
+type projectsLoadedMsg struct {
+	projects []*Project
+}
+
+type notesLoadedMsg struct {
+	notes []*Note
+	total int
+}
+
+type apiErrorMsg struct {
+	err error
+}
+
+type noteDeletedMsg struct{}
+
+func newMainScreenModel(client *APIClient, username string) mainScreenModel {
+	return mainScreenModel{
+		client:   client,
+		username: username,
+	}
+}
+
+func (m mainScreenModel) Init() tea.Cmd {
+	return m.loadProjects()
+}
+
+func (m mainScreenModel) loadProjects() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		projects, err := client.ListProjects()
+		if err != nil {
+			return apiErrorMsg{err: err}
+		}
+		return projectsLoadedMsg{projects: projects}
+	}
+}
+
+func (m mainScreenModel) loadNotes() tea.Cmd {
+	if len(m.projects) == 0 {
+		return nil
+	}
+	client := m.client
+	item := m.projects[m.projectIdx]
+
+	return func() tea.Msg {
+		projectFilter := item.id
+		if item.id == "" {
+			projectFilter = "inbox"
+		}
+		notes, total, err := client.ListNotes(projectFilter)
+		if err != nil {
+			return apiErrorMsg{err: err}
+		}
+		return notesLoadedMsg{notes: notes, total: total}
+	}
+}
+
+func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
+	// If capture modal is open, delegate to it.
+	if m.showCapture {
+		return m.updateCapture(msg)
+	}
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
+	case projectsLoadedMsg:
+		m.loading = false
+		m.projects = []projectItem{{id: "", name: "Inbox"}}
+		for _, p := range msg.projects {
+			m.projects = append(m.projects, projectItem{id: p.ID, name: p.Name})
+		}
+		m.projectIdx = 0
+		return m, m.loadNotes()
+
+	case notesLoadedMsg:
+		m.loading = false
+		m.notes = msg.notes
+		m.totalNotes = msg.total
+		m.noteIdx = 0
+		return m, nil
+
+	case apiErrorMsg:
+		m.loading = false
+		m.err = msg.err.Error()
+		return m, nil
+
+	case noteDeletedMsg:
+		m.err = ""
+		return m, m.loadNotes()
+
+	case tea.KeyMsg:
+		m.err = ""
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+
+		case "tab":
+			if m.activePane == paneProjects {
+				m.activePane = paneNotes
+			} else {
+				m.activePane = paneProjects
+			}
+			return m, nil
+
+		case "j", "down":
+			if m.activePane == paneProjects {
+				if m.projectIdx < len(m.projects)-1 {
+					m.projectIdx++
+					m.loading = true
+					return m, m.loadNotes()
+				}
+			} else {
+				if m.noteIdx < len(m.notes)-1 {
+					m.noteIdx++
+				}
+			}
+			return m, nil
+
+		case "k", "up":
+			if m.activePane == paneProjects {
+				if m.projectIdx > 0 {
+					m.projectIdx--
+					m.loading = true
+					return m, m.loadNotes()
+				}
+			} else {
+				if m.noteIdx > 0 {
+					m.noteIdx--
+				}
+			}
+			return m, nil
+
+		case "enter":
+			if m.activePane == paneNotes && len(m.notes) > 0 {
+				note := m.notes[m.noteIdx]
+				return m, func() tea.Msg {
+					return openEditorMsg{noteID: note.ID}
+				}
+			}
+			return m, nil
+
+		case "c":
+			// Quick capture: open capture modal.
+			projectID := ""
+			if m.projectIdx < len(m.projects) {
+				projectID = m.projects[m.projectIdx].id
+			}
+			m.showCapture = true
+			m.captureModel = newCaptureModel(m.client, projectID, m.width, m.height)
+			return m, m.captureModel.Init()
+
+		case "n":
+			// Create note: same as capture but with focused project.
+			projectID := ""
+			if m.projectIdx < len(m.projects) {
+				projectID = m.projects[m.projectIdx].id
+			}
+			m.showCapture = true
+			m.captureModel = newCaptureModel(m.client, projectID, m.width, m.height)
+			return m, m.captureModel.Init()
+
+		case "/":
+			return m, func() tea.Msg {
+				return openSearchMsg{}
+			}
+
+		case "a":
+			return m, func() tea.Msg {
+				return openAskMsg{}
+			}
+
+		case "d":
+			if m.activePane == paneNotes && len(m.notes) > 0 {
+				note := m.notes[m.noteIdx]
+				client := m.client
+				return m, func() tea.Msg {
+					if err := client.DeleteNote(note.ID); err != nil {
+						return apiErrorMsg{err: err}
+					}
+					return noteDeletedMsg{}
+				}
+			}
+			return m, nil
+
+		case "r":
+			m.loading = true
+			return m, m.loadProjects()
+		}
+	}
+
+	return m, nil
+}
+
+func (m mainScreenModel) updateCapture(msg tea.Msg) (mainScreenModel, tea.Cmd) {
+	var cmd tea.Cmd
+	m.captureModel, cmd = m.captureModel.Update(msg)
+
+	if m.captureModel.done {
+		m.showCapture = false
+		if m.captureModel.created {
+			return m, m.loadNotes()
+		}
+		return m, nil
+	}
+
+	return m, cmd
+}
+
+func (m mainScreenModel) View() string {
+	if m.width == 0 {
+		return ""
+	}
+
+	if m.showCapture {
+		return m.captureModel.View()
+	}
+
+	// Header.
+	header := styleHeader.Width(m.width).Render(
+		fmt.Sprintf(" Seam  |  %s  |  %d notes", m.username, m.totalNotes),
+	)
+
+	// Status bar.
+	statusText := "j/k: navigate | Tab: pane | Enter: open | c: capture | /: search | a: ask | d: del | q: quit"
+	if m.err != "" {
+		statusText = styleError.Render(m.err)
+	}
+	statusBar := styleStatusBar.Width(m.width).Render(statusText)
+
+	// Calculate pane dimensions.
+	contentHeight := m.height - 3 // header + status + borders
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	leftWidth := m.width/4 - 2
+	if leftWidth < 15 {
+		leftWidth = 15
+	}
+	rightWidth := m.width - leftWidth - 6 // account for borders
+	if rightWidth < 20 {
+		rightWidth = 20
+	}
+
+	// Project list pane.
+	leftPaneStyle := stylePane
+	if m.activePane == paneProjects {
+		leftPaneStyle = stylePaneActive
+	}
+	projectList := m.renderProjectList(leftWidth, contentHeight-2)
+	leftPane := leftPaneStyle.Width(leftWidth).Height(contentHeight - 2).Render(projectList)
+
+	// Note list pane.
+	rightPaneStyle := stylePane
+	if m.activePane == paneNotes {
+		rightPaneStyle = stylePaneActive
+	}
+	noteList := m.renderNoteList(rightWidth, contentHeight-2)
+	rightPane := rightPaneStyle.Width(rightWidth).Height(contentHeight - 2).Render(noteList)
+
+	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, content, statusBar)
+}
+
+func (m mainScreenModel) renderProjectList(width, height int) string {
+	var b strings.Builder
+	title := styleTitle.Render("Projects")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	if len(m.projects) == 0 {
+		b.WriteString(styleMuted.Render("  No projects"))
+		return b.String()
+	}
+
+	for i, p := range m.projects {
+		if i >= height-2 {
+			b.WriteString(styleMuted.Render(fmt.Sprintf("  ... +%d more", len(m.projects)-i)))
+			break
+		}
+		label := p.name
+		if i == m.projectIdx {
+			b.WriteString(styleSelected.Width(width - 2).Render("> " + label))
+		} else {
+			b.WriteString(styleNormal.Width(width - 2).Render("  " + label))
+		}
+		if i < len(m.projects)-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+func (m mainScreenModel) renderNoteList(width, height int) string {
+	var b strings.Builder
+	title := styleTitle.Render("Notes")
+	if m.loading {
+		title += styleMuted.Render(" (loading...)")
+	}
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	if len(m.notes) == 0 {
+		b.WriteString(styleMuted.Render("  No notes"))
+		return b.String()
+	}
+
+	for i, n := range m.notes {
+		if i >= height-2 {
+			b.WriteString(styleMuted.Render(fmt.Sprintf("  ... +%d more", len(m.notes)-i)))
+			break
+		}
+
+		noteTitle := n.Title
+		if noteTitle == "" {
+			noteTitle = "(untitled)"
+		}
+
+		// Truncate title if needed.
+		maxTitleLen := width - 6
+		if maxTitleLen < 10 {
+			maxTitleLen = 10
+		}
+		if len(noteTitle) > maxTitleLen {
+			noteTitle = noteTitle[:maxTitleLen-3] + "..."
+		}
+
+		line := noteTitle
+		if len(n.Tags) > 0 {
+			tags := styleMuted.Render(" [" + strings.Join(n.Tags, ", ") + "]")
+			line += tags
+		}
+
+		if i == m.noteIdx {
+			b.WriteString(styleSelected.Width(width - 2).Render("> " + line))
+		} else {
+			b.WriteString(styleNormal.Width(width - 2).Render("  " + line))
+		}
+		if i < len(m.notes)-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}

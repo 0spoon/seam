@@ -1,0 +1,50 @@
+# Seam server configuration
+# Copy this file to seam-server.yaml and edit as needed.
+
+# Address to listen on.
+# env: SEAM_LISTEN
+listen: ":8080"
+
+# Root data directory. User databases, notes, and templates are stored here.
+# env: SEAM_DATA_DIR
+data_dir: "./data"
+
+# JWT signing secret. Required, no default. Generate with:
+#   openssl rand -hex 32
+# env: SEAM_JWT_SECRET
+jwt_secret: ""
+
+# Ollama API base URL.
+# env: SEAM_OLLAMA_URL
+ollama_base_url: "http://localhost:11434"
+
+# ChromaDB API URL. Optional; required for semantic search (Phase 2+).
+# env: SEAM_CHROMADB_URL
+chromadb_url: "http://localhost:8000"
+
+# AI model names used by Seam.
+models:
+  embeddings: "qwen3-embedding:8b"
+  background: "qwen3:32b"
+  chat: "qwen3:32b"
+  transcription: "whisper"     # optional; required for voice capture
+
+# Authentication settings.
+auth:
+  access_token_ttl: "15m"      # access token lifetime
+  refresh_token_ttl: "168h"    # refresh token lifetime (7 days)
+  bcrypt_cost: 12              # bcrypt hashing cost
+
+# AI task queue settings.
+ai:
+  queue_workers: 1             # concurrent Ollama requests
+  embedding_timeout: "30s"
+  chat_timeout: "120s"
+
+# Per-user database manager settings.
+userdb:
+  eviction_timeout: "30m"     # close idle user DBs after this duration
+
+# File watcher settings.
+watcher:
+  debounce_interval: "200ms"

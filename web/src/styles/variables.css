@@ -1,0 +1,117 @@
+:root {
+  /* Backgrounds */
+  --bg-deep: #08090d;
+  --bg-base: #0f1117;
+  --bg-surface: #161922;
+  --bg-elevated: #1d2130;
+  --bg-overlay: #252a3a;
+
+  /* Borders */
+  --border-subtle: #1e2233;
+  --border-default: #2a3045;
+  --border-strong: #3a4260;
+
+  /* Text */
+  --text-primary: #e8e2d9;
+  --text-secondary: #9992a6;
+  --text-tertiary: #5e5a6e;
+  --text-inverse: #0f1117;
+
+  /* Accents */
+  --accent-primary: #c4915c;
+  --accent-hover: #d4a06c;
+  --accent-muted: rgba(196, 145, 92, 0.10);
+  --accent-secondary: #6b9b7a;
+  --accent-tertiary: #7b8ec4;
+
+  /* Status */
+  --status-error: #c46b6b;
+  --status-warning: #c4a95c;
+  --status-success: #6b9b7a;
+  --status-info: #7b8ec4;
+
+  /* Project colors */
+  --project-1: #c4915c;
+  --project-2: #6b9b7a;
+  --project-3: #7b8ec4;
+  --project-4: #b87ba4;
+  --project-5: #c49b6b;
+  --project-6: #6bc4b8;
+  --project-7: #9b7bc4;
+  --project-8: #c46b6b;
+
+  /* Typography */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-ui: 'Outfit', system-ui, sans-serif;
+  --font-content: 'Lora', Georgia, serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', monospace;
+
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-base: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+  --font-size-3xl: 2.5rem;
+
+  --line-height-tight: 1.3;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.7;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* Layout */
+  --sidebar-width: 260px;
+  --sidebar-collapsed: 52px;
+  --right-panel-width: 300px;
+  --topbar-height: 0px;
+  --editor-max-width: none;
+  --preview-max-width: 720px;
+  --chat-max-width: 680px;
+  --note-card-min-height: 80px;
+  --modal-width-sm: 420px;
+  --modal-width-md: 560px;
+  --modal-width-lg: 720px;
+
+  /* Z-index */
+  --z-sidebar: 100;
+  --z-panel: 200;
+  --z-dropdown: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-command: 600;
+
+  /* Animation */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+    --duration-slow: 0ms;
+  }
+}

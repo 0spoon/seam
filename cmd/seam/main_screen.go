@@ -244,6 +244,11 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 				return openAskMsg{}
 			}
 
+		case "t":
+			return m, func() tea.Msg {
+				return openTimelineMsg{}
+			}
+
 		case "d":
 			if m.activePane == paneNotes && len(m.notes) > 0 {
 				note := m.notes[m.noteIdx]

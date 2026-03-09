@@ -62,6 +62,8 @@ vi.mock('../../hooks/useWebSocket', () => ({
 
 vi.mock('../../api/client', () => ({
   getRelatedNotes: vi.fn().mockResolvedValue([]),
+  getTwoHopBacklinks: vi.fn().mockResolvedValue([]),
+  getOrphanNotes: vi.fn().mockResolvedValue([]),
   aiAssist: vi.fn().mockResolvedValue({ result: 'AI generated text' }),
 }));
 

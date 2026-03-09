@@ -11,6 +11,8 @@ import { ProjectPage } from './pages/Project/ProjectPage';
 import { NoteEditorPage } from './pages/NoteEditor/NoteEditorPage';
 import { SearchPage } from './pages/Search/SearchPage';
 import { AskPage } from './pages/Ask/AskPage';
+import { GraphPage } from './pages/Graph/GraphPage';
+import { TimelinePage } from './pages/Timeline/TimelinePage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -62,6 +64,8 @@ export function App() {
         <Route path="notes/:id" element={<NoteEditorPage />} />
         <Route path="search" element={<SearchPage />} />
         <Route path="ask" element={<AskPage />} />
+        <Route path="graph" element={<GraphPage />} />
+        <Route path="timeline" element={<TimelinePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

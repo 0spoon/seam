@@ -8,6 +8,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   MessageCircle,
+  Network,
+  Calendar,
 } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -216,6 +218,26 @@ export function Sidebar() {
         >
           <MessageCircle size={16} />
           {!collapsed && <span>Ask Seam</span>}
+        </button>
+
+        {/* Graph */}
+        <button
+          className={`${styles.navItem} ${isActive('/graph') ? styles.active : ''}`}
+          onClick={() => navigate('/graph')}
+          title="Knowledge Graph"
+        >
+          <Network size={16} />
+          {!collapsed && <span>Graph</span>}
+        </button>
+
+        {/* Timeline */}
+        <button
+          className={`${styles.navItem} ${isActive('/timeline') ? styles.active : ''}`}
+          onClick={() => navigate('/timeline')}
+          title="Timeline"
+        >
+          <Calendar size={16} />
+          {!collapsed && <span>Timeline</span>}
         </button>
 
         {/* Projects */}

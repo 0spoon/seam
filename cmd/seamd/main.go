@@ -17,6 +17,7 @@ import (
 	"github.com/katata/seam/internal/auth"
 	"github.com/katata/seam/internal/capture"
 	"github.com/katata/seam/internal/config"
+	"github.com/katata/seam/internal/graph"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/search"
@@ -155,6 +156,10 @@ func run() error {
 
 	// Wire template service into note handler for single-request template-based creation.
 	noteHandler.SetTemplateApplier(templateSvc)
+
+	// Create graph components.
+	graphSvc := graph.NewService(userDBMgr, logger)
+	graphHandler := graph.NewHandler(graphSvc, logger)
 
 	// Create AI components (Ollama, ChromaDB, embedder, chat, synthesizer, linker, writer).
 	ollamaClient := ai.NewOllamaClient(
@@ -434,6 +439,7 @@ func run() error {
 		AIHandler:        aiHandler,
 		CaptureHandler:   captureHandler,
 		TemplateHandler:  templateHandler,
+		GraphHandler:     graphHandler,
 		WSMessageHandler: wsHandler,
 	})
 

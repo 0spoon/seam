@@ -5,6 +5,7 @@ import {
   Search,
   Folder,
   Network,
+  Calendar,
   PanelLeftClose,
 } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
@@ -61,6 +62,15 @@ export function CommandPalette() {
       action: () => {
         setOpen(false);
         navigate('/graph');
+      },
+    },
+    {
+      id: 'timeline',
+      label: 'Timeline',
+      icon: <Calendar size={16} />,
+      action: () => {
+        setOpen(false);
+        navigate('/timeline');
       },
     },
     {

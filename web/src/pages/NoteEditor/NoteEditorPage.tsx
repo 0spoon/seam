@@ -24,7 +24,7 @@ import {
 import { useNoteStore } from '../../stores/noteStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { getRelatedNotes, aiAssist } from '../../api/client';
+import { getRelatedNotes, aiAssist, getTwoHopBacklinks, getOrphanNotes } from '../../api/client';
 import { renderMarkdown } from '../../lib/markdown';
 import { timeAgo, formatDateTime } from '../../lib/dates';
 import { getTagColor } from '../../lib/tagColor';
@@ -34,7 +34,7 @@ import {
   wikilinkDecorationTheme,
   wikilinkAutocomplete,
 } from './wikilinkExtension';
-import type { AIAssistReq, LinkSuggestion, RelatedNote, WSMessage } from '../../api/types';
+import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage } from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
 type ViewMode = 'editor' | 'split' | 'preview';
@@ -58,6 +58,8 @@ export function NoteEditorPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [relatedNotes, setRelatedNotes] = useState<RelatedNote[]>([]);
+  const [twoHopBacklinks, setTwoHopBacklinks] = useState<TwoHopBacklink[]>([]);
+  const [isOrphan, setIsOrphan] = useState(false);
   const [showAIMenu, setShowAIMenu] = useState(false);
   const [aiLoading, setAILoading] = useState(false);
   const [aiResult, setAIResult] = useState<{ action: string; text: string } | null>(null);
@@ -70,11 +72,19 @@ export function NoteEditorPage() {
       fetchBacklinks(id);
       // Fetch related notes (semantic similarity).
       getRelatedNotes(id).then(setRelatedNotes).catch(() => setRelatedNotes([]));
+      // Fetch two-hop backlinks.
+      getTwoHopBacklinks(id).then(setTwoHopBacklinks).catch(() => setTwoHopBacklinks([]));
+      // Check if this note is an orphan (no links in or out).
+      getOrphanNotes()
+        .then((orphans) => setIsOrphan(orphans.some((o) => o.id === id)))
+        .catch(() => setIsOrphan(false));
     }
     return () => {
       clearCurrentNote();
       setLinkSuggestions([]);
       setRelatedNotes([]);
+      setTwoHopBacklinks([]);
+      setIsOrphan(false);
     };
   }, [id, fetchNote, fetchBacklinks, clearCurrentNote]);
 
@@ -578,6 +588,41 @@ export function NoteEditorPage() {
                 ))
               )}
             </section>
+
+            {/* Orphan indicator */}
+            {isOrphan && (
+              <section className={styles.panelSection}>
+                <div className={styles.orphanBadge}>
+                  Orphan note -- no links in or out
+                </div>
+              </section>
+            )}
+
+            {/* Two-hop backlinks */}
+            {twoHopBacklinks.length > 0 && (
+              <section className={styles.panelSection}>
+                <h3 className={styles.panelSectionTitle}>2-hop Backlinks</h3>
+                {twoHopBacklinks.map((note) => (
+                  <div key={note.id} className={styles.twoHopItem}>
+                    <button
+                      className={styles.backlinkItem}
+                      onClick={() => navigate(`/notes/${note.id}`)}
+                    >
+                      <span className={styles.backlinkTitle}>{note.title}</span>
+                    </button>
+                    <span className={styles.twoHopVia}>
+                      via{' '}
+                      <button
+                        className={styles.twoHopViaLink}
+                        onClick={() => navigate(`/notes/${note.via_id}`)}
+                      >
+                        {note.via_title}
+                      </button>
+                    </span>
+                  </div>
+                ))}
+              </section>
+            )}
 
             {/* Tags */}
             <section className={styles.panelSection}>

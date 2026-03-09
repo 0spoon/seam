@@ -1,0 +1,206 @@
+.container {
+  padding: var(--space-6);
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-6);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--font-size-xl);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.toggle {
+  display: flex;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.toggleButton {
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.toggleButton:hover {
+  color: var(--text-primary);
+}
+
+.toggleActive {
+  background: var(--accent-muted);
+  color: var(--accent-primary);
+}
+
+.dateInput {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+}
+
+.dateInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.timeline {
+  position: relative;
+  padding-left: var(--space-8);
+}
+
+.timelineLine {
+  position: absolute;
+  left: 14px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-subtle);
+}
+
+.dateGroup {
+  position: relative;
+  margin-bottom: var(--space-6);
+}
+
+.dateMarker {
+  position: sticky;
+  top: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  z-index: 1;
+  background: var(--bg-base);
+  padding: var(--space-1) 0;
+}
+
+.dateDot {
+  position: absolute;
+  left: -26px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--border-default);
+  border: 2px solid var(--bg-base);
+}
+
+.dateDotToday {
+  background: var(--accent-primary);
+}
+
+.dateText {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--font-size-lg);
+  color: var(--text-secondary);
+}
+
+.noteCount {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.noteList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.noteItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  text-align: left;
+  width: 100%;
+}
+
+.noteItem:hover {
+  border-color: var(--accent-primary);
+  background: var(--bg-elevated);
+}
+
+.noteTitle {
+  font-family: var(--font-ui);
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.noteMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.noteTime {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.noteTags {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.noteTag {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--bg-overlay);
+}
+
+.empty {
+  text-align: center;
+  padding: var(--space-16) var(--space-6);
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+}
+
+.emptyTitle {
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  margin-bottom: var(--space-2);
+}
+
+.loading {
+  text-align: center;
+  padding: var(--space-16) var(--space-6);
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}

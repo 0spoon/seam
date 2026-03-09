@@ -304,6 +304,45 @@
   color: var(--text-tertiary);
 }
 
+.orphanBadge {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgba(196, 107, 107, 0.1);
+  border: 1px solid rgba(196, 107, 107, 0.3);
+  color: #c46b6b;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+
+.twoHopItem {
+  margin-bottom: var(--space-1);
+}
+
+.twoHopVia {
+  display: block;
+  padding-left: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.twoHopViaLink {
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.twoHopViaLink:hover {
+  color: var(--accent-primary);
+}
+
 .tagList {
   display: flex;
   flex-wrap: wrap;

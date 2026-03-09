@@ -20,6 +20,9 @@ import {
   listTemplates,
   applyTemplate,
   aiAssist,
+  getGraph,
+  getTwoHopBacklinks,
+  getOrphanNotes,
   ApiError,
 } from './client';
 
@@ -608,6 +611,57 @@ describe('API Client', () => {
       );
 
       await expect(aiAssist('note1', 'expand')).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('getGraph', () => {
+    it('fetches graph data with no filter', async () => {
+      setTokens({ access_token: 'token', refresh_token: 'rt' });
+      const mockGraph = { nodes: [{ id: 'n1', title: 'Test', tags: [], link_count: 0 }], edges: [] };
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockGraph), { status: 200 }),
+      );
+      const result = await getGraph();
+      expect(result.nodes).toHaveLength(1);
+      expect(result.edges).toHaveLength(0);
+    });
+
+    it('fetches graph data with filter', async () => {
+      setTokens({ access_token: 'token', refresh_token: 'rt' });
+      const mockGraph = { nodes: [], edges: [] };
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockGraph), { status: 200 }),
+      );
+      const result = await getGraph({ tag: 'go', limit: 100 });
+      expect(result).toBeDefined();
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(url).toContain('tag=go');
+      expect(url).toContain('limit=100');
+    });
+  });
+
+  describe('getTwoHopBacklinks', () => {
+    it('fetches two-hop backlinks for a note', async () => {
+      setTokens({ access_token: 'token', refresh_token: 'rt' });
+      const mockNodes = [{ id: 'n2', title: 'Two Hops Away' }];
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockNodes), { status: 200 }),
+      );
+      const result = await getTwoHopBacklinks('n1');
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('n2');
+    });
+  });
+
+  describe('getOrphanNotes', () => {
+    it('fetches orphan notes', async () => {
+      setTokens({ access_token: 'token', refresh_token: 'rt' });
+      const mockNodes = [{ id: 'n3', title: 'Orphan' }];
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(mockNodes), { status: 200 }),
+      );
+      const result = await getOrphanNotes();
+      expect(result).toHaveLength(1);
     });
   });
 

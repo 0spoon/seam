@@ -169,6 +169,27 @@ func (c *APIClient) ListNotes(projectID string) ([]*Note, int, error) {
 	return notes, total, nil
 }
 
+// ListNotesAll returns all notes with custom sort and limit parameters.
+func (c *APIClient) ListNotesAll(sort string, limit int) ([]*Note, error) {
+	params := url.Values{}
+	if sort != "" {
+		params.Set("sort", sort)
+	}
+	params.Set("sort_dir", "desc")
+	if limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+
+	var notes []*Note
+	if err := c.get("/api/notes", params, &notes); err != nil {
+		return nil, err
+	}
+	if notes == nil {
+		notes = []*Note{}
+	}
+	return notes, nil
+}
+
 // GetNote retrieves a single note by ID.
 func (c *APIClient) GetNote(id string) (*Note, error) {
 	var n Note

@@ -25,6 +25,10 @@ import type {
   TemplateApplyResult,
   AIAssistReq,
   AIAssistResult,
+  GraphData,
+  GraphFilter,
+  GraphNode,
+  TwoHopBacklink,
 } from './types';
 
 const BASE_URL = '/api';
@@ -397,6 +401,30 @@ export async function aiAssist(
     method: 'POST',
     body: JSON.stringify(req),
   });
+}
+
+// Graph endpoints
+export async function getGraph(
+  filter: GraphFilter = {},
+): Promise<GraphData> {
+  const params = new URLSearchParams();
+  if (filter.project) params.set('project', filter.project);
+  if (filter.tag) params.set('tag', filter.tag);
+  if (filter.since) params.set('since', filter.since);
+  if (filter.until) params.set('until', filter.until);
+  if (filter.limit) params.set('limit', String(filter.limit));
+  const qs = params.toString();
+  return request<GraphData>(`/graph${qs ? `?${qs}` : ''}`);
+}
+
+export async function getTwoHopBacklinks(
+  noteId: string,
+): Promise<TwoHopBacklink[]> {
+  return request<TwoHopBacklink[]>(`/graph/two-hop-backlinks/${noteId}`);
+}
+
+export async function getOrphanNotes(): Promise<GraphNode[]> {
+  return request<GraphNode[]>('/graph/orphans');
 }
 
 // Search endpoints

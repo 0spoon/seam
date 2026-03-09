@@ -181,3 +181,40 @@ export interface AIAssistReq {
 export interface AIAssistResult {
   result: string;
 }
+
+// Phase 4: Graph types
+export interface GraphNode {
+  id: string;
+  title: string;
+  project_id?: string;
+  project?: string; // human-readable project name
+  tags: string[];
+  created_at: string;
+  link_count: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface GraphFilter {
+  project?: string;
+  tag?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+}
+
+// Phase 4: Two-hop backlinks (includes the intermediate connecting note)
+export interface TwoHopBacklink {
+  id: string;
+  title: string;
+  via_id: string;    // intermediate note ID
+  via_title: string; // intermediate note title
+}

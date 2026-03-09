@@ -13,20 +13,22 @@ const (
 	screenEditor
 	screenSearch
 	screenAsk
+	screenTimeline
 )
 
 // appModel is the root Bubble Tea model that delegates to sub-models.
 type appModel struct {
-	screen      screen
-	client      *APIClient
-	username    string
-	width       int
-	height      int
-	loginModel  loginModel
-	mainModel   mainScreenModel
-	editorModel editorModel
-	searchModel searchModel
-	askModel    askModel
+	screen        screen
+	client        *APIClient
+	username      string
+	width         int
+	height        int
+	loginModel    loginModel
+	mainModel     mainScreenModel
+	editorModel   editorModel
+	searchModel   searchModel
+	askModel      askModel
+	timelineModel timelineModel
 }
 
 func newAppModel(client *APIClient, authenticated bool, username string) appModel {
@@ -82,6 +84,8 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSearch(msg)
 	case screenAsk:
 		return m.updateAsk(msg)
+	case screenTimeline:
+		return m.updateTimeline(msg)
 	}
 
 	return m, nil
@@ -129,6 +133,11 @@ func (m appModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenAsk
 		m.askModel = newAskModel(m.client, m.width, m.height)
 		return m, m.askModel.Init()
+
+	case openTimelineMsg:
+		m.screen = screenTimeline
+		m.timelineModel = newTimelineModel(m.client, m.width, m.height)
+		return m, m.timelineModel.Init()
 	}
 
 	var cmd tea.Cmd
@@ -185,6 +194,25 @@ func (m appModel) updateAsk(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m appModel) updateTimeline(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// If timeline triggers opening a note, switch to editor.
+	if oe, ok := msg.(openEditorMsg); ok {
+		m.screen = screenEditor
+		m.editorModel = newEditorModel(m.client, oe.noteID, m.width, m.height)
+		return m, m.editorModel.Init()
+	}
+
+	var cmd tea.Cmd
+	m.timelineModel, cmd = m.timelineModel.Update(msg)
+
+	if m.timelineModel.done {
+		m.screen = screenMain
+		return m, nil
+	}
+
+	return m, cmd
+}
+
 func (m appModel) View() string {
 	switch m.screen {
 	case screenLogin:
@@ -197,6 +225,8 @@ func (m appModel) View() string {
 		return m.searchModel.View()
 	case screenAsk:
 		return m.askModel.View()
+	case screenTimeline:
+		return m.timelineModel.View()
 	default:
 		return ""
 	}

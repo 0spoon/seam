@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { AnimatePresence, motion } from 'motion/react';
+import { formatDistanceToNow } from 'date-fns';
   import {
   Bold,
   Italic,
@@ -36,6 +37,7 @@ import { getRelatedNotes, aiAssist, getTwoHopBacklinks } from '../../api/client'
 import { renderMarkdown } from '../../lib/markdown';
 import { sanitizeHtml } from '../../lib/sanitize';
 import { timeAgo, formatDateTime } from '../../lib/dates';
+import { saveDraft, getDraft, clearDraft } from '../../lib/drafts';
 import { getTagColor } from '../../lib/tagColor';
 import { seamEditorTheme } from './editorTheme';
 import {
@@ -79,6 +81,7 @@ export function NoteEditorPage() {
   const addToast = useToastStore((s) => s.addToast);
   const [aiLoading, setAILoading] = useState(false);
   const [aiResult, setAIResult] = useState<{ action: string; text: string } | null>(null);
+  const [draftBanner, setDraftBanner] = useState<{ title: string; body: string; savedAt: number } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const titleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const contentRef = useRef('');
@@ -86,6 +89,22 @@ export function NoteEditorPage() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  const hasUnsavedChanges = saveStatus === 'unsaved' || saveStatus === 'saving';
+
+  // Warn user before leaving with unsaved changes.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
+    if (hasUnsavedChanges) {
+      window.addEventListener('beforeunload', handler);
+    }
+
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
 
   useEffect(() => {
     let aborted = false;
@@ -165,12 +184,28 @@ export function NoteEditorPage() {
     }
   }, [currentNote?.id]); // Only reset content on note change, not on every update
 
+  // Check for a local draft that is newer than the server version.
+  useEffect(() => {
+    if (currentNote) {
+      const draft = getDraft(currentNote.id);
+      if (draft) {
+        const noteUpdatedAt = new Date(currentNote.updated_at).getTime();
+        if (draft.savedAt > noteUpdatedAt) {
+          setDraftBanner(draft);
+        } else {
+          clearDraft(currentNote.id);
+        }
+      }
+    }
+  }, [currentNote?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSave = useCallback(async (value: string) => {
     if (!id) return;
     setSaveStatus('saving');
     try {
       await updateNote(id, { body: value });
       setSaveStatus('saved');
+      clearDraft(id);
     } catch {
       setSaveStatus('unsaved');
       addToast('Failed to save note', 'error');
@@ -181,6 +216,7 @@ export function NoteEditorPage() {
     setTitle(newTitle);
     titleRef.current = newTitle;
     setSaveStatus('unsaved');
+    if (id) saveDraft(id, newTitle, contentRef.current);
 
     if (titleTimerRef.current) {
       clearTimeout(titleTimerRef.current);
@@ -191,6 +227,7 @@ export function NoteEditorPage() {
       try {
         await updateNote(id, { title: newTitle });
         setSaveStatus('saved');
+        clearDraft(id);
       } catch {
         setSaveStatus('unsaved');
         addToast('Failed to save title', 'error');
@@ -202,6 +239,7 @@ export function NoteEditorPage() {
     setContent(value);
     contentRef.current = value;
     setSaveStatus('unsaved');
+    if (id) saveDraft(id, titleRef.current, value);
 
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
@@ -209,7 +247,7 @@ export function NoteEditorPage() {
     saveTimerRef.current = setTimeout(() => {
       handleSave(value);
     }, 1000);
-  }, [handleSave]);
+  }, [id, handleSave]);
 
   // Cleanup save timers on unmount -- flush any pending saves.
   useEffect(() => {
@@ -568,6 +606,21 @@ export function NoteEditorPage() {
     };
   }, [navigate, viewMode]);
 
+  const handleRestoreDraft = useCallback(() => {
+    if (!draftBanner || !id) return;
+    setTitle(draftBanner.title);
+    titleRef.current = draftBanner.title;
+    setContent(draftBanner.body);
+    contentRef.current = draftBanner.body;
+    setSaveStatus('unsaved');
+    setDraftBanner(null);
+  }, [draftBanner, id]);
+
+  const handleDiscardDraft = useCallback(() => {
+    if (id) clearDraft(id);
+    setDraftBanner(null);
+  }, [id]);
+
   const wordStats = useMemo(() => {
     const chars = content.length;
     const words = content.trim() ? content.trim().split(/\s+/).length : 0;
@@ -766,6 +819,22 @@ export function NoteEditorPage() {
         {noteLoading ? (
           <EditorSkeleton />
         ) : (<>
+        {draftBanner && (
+          <div className={styles.draftBanner}>
+            <span className={styles.draftBannerText}>
+              Local draft found (saved{' '}
+              {formatDistanceToNow(new Date(draftBanner.savedAt), { addSuffix: true })})
+            </span>
+            <div className={styles.draftBannerActions}>
+              <button className={styles.draftRestore} onClick={handleRestoreDraft}>
+                Restore
+              </button>
+              <button className={styles.draftDiscard} onClick={handleDiscardDraft}>
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
         <div className={styles.editorWrapper}>
           {/* Editor pane */}
           {viewMode !== 'preview' && (

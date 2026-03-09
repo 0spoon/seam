@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('motion/react', () => ({
@@ -30,9 +30,29 @@ vi.mock('./CommandPalette.module.css', () => ({
   }),
 }));
 
+vi.mock('../../api/client', () => ({
+  searchFTS: vi.fn().mockResolvedValue({ results: [], total: 0 }),
+}));
+
+vi.mock('../../lib/dates', () => ({
+  timeAgo: () => 'just now',
+}));
+
+vi.mock('../../lib/navigation', () => ({
+  navigate: vi.fn(),
+  setNavigate: vi.fn(),
+}));
+
+vi.mock('../../lib/recentNotes', () => ({
+  getRecentNotes: vi.fn(() => []),
+  addRecentNote: vi.fn(),
+  clearRecentNotes: vi.fn(),
+}));
+
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { CommandPalette } from './CommandPalette';
+import { getRecentNotes } from '../../lib/recentNotes';
 
 vi.mock('../../stores/uiStore', () => ({
   useUIStore: Object.assign(
@@ -42,10 +62,20 @@ vi.mock('../../stores/uiStore', () => ({
         setCommandPaletteOpen: vi.fn(),
         setCaptureModalOpen: vi.fn(),
         toggleSidebar: vi.fn(),
+        toggleRightPanel: vi.fn(),
+        setEditorViewMode: vi.fn(),
+        setRightPanelOpen: vi.fn(),
+        tags: [],
       };
       return selector(state);
     }),
-    { setState: vi.fn(), getState: vi.fn() },
+    { setState: vi.fn(), getState: vi.fn(() => ({
+      setCommandPaletteOpen: vi.fn(),
+      setCaptureModalOpen: vi.fn(),
+      toggleSidebar: vi.fn(),
+      toggleRightPanel: vi.fn(),
+      setEditorViewMode: vi.fn(),
+    })) },
   ),
 }));
 
@@ -67,6 +97,10 @@ function setUIState(overrides: Record<string, unknown>) {
     setCommandPaletteOpen: vi.fn(),
     setCaptureModalOpen: vi.fn(),
     toggleSidebar: vi.fn(),
+    toggleRightPanel: vi.fn(),
+    setEditorViewMode: vi.fn(),
+    setRightPanelOpen: vi.fn(),
+    tags: [],
   };
   const merged = { ...defaults, ...overrides };
   vi.mocked(useUIStore).mockImplementation(
@@ -109,22 +143,113 @@ describe('CommandPalette', () => {
     renderPalette();
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Type a command...')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...'),
+    ).toBeInTheDocument();
   });
 
-  it('shows base command items', () => {
+  it('shows "No recent notes" when empty query and no recents', () => {
     setUIState({ commandPaletteOpen: true });
     renderPalette();
 
+    expect(screen.getByText('No recent notes')).toBeInTheDocument();
+  });
+
+  it('shows recent notes when query is empty', () => {
+    vi.mocked(getRecentNotes).mockReturnValue([
+      { id: 'n1', title: 'My Note', openedAt: Date.now() },
+    ]);
+    setUIState({ commandPaletteOpen: true });
+    renderPalette();
+
+    expect(screen.getByText('My Note')).toBeInTheDocument();
+    expect(screen.getByText('RECENT')).toBeInTheDocument();
+  });
+
+  it('switches to command mode with > prefix', () => {
+    setUIState({ commandPaletteOpen: true });
+    renderPalette();
+
+    const input = screen.getByPlaceholderText(
+      'Search notes, >commands, #tags, @projects...',
+    );
+    fireEvent.change(input, { target: { value: '>' } });
+
+    expect(screen.getByText('Commands')).toBeInTheDocument();
+    expect(screen.getByText('COMMANDS')).toBeInTheDocument();
+    // Should show default commands
     expect(screen.getByText('New note')).toBeInTheDocument();
     expect(screen.getByText('Search notes')).toBeInTheDocument();
-    expect(screen.getByText('Graph view')).toBeInTheDocument();
-    expect(screen.getByText('Timeline')).toBeInTheDocument();
-    expect(screen.getByText('Ask Seam')).toBeInTheDocument();
     expect(screen.getByText('Toggle sidebar')).toBeInTheDocument();
   });
 
-  it('shows project commands when projects exist', () => {
+  it('filters commands by query in command mode', () => {
+    setUIState({ commandPaletteOpen: true });
+    renderPalette();
+
+    const input = screen.getByPlaceholderText(
+      'Search notes, >commands, #tags, @projects...',
+    );
+    fireEvent.change(input, { target: { value: '>graph' } });
+
+    // Text is split across highlight spans, so use a function matcher.
+    expect(
+      screen.getByText((_content, el) =>
+        el?.classList.contains('label') && el?.textContent === 'Graph view' || false,
+      ),
+    ).toBeInTheDocument();
+    // Only one command result should appear
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(1);
+  });
+
+  it('shows tags in tag mode', () => {
+    setUIState({
+      commandPaletteOpen: true,
+      tags: [
+        { name: 'javascript', count: 5 },
+        { name: 'rust', count: 3 },
+      ],
+    });
+    renderPalette();
+
+    const input = screen.getByPlaceholderText(
+      'Search notes, >commands, #tags, @projects...',
+    );
+    fireEvent.change(input, { target: { value: '#' } });
+
+    expect(screen.getByText('Tags')).toBeInTheDocument();
+    expect(screen.getByText('#javascript')).toBeInTheDocument();
+    expect(screen.getByText('#rust')).toBeInTheDocument();
+  });
+
+  it('filters tags by query', () => {
+    setUIState({
+      commandPaletteOpen: true,
+      tags: [
+        { name: 'javascript', count: 5 },
+        { name: 'rust', count: 3 },
+      ],
+    });
+    renderPalette();
+
+    const input = screen.getByPlaceholderText(
+      'Search notes, >commands, #tags, @projects...',
+    );
+    fireEvent.change(input, { target: { value: '#rust' } });
+
+    // Text is split across highlight spans, so use a function matcher.
+    expect(
+      screen.getByText((_content, el) =>
+        el?.classList.contains('label') && el?.textContent === '#rust' || false,
+      ),
+    ).toBeInTheDocument();
+    // Only one tag result should appear
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(1);
+  });
+
+  it('shows projects in project mode', () => {
     setUIState({ commandPaletteOpen: true });
     setProjectState({
       projects: [
@@ -134,46 +259,51 @@ describe('CommandPalette', () => {
     });
     renderPalette();
 
-    expect(screen.getByText('Open project: Research')).toBeInTheDocument();
-    expect(screen.getByText('Open project: Writing')).toBeInTheDocument();
+    const input = screen.getByPlaceholderText(
+      'Search notes, >commands, #tags, @projects...',
+    );
+    fireEvent.change(input, { target: { value: '@' } });
+
+    expect(screen.getByText('Projects')).toBeInTheDocument();
+    expect(screen.getByText('Research')).toBeInTheDocument();
+    expect(screen.getByText('Writing')).toBeInTheDocument();
   });
 
-  it('filters commands by query', () => {
+  it('displays keyboard shortcuts for commands', () => {
     setUIState({ commandPaletteOpen: true });
     renderPalette();
 
-    const input = screen.getByPlaceholderText('Type a command...');
-    fireEvent.change(input, { target: { value: 'graph' } });
-
-    expect(screen.getByText('Graph view')).toBeInTheDocument();
-    expect(screen.queryByText('New note')).not.toBeInTheDocument();
-    expect(screen.queryByText('Search notes')).not.toBeInTheDocument();
-  });
-
-  it('shows "No matching commands" for non-matching query', () => {
-    setUIState({ commandPaletteOpen: true });
-    renderPalette();
-
-    const input = screen.getByPlaceholderText('Type a command...');
-    fireEvent.change(input, { target: { value: 'xyznonexistent' } });
-
-    expect(screen.getByText('No matching commands')).toBeInTheDocument();
-  });
-
-  it('displays keyboard shortcuts for commands that have them', () => {
-    setUIState({ commandPaletteOpen: true });
-    renderPalette();
+    const input = screen.getByPlaceholderText(
+      'Search notes, >commands, #tags, @projects...',
+    );
+    fireEvent.change(input, { target: { value: '>' } });
 
     expect(screen.getByText('Cmd+N')).toBeInTheDocument();
     expect(screen.getByText('/')).toBeInTheDocument();
   });
 
-  it('renders all command items as role=option', () => {
+  it('closes on Escape', () => {
+    const setOpen = vi.fn();
+    setUIState({ commandPaletteOpen: true, setCommandPaletteOpen: setOpen });
+    renderPalette();
+
+    const input = screen.getByPlaceholderText(
+      'Search notes, >commands, #tags, @projects...',
+    );
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(setOpen).toHaveBeenCalledWith(false);
+  });
+
+  it('shows "No results found" for non-matching command query', () => {
     setUIState({ commandPaletteOpen: true });
     renderPalette();
 
-    const options = screen.getAllByRole('option');
-    // 6 base commands, no projects
-    expect(options.length).toBe(6);
+    const input = screen.getByPlaceholderText(
+      'Search notes, >commands, #tags, @projects...',
+    );
+    fireEvent.change(input, { target: { value: '>xyznonexistent' } });
+
+    expect(screen.getByText('No results found')).toBeInTheDocument();
   });
 });

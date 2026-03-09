@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { AnimatePresence, motion } from 'motion/react';
-  import {
+import {
   Bold,
   Italic,
   Heading,
@@ -45,6 +45,7 @@ import {
 } from './wikilinkExtension';
 import { EditorSkeleton } from '../../components/Skeleton/Skeleton';
 import { ConfirmModal } from '../../components/ConfirmModal/ConfirmModal';
+import { useRecentNote } from '../../hooks/useRecentNotes';
 import type { AIAssistReq, LinkSuggestion, RelatedNote, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
@@ -86,6 +87,9 @@ export function NoteEditorPage() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  // Track this note as recently opened for the command palette.
+  useRecentNote(currentNote?.id, currentNote?.title);
 
   useEffect(() => {
     let aborted = false;

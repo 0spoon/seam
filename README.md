@@ -28,10 +28,13 @@
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5.9">
   <img src="https://img.shields.io/badge/SQLite-FTS5-003B57?logo=sqlite&logoColor=white" alt="SQLite FTS5">
   <img src="https://img.shields.io/badge/AI-Ollama_(local)-000000?logo=ollama&logoColor=white" alt="Ollama">
-  <img src="https://img.shields.io/badge/License-TBD-333333" alt="License TBD">
 </p>
 
 ---
+
+<p align="center">
+  <img src="./resources/feature-image.webp" alt="Seam — where things connect" width="100%">
+</p>
 
 Seam helps you capture, organize, and retrieve everything you know. All your notes live as plain `.md` files on your filesystem. AI runs entirely locally via [Ollama](https://ollama.com) -- no cloud, no API costs, no privacy trade-offs.
 
@@ -133,10 +136,10 @@ All model names are config values -- swap based on your hardware with no code ch
 
 | Requirement | Version | Purpose |
 |---|---|---|
-| [Go](https://go.dev) | 1.24+ | Build the server and TUI |
+| [Go](https://go.dev) | 1.25+ | Build the server and TUI |
 | [Node.js](https://nodejs.org) | 22+ | Build the web frontend |
 | [Ollama](https://ollama.com) | Latest | AI features (embeddings, chat, synthesis) |
-| [ChromaDB](https://www.trychroma.com) | Latest | Semantic search (optional, required for Phase 2+ features) |
+| [ChromaDB](https://www.trychroma.com) | Latest | Semantic search and embeddings (optional) |
 
 ### Quick Start
 
@@ -285,6 +288,21 @@ Graph
 
 Tags
   GET    /api/tags                      # all tags with note counts
+
+Chat
+  POST   /api/chat/conversations        # create a conversation
+  GET    /api/chat/conversations        # list conversations (paginated)
+  GET    /api/chat/conversations/{id}   # get conversation with messages
+  DELETE /api/chat/conversations/{id}   # delete a conversation
+  POST   /api/chat/conversations/{id}/messages  # add a message
+
+Settings
+  GET    /api/settings                  # get all user settings
+  PUT    /api/settings                  # update user settings
+  DELETE /api/settings/{key}            # delete a setting
+
+Review
+  GET    /api/review/queue              # knowledge gardening review queue
 ```
 
 ### WebSocket
@@ -307,7 +325,7 @@ make test                 # all Go unit tests
 make test-integration     # integration tests (real filesystem, on-disk SQLite)
 make test-web             # all frontend tests (Vitest)
 make lint                 # golangci-lint + eslint
-make fmt                  # gofmt + prettier
+make fmt                  # gofmt
 make clean                # remove build artifacts + web/dist
 ```
 
@@ -353,17 +371,22 @@ cd web && npx vitest run src/api/client        # single file
 cmd/
   seamd/                    # server binary
   seam/                     # TUI binary
+  seed/                     # seed data generator for development
 internal/
   ai/                       # Ollama client, ChromaDB client, task queue,
-                            #   embedder, chat (RAG), synthesis, auto-linker, writer
+                            #   embedder, synthesis, auto-linker, writer
   auth/                     # user registration, login, JWT, bcrypt
   capture/                  # URL fetch (SSRF-safe), voice transcription
+  chat/                     # Ask Seam conversational chat (RAG, streaming)
   config/                   # YAML + env config loading
   graph/                    # knowledge graph data (nodes, edges, orphans, two-hop)
   note/                     # note CRUD, frontmatter parser, wikilink parser, tag parser
   project/                  # project CRUD, slug generation, cascade delete
+  reqctx/                   # request-scoped context keys (user ID, request ID)
+  review/                   # knowledge gardening review queue (orphans, untagged, similar)
   search/                   # full-text search (FTS5) + semantic search
   server/                   # HTTP server, middleware, router wiring
+  settings/                 # per-user settings (editor mode, sidebar state, etc.)
   template/                 # note templates with variable substitution
   userdb/                   # per-user SQLite database manager
   validate/                 # path traversal, input sanitization
@@ -398,8 +421,6 @@ Seam's frontend follows the **"Dark Cartography"** aesthetic -- warm, precise, a
 - **CSS custom properties** for all design tokens -- colors, spacing, typography, radii, z-indexes
 - **CSS Modules** per component -- no global class name conflicts
 
-See [FE_DESIGN.md](./FE_DESIGN.md) for the complete design specification.
-
 ---
 
 ## Security
@@ -419,10 +440,6 @@ See [FE_DESIGN.md](./FE_DESIGN.md) for the complete design specification.
 | Document | Description |
 |---|---|
 | [PLAN.md](./PLAN.md) | Architecture decisions, feature scope, data model |
-| [IMP_PLAN.md](./IMP_PLAN.md) | Detailed implementation plan with task breakdown |
-| [FE_DESIGN.md](./FE_DESIGN.md) | Frontend design system: colors, typography, components, layouts |
-| [TEST_PLAN.md](./TEST_PLAN.md) | Comprehensive test specifications (TDD) |
-| [PROGRESS.md](./PROGRESS.md) | Task-level implementation progress tracker |
 | [AGENTS.md](./AGENTS.md) | Instructions for AI coding agents |
 
 ---

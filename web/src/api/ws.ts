@@ -111,20 +111,16 @@ function stopHeartbeat() {
 async function scheduleReconnect() {
   if (reconnectTimer) return;
 
-  // Before reconnecting, ensure the access token is still valid.
-  // If it has expired, attempt a refresh. If refresh fails (e.g. the
-  // refresh token is also expired), stop reconnecting entirely.
-  const token = getAccessToken();
+  // Always refresh the access token before reconnecting. The in-memory
+  // token string may still be present but expired, and unlike the HTTP
+  // client the WebSocket auth handshake has no 401 retry path.
   const refresh = getRefreshToken();
-  if (!token && !refresh) return;
+  if (!refresh) return;
 
-  if (!token && refresh) {
-    const ok = await tryRefresh();
-    if (!ok) {
-      // Refresh failed -- tokens are invalid, clear them.
-      setTokens(null);
-      return;
-    }
+  const ok = await tryRefresh();
+  if (!ok) {
+    setTokens(null);
+    return;
   }
 
   reconnectAttempts++;

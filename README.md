@@ -439,7 +439,6 @@ Seam's frontend follows the **"Dark Cartography"** aesthetic -- warm, precise, a
 
 | Document | Description |
 |---|---|
-| [PLAN.md](./PLAN.md) | Architecture decisions, feature scope, data model |
 | [AGENTS.md](./AGENTS.md) | Instructions for AI coding agents |
 
 ---

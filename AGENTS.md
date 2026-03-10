@@ -4,7 +4,7 @@ Instructions for AI coding agents operating in this repository.
 
 ## Project overview
 
-Seam is a local-first, AI-powered knowledge system. Go backend (REST + WebSocket), Bubble Tea TUI, React web frontend. Multi-user, single machine. Notes are plain `.md` files on disk. AI via Ollama (local). See PLAN.md for architecture, IMP_PLAN.md for implementation details.
+Seam is a local-first, AI-powered knowledge system. Go backend (REST + WebSocket), Bubble Tea TUI, React web frontend. Multi-user, single machine. Notes are plain `.md` files on disk. AI via Ollama (local). See README.md for architecture and feature overview.
 
 ## Build and run
 
@@ -56,7 +56,7 @@ make fmt                  # gofmt + prettier
 
 ### General
 
-- Go 1.24+. No CGO. Pure Go SQLite driver (`modernc.org/sqlite`).
+- Go 1.25+. No CGO. Pure Go SQLite driver (`modernc.org/sqlite`).
 - Never use emojis in code or comments.
 - Never include credit or attribution lines in commits, PRs, or code comments.
 - Format with `gofmt`. No exceptions.
@@ -144,11 +144,9 @@ No package imports `internal/server`. The server wires dependencies at startup.
 
 ## Frontend style rules (web/)
 
-See [FE_DESIGN.md](./FE_DESIGN.md) for the full design system.
-
 - React 19 + TypeScript 5 + Vite 7.
 - State management: Zustand.
-- Markdown editor: CodeMirror 6 with custom dark theme (FE_DESIGN.md Section 7.3a).
+- Markdown editor: CodeMirror 6 with custom dark theme.
 - Markdown preview: `markdown-it` with wikilink plugin.
 - Graph visualization: Cytoscape.js with `fcose` layout.
 - Icons: Lucide (`lucide-react`). No other icon libraries.
@@ -167,26 +165,11 @@ See [FE_DESIGN.md](./FE_DESIGN.md) for the full design system.
 - Never hardcode color values, spacing, or font sizes. Always reference CSS variables.
 - Never use `!important`. No nesting deeper than 2 levels in CSS Modules.
 
-## Implementation progress
-
-See [PROGRESS.md](./PROGRESS.md) for detailed task-level tracking.
-
-| Phase | Status | Description |
-|---|---|---|
-| Phase 1 -- Core (Weeks 1-3) | **Done** | All 26 gaps resolved. Backend + frontend fully functional. See PROGRESS.md. |
-| Phase 2 -- Intelligence (Weeks 4-6) | **Done** | Ollama, ChromaDB, embeddings, semantic search, Ask Seam, synthesis, auto-link. All 15 tasks complete. See PROGRESS.md. |
-| Phase 3 -- Rich Capture (Weeks 7-8) | **Done** | All 6 tasks complete. URL capture, voice capture, templates, AI writing assist. Backend + frontend + TUI. See PROGRESS.md. |
-| Phase 4 -- Visualization (Weeks 9-10) | **Done** | Knowledge graph, timeline, backlink refinement, E2E testing. All 6 tasks complete. See PROGRESS.md. |
-
 ## Key files
 
 | File | Purpose |
 |---|---|
-| `PLAN.md` | Architecture decisions, feature scope, data model |
-| `IMP_PLAN.md` | Implementation plan, schemas, interfaces, task breakdown |
-| `FE_DESIGN.md` | Frontend design system: colors, typography, components, screen layouts |
-| `TEST_PLAN.md` | Test specifications (TDD -- write tests before implementation) |
-| `PROGRESS.md` | Task-level implementation progress tracker |
+| `README.md` | Architecture, features, API reference, getting started |
 | `seam-server.yaml.example` | Server configuration template |
 | `migrations/server/` | server.db SQL migrations |
 | `migrations/user/` | per-user seam.db SQL migrations |

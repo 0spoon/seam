@@ -76,24 +76,39 @@ Seam helps you capture, organize, and retrieve everything you know. All your not
 
 ## Architecture
 
-```
-                    +------------------+
-                    |     Clients      |
-                    |  TUI  |  React   |
-                    +--------+---------+
-                             |
-                      REST + WebSocket
-                             |
-                    +--------+---------+
-                    |   Go Backend     |
-                    |  chi router      |
-                    |  JWT auth        |
-                    +--+-----+-----+---+
-                       |     |     |
-                +------+  +--+--+  +-------+
-                |         |     |          |
-            SQLite     ChromaDB  Ollama   Filesystem
-          (per-user)  (vectors)  (LLM)   (.md files)
+```mermaid
+graph TD
+    subgraph Clients
+        TUI["TUI (Bubble Tea)"]
+        Web["Web (React 19)"]
+    end
+
+    TUI & Web <-->|"REST + WebSocket"| Backend
+
+    subgraph Backend["Go Backend"]
+        Router["chi router"]
+        Auth["JWT auth"]
+        Queue["AI task queue"]
+    end
+
+    Backend --> SQLite["SQLite (per-user)\nMetadata + FTS5"]
+    Backend --> Chroma["ChromaDB\nVector embeddings"]
+    Backend --> Ollama["Ollama\nLocal LLM"]
+    Backend --> FS["Filesystem\nPlain .md files"]
+
+    FS -.->|"fsnotify"| Backend
+
+    style Backend fill:#1d2130,stroke:#c4915c,color:#e8e2d9
+    style Clients fill:#1d2130,stroke:#3a4260,color:#e8e2d9
+    style TUI fill:#161922,stroke:#3a4260,color:#e8e2d9
+    style Web fill:#161922,stroke:#3a4260,color:#e8e2d9
+    style Router fill:#161922,stroke:#3a4260,color:#e8e2d9
+    style Auth fill:#161922,stroke:#3a4260,color:#e8e2d9
+    style Queue fill:#161922,stroke:#3a4260,color:#e8e2d9
+    style SQLite fill:#161922,stroke:#6b9b7a,color:#e8e2d9
+    style Chroma fill:#161922,stroke:#7b8ec4,color:#e8e2d9
+    style Ollama fill:#161922,stroke:#b87ba4,color:#e8e2d9
+    style FS fill:#161922,stroke:#c4915c,color:#e8e2d9
 ```
 
 **Multi-user, single machine.** Each user gets fully isolated storage -- their own SQLite database, their own notes directory on disk, their own embedding collection in ChromaDB. Users can browse and edit their `.md` files directly with any text editor; the server detects changes via `fsnotify` and re-indexes automatically.

@@ -120,6 +120,7 @@ export function ProjectPage() {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 100,
     overscan: 10,
+    gap: 8,
   });
 
   if (!currentProject && !isLoading) {
@@ -250,7 +251,7 @@ export function ProjectPage() {
             const note = loadedNotes[virtualRow.index];
             const noteIndex = virtualRow.index;
             return (
-              <motion.div
+              <div
                 key={note.id}
                 ref={virtualizer.measureElement}
                 data-index={virtualRow.index}
@@ -261,13 +262,6 @@ export function ProjectPage() {
                   right: 0,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: 0.2,
-                  ease: [0.16, 1, 0.3, 1],
-                  delay: virtualRow.index < 20 ? virtualRow.index * 0.03 : 0,
-                }}
                 onClick={(e) => {
                   if (e.shiftKey && isSelectionMode) {
                     e.preventDefault();
@@ -275,17 +269,27 @@ export function ProjectPage() {
                   }
                 }}
               >
-                <NoteCard
-                  note={note}
-                  projectName={currentProject?.name}
-                  projectColor={projectColor}
-                  selected={selectedNoteIds.has(note.id)}
-                  selectionMode={isSelectionMode}
-                  onSelect={(noteId) =>
-                    handleNoteSelect(noteId, noteIndex, false)
-                  }
-                />
-              </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.2,
+                    ease: [0.16, 1, 0.3, 1],
+                    delay: virtualRow.index < 20 ? virtualRow.index * 0.03 : 0,
+                  }}
+                >
+                  <NoteCard
+                    note={note}
+                    projectName={currentProject?.name}
+                    projectColor={projectColor}
+                    selected={selectedNoteIds.has(note.id)}
+                    selectionMode={isSelectionMode}
+                    onSelect={(noteId) =>
+                      handleNoteSelect(noteId, noteIndex, false)
+                    }
+                  />
+                </motion.div>
+              </div>
             );
           })}
         </div>

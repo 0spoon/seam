@@ -115,6 +115,7 @@ export function InboxPage() {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 100,
     overscan: 10,
+    gap: 8,
   });
 
   return (
@@ -236,7 +237,7 @@ export function InboxPage() {
             const note = loadedNotes[virtualRow.index];
             const noteIndex = virtualRow.index;
             return (
-              <motion.div
+              <div
                 key={note.id}
                 ref={virtualizer.measureElement}
                 data-index={virtualRow.index}
@@ -247,13 +248,6 @@ export function InboxPage() {
                   right: 0,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: 0.2,
-                  ease: [0.16, 1, 0.3, 1],
-                  delay: virtualRow.index < 20 ? virtualRow.index * 0.03 : 0,
-                }}
                 onClick={(e) => {
                   if (e.shiftKey && isSelectionMode) {
                     e.preventDefault();
@@ -261,15 +255,25 @@ export function InboxPage() {
                   }
                 }}
               >
-                <NoteCard
-                  note={note}
-                  selected={selectedNoteIds.has(note.id)}
-                  selectionMode={isSelectionMode}
-                  onSelect={(id) =>
-                    handleNoteSelect(id, noteIndex, false)
-                  }
-                />
-              </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.2,
+                    ease: [0.16, 1, 0.3, 1],
+                    delay: virtualRow.index < 20 ? virtualRow.index * 0.03 : 0,
+                  }}
+                >
+                  <NoteCard
+                    note={note}
+                    selected={selectedNoteIds.has(note.id)}
+                    selectionMode={isSelectionMode}
+                    onSelect={(id) =>
+                      handleNoteSelect(id, noteIndex, false)
+                    }
+                  />
+                </motion.div>
+              </div>
             );
           })}
         </div>

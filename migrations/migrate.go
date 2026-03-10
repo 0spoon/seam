@@ -3,7 +3,6 @@ package migrations
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
 // Run applies all unapplied migrations from the given list to db.
@@ -67,28 +66,4 @@ func Run(db *sql.DB, migrations []Migration) error {
 	}
 
 	return nil
-}
-
-// HasColumn checks if a table has a specific column using PRAGMA table_info.
-func HasColumn(db *sql.DB, table, column string) bool {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return false
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cid int
-		var name, typeName string
-		var notNull int
-		var dfltValue sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &name, &typeName, &notNull, &dfltValue, &pk); err != nil {
-			continue
-		}
-		if strings.EqualFold(name, column) {
-			return true
-		}
-	}
-	return false
 }

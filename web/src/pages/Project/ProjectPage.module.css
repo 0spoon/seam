@@ -1,8 +1,54 @@
-.page {
-  padding: var(--space-4) var(--space-6);
-  max-width: 900px;
+.splitLayout {
+  display: flex;
   height: 100vh;
+  overflow: hidden;
+}
+
+.listPane {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-4) var(--space-6);
   overflow-y: auto;
+}
+
+/* Drag resize handle */
+.resizeHandle {
+  flex-shrink: 0;
+  width: 8px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+
+.resizeHandle::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.resizeHandleBar {
+  width: 1px;
+  height: 100%;
+  background: var(--border-subtle);
+  transition: width var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.resizeHandle:hover .resizeHandleBar,
+.resizeHandle:active .resizeHandleBar {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent-primary);
+}
+
+.previewPane {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-deep);
+  overflow: hidden;
 }
 
 .header {
@@ -104,9 +150,27 @@
   background: var(--bg-elevated);
 }
 
-/* Responsive: <640px tighter padding, room for hamburger */
+/* Responsive: stacked layout on narrow screens */
 @media (max-width: 640px) {
-  .page {
+  .splitLayout {
+    flex-direction: column;
+  }
+
+  .listPane {
     padding: 44px var(--space-3) var(--space-3);
+    flex: none;
+    max-width: none;
+    height: 50vh;
+    overflow-y: auto;
+  }
+
+  .resizeHandle {
+    display: none;
+  }
+
+  .previewPane {
+    border-top: 1px solid var(--border-subtle);
+    flex: 1;
+    overflow-y: auto;
   }
 }

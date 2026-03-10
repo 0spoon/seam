@@ -15,6 +15,7 @@
 
 .sidebar.collapsed {
   width: var(--sidebar-collapsed);
+  align-items: center;
 }
 
 /* Content fade for smooth collapse/expand.
@@ -27,8 +28,7 @@
 }
 
 .collapsed .fadeLabel {
-  opacity: 0;
-  transition: opacity 60ms var(--ease-in);
+  display: none;
 }
 
 .top {
@@ -38,6 +38,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  width: 100%;
+}
+
+.collapsed .top {
+  padding: var(--space-4) var(--space-2);
+  align-items: center;
 }
 
 .bottom {
@@ -45,6 +51,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  width: 100%;
+}
+
+.collapsed .bottom {
+  padding: var(--space-4) var(--space-2);
+  align-items: center;
 }
 
 .wordmark {
@@ -56,6 +68,11 @@
   margin-bottom: var(--space-2);
   text-align: left;
   white-space: nowrap;
+}
+
+.collapsed .wordmark {
+  text-align: center;
+  padding: var(--space-2) 0;
 }
 
 .wordmark:hover {
@@ -181,6 +198,27 @@
   border-left: 2px solid transparent;
   transition: background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
+  width: 100%;
+}
+
+.collapsed .navItem {
+  justify-content: center;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  gap: 0;
+  border-left: none;
+  border-radius: var(--radius-md);
+}
+
+.collapsed .navItem svg {
+  flex-shrink: 0;
+}
+
+.collapsed .navItem.active {
+  background: var(--bg-elevated);
+  border-left: none;
+  box-shadow: inset 0 0 0 1px var(--accent-primary);
 }
 
 .navItem:hover {
@@ -213,20 +251,35 @@
   flex-shrink: 0;
 }
 
+.collapsed .projectDot {
+  width: 8px;
+  height: 8px;
+}
+
 .section {
   margin-top: var(--space-2);
+  width: 100%;
+}
+
+.sectionDivider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--space-1) var(--space-2);
+  width: calc(100% - var(--space-4));
 }
 
 .sectionHidden {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--duration-fast) var(--ease-standard);
+  display: none;
 }
 
 .sectionHeaderRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.collapsed .sectionHeaderRow {
+  justify-content: center;
 }
 
 .sectionHeader {
@@ -314,6 +367,7 @@
   height: 1px;
   background: var(--border-subtle);
   margin: var(--space-2) 0;
+  width: 100%;
 }
 
 .userRow {
@@ -321,6 +375,11 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
+}
+
+.collapsed .userRow {
+  justify-content: center;
+  padding: var(--space-1) 0;
 }
 
 .avatar {
@@ -382,6 +441,12 @@
   animation: captureButtonPulse 4s var(--ease-standard) infinite;
 }
 
+.collapsed .captureButton {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+}
+
 .captureButton:hover {
   background: var(--accent-hover);
 }
@@ -421,6 +486,10 @@
   position: relative;
   display: flex;
   align-items: center;
+}
+
+.collapsed .projectRow {
+  justify-content: center;
 }
 
 .projectRow:hover .projectMenuTrigger {

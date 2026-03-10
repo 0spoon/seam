@@ -306,12 +306,12 @@ export function Sidebar() {
         {/* Search */}
         {collapsed ? (
           <button
-            className={styles.iconButton}
+            className={styles.navItem}
             onClick={() => navTo('/search')}
             title="Search notes"
             aria-label="Search notes"
           >
-            <Search size={16} />
+            <Search size={18} />
           </button>
         ) : (
           <form onSubmit={handleSearchSubmit} className={styles.searchForm}>
@@ -380,7 +380,7 @@ export function Sidebar() {
             title="Today's daily note"
             aria-label="Today's daily note"
           >
-            <CalendarDays size={16} />
+            <CalendarDays size={18} />
           </button>
         ) : (
           <button
@@ -399,7 +399,7 @@ export function Sidebar() {
           onClick={() => navTo('/')}
           title="Inbox"
         >
-          <Inbox size={16} />
+          <Inbox size={18} />
           <span className={styles.fadeLabel}>Inbox</span>
         </button>
 
@@ -409,7 +409,7 @@ export function Sidebar() {
           onClick={() => navTo('/ask')}
           title="Ask Seam"
         >
-          <MessageCircle size={16} />
+          <MessageCircle size={18} />
           <span className={styles.fadeLabel}>Ask Seam</span>
         </button>
 
@@ -419,7 +419,7 @@ export function Sidebar() {
           onClick={() => navTo('/graph')}
           title="Knowledge Graph"
         >
-          <Network size={16} />
+          <Network size={18} />
           <span className={styles.fadeLabel}>Graph</span>
         </button>
 
@@ -429,7 +429,7 @@ export function Sidebar() {
           onClick={() => navTo('/timeline')}
           title="Timeline"
         >
-          <Calendar size={16} />
+          <Calendar size={18} />
           <span className={styles.fadeLabel}>Timeline</span>
         </button>
 
@@ -439,20 +439,22 @@ export function Sidebar() {
           onClick={() => navTo('/review')}
           title="Garden"
         >
-          <Sprout size={16} />
+          <Sprout size={18} />
           <span className={styles.fadeLabel}>Garden</span>
         </button>
 
         {/* Projects */}
         <div className={styles.section}>
-          <div className={`${styles.sectionHeaderRow} ${styles.fadeLabel}`}>
-            <button
-              className={styles.sectionHeader}
-              onClick={() => setProjectsExpanded(!projectsExpanded)}
-            >
-              Projects
-            </button>
-            {!collapsed && (
+          {collapsed ? (
+            <div className={styles.sectionDivider} />
+          ) : (
+            <div className={styles.sectionHeaderRow}>
+              <button
+                className={styles.sectionHeader}
+                onClick={() => setProjectsExpanded(!projectsExpanded)}
+              >
+                Projects
+              </button>
               <button
                 className={styles.sectionAction}
                 onClick={() => setShowNewProject(!showNewProject)}
@@ -461,8 +463,8 @@ export function Sidebar() {
               >
                 <Plus size={12} />
               </button>
-            )}
-          </div>
+            </div>
+          )}
           {!collapsed && showNewProject && (
             <div className={styles.newProjectRow}>
               <input
@@ -579,14 +581,15 @@ export function Sidebar() {
         </div>
 
         {/* Tags */}
-        <div className={`${styles.section} ${collapsed ? styles.sectionHidden : ''}`}>
+        {!collapsed && (
+        <div className={styles.section}>
           <button
-            className={`${styles.sectionHeader} ${styles.fadeLabel}`}
+            className={styles.sectionHeader}
             onClick={() => setTagsExpanded(!tagsExpanded)}
           >
             Tags
           </button>
-          {!collapsed && tagsExpanded &&
+          {tagsExpanded &&
             tags.slice(0, 10).map((tag) => (
               <button
                 key={tag.name}
@@ -600,6 +603,7 @@ export function Sidebar() {
               </button>
             ))}
         </div>
+        )}
       </div>
 
       <div className={styles.bottom}>

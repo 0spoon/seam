@@ -16,6 +16,11 @@
   border-left-color: var(--accent-primary);
 }
 
+.card.previewing {
+  background: var(--bg-elevated);
+  border-left-color: var(--accent-primary);
+}
+
 .card:hover {
   background: var(--bg-elevated);
   border-left-color: var(--accent-primary);

@@ -18,17 +18,314 @@
   background-size: 24px 24px;
 }
 
+.canvas:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Hull canvas overlay -- sits on top of the graph but is non-interactive.
+   Very subtle fills so it doesn't obscure nodes.                      */
+/* ------------------------------------------------------------------ */
+.hullCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Top toolbar -- contextual actions bar                               */
+/* ------------------------------------------------------------------ */
+.toolbar {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  z-index: var(--z-panel);
+  pointer-events: none;
+}
+
+.toolbar > * {
+  pointer-events: auto;
+}
+
+.toolbarRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Small icon buttons used throughout the toolbar */
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.iconBtn:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.iconBtnActive {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: var(--accent-muted);
+}
+
+.filterBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Focus mode bar                                                      */
+/* ------------------------------------------------------------------ */
+.focusBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.focusBackBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.focusBackBtn:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.focusTitle {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.focusTitleAccent {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ */
+/* Node action bar (shown when a node is selected)                     */
+/* ------------------------------------------------------------------ */
+.nodeActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.nodeActionTitle {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.actionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  white-space: nowrap;
+}
+
+.actionBtn:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Search                                                              */
+/* ------------------------------------------------------------------ */
+.searchContainer {
+  position: relative;
+}
+
+.searchInputWrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px var(--space-2);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  min-width: 220px;
+}
+
+.searchInputWrapper:focus-within {
+  border-color: var(--accent-primary);
+}
+
+.searchInputWrapper svg {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  width: 160px;
+}
+
+.searchInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+.searchClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.searchClose:hover {
+  color: var(--text-primary);
+}
+
+.searchDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--bg-deep) 60%, transparent);
+  z-index: var(--z-dropdown);
+}
+
+.searchResult {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.searchResult:hover,
+.searchResultActive {
+  background: var(--bg-elevated);
+}
+
+.searchResultTitle {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.searchResultMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.searchResultDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.searchEmpty {
+  padding: var(--space-3);
+  text-align: center;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Filter panel (collapsible)                                          */
+/* ------------------------------------------------------------------ */
 .filterPanel {
   position: absolute;
-  top: var(--space-4);
-  left: var(--space-4);
+  top: calc(var(--space-3) + 40px);
+  left: var(--space-3);
   width: 240px;
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   z-index: var(--z-panel);
-  max-height: calc(100vh - var(--space-8));
+  max-height: calc(100vh - 80px);
   overflow-y: auto;
 }
 
@@ -148,6 +445,140 @@
   color: var(--text-primary);
 }
 
+/* ------------------------------------------------------------------ */
+/* Rich tooltip (card-style)                                           */
+/* ------------------------------------------------------------------ */
+.richTooltip {
+  position: absolute;
+  transform: translateX(-50%);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  z-index: var(--z-dropdown);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--bg-deep) 60%, transparent);
+  min-width: 160px;
+  max-width: 280px;
+}
+
+.tooltipTitle {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+
+.tooltipProject {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.tooltipProjectDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.tooltipTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.tooltipTag {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.tooltipMeta {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Minimap                                                             */
+/* ------------------------------------------------------------------ */
+.minimap {
+  position: absolute;
+  bottom: var(--space-4);
+  right: var(--space-4);
+  width: 140px;
+  height: 90px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  z-index: var(--z-panel);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/* Stats bar                                                           */
+/* ------------------------------------------------------------------ */
+.statsBar {
+  position: absolute;
+  bottom: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  z-index: var(--z-panel);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.statsDot {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--border-default);
+  flex-shrink: 0;
+}
+
+.orphanBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.orphanBtn:hover {
+  color: var(--accent-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Empty / Error / Loading states                                      */
+/* ------------------------------------------------------------------ */
 .emptyState {
   position: absolute;
   top: 50%;
@@ -165,45 +596,6 @@
 }
 
 .emptyDescription {
-  font-size: var(--font-size-sm);
-}
-
-.tooltip {
-  position: absolute;
-  transform: translateX(-50%);
-  padding: 5px 10px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  font-family: var(--font-ui);
-  font-size: var(--font-size-xs);
-  color: var(--text-primary);
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: var(--z-dropdown);
-  box-shadow: 0 4px 20px color-mix(in srgb, var(--bg-deep) 60%, transparent);
-}
-
-.minimap {
-  position: absolute;
-  bottom: var(--space-4);
-  right: var(--space-4);
-  width: 120px;
-  height: 80px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  z-index: var(--z-panel);
-  overflow: hidden;
-}
-
-.loading {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: var(--text-tertiary);
-  font-family: var(--font-ui);
   font-size: var(--font-size-sm);
 }
 
@@ -258,17 +650,31 @@
   border-width: 0;
 }
 
-.canvas:focus {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: -2px;
-}
-
-/* Responsive: <640px filter panel full-width overlay */
+/* ------------------------------------------------------------------ */
+/* Responsive                                                          */
+/* ------------------------------------------------------------------ */
 @media (max-width: 640px) {
   .filterPanel {
-    top: 44px;
+    top: calc(var(--space-3) + 40px);
     left: var(--space-2);
     right: var(--space-2);
     width: auto;
+  }
+
+  .toolbar {
+    left: var(--space-2);
+    right: var(--space-2);
+  }
+
+  .nodeActions {
+    display: none;
+  }
+
+  .focusTitle {
+    max-width: 120px;
+  }
+
+  .searchInput {
+    width: 100px;
   }
 }

@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { GraphPage } from './GraphPage';
 
 // Mock the API client.
 vi.mock('../../api/client', () => ({
   getGraph: vi.fn(),
+  getOrphanNotes: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock the stores.
@@ -34,6 +35,15 @@ vi.mock('cytoscape', () => {
     position: vi.fn(),
     style: vi.fn(),
   };
+  const mockCollection = {
+    forEach: vi.fn(),
+    show: vi.fn(),
+    hide: vi.fn(),
+    addClass: vi.fn().mockReturnThis(),
+    removeClass: vi.fn().mockReturnThis(),
+    not: vi.fn().mockReturnThis(),
+    filter: vi.fn().mockReturnThis(),
+  };
   const mockCy = {
     on: vi.fn(),
     one: vi.fn(),
@@ -42,19 +52,20 @@ vi.mock('cytoscape', () => {
     zoom: vi.fn(() => 1),
     center: vi.fn(),
     extent: vi.fn(() => ({ x1: 0, y1: 0, x2: 100, y2: 100 })),
+    pan: vi.fn(() => ({ x: 0, y: 0 })),
+    width: vi.fn(() => 800),
+    height: vi.fn(() => 600),
     getElementById: vi.fn(() => mockElement),
     add: vi.fn(),
-    nodes: vi.fn(() => ({
-      forEach: vi.fn(),
-      show: vi.fn(),
-    })),
-    edges: vi.fn(() => ({
-      forEach: vi.fn(),
-      show: vi.fn(),
-    })),
+    startBatch: vi.fn(),
+    endBatch: vi.fn(),
+    animate: vi.fn(),
+    nodes: vi.fn(() => mockCollection),
+    edges: vi.fn(() => mockCollection),
     elements: vi.fn(() => ({
       jsons: vi.fn(() => []),
       unselect: vi.fn(),
+      removeClass: vi.fn().mockReturnThis(),
     })),
   };
   const cytoscapeFn = vi.fn(() => mockCy);
@@ -111,7 +122,7 @@ describe('GraphPage', () => {
     });
   });
 
-  it('renders filter panel with projects and tags', async () => {
+  it('renders filter panel with projects and tags after toggling', async () => {
     (getGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
       nodes: [
         { id: 'n1', title: 'Test', project_id: 'p1', tags: ['go'], created_at: '2026-01-01T00:00:00Z', link_count: 1 },
@@ -123,6 +134,13 @@ describe('GraphPage', () => {
         <GraphPage />
       </MemoryRouter>,
     );
+
+    // Filter panel is collapsed by default. Click the filter toggle to open it.
+    await waitFor(() => {
+      expect(screen.getByTitle('Toggle filters')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('Toggle filters'));
+
     await waitFor(() => {
       expect(screen.getByText('Filters')).toBeInTheDocument();
       expect(screen.getByText('Project One')).toBeInTheDocument();
@@ -131,7 +149,7 @@ describe('GraphPage', () => {
     });
   });
 
-  it('renders reset button', async () => {
+  it('renders reset button after opening filters', async () => {
     (getGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
       nodes: [
         { id: 'n1', title: 'Test', tags: [], created_at: '2026-01-01T00:00:00Z', link_count: 0 },
@@ -143,12 +161,18 @@ describe('GraphPage', () => {
         <GraphPage />
       </MemoryRouter>,
     );
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Toggle filters')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('Toggle filters'));
+
     await waitFor(() => {
       expect(screen.getByText('Reset filters')).toBeInTheDocument();
     });
   });
 
-  it('renders date range inputs', async () => {
+  it('renders date range inputs after opening filters', async () => {
     (getGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
       nodes: [
         { id: 'n1', title: 'Test', tags: [], created_at: '2026-01-01T00:00:00Z', link_count: 0 },
@@ -160,6 +184,12 @@ describe('GraphPage', () => {
         <GraphPage />
       </MemoryRouter>,
     );
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Toggle filters')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('Toggle filters'));
+
     await waitFor(() => {
       expect(screen.getByLabelText('Since date')).toBeInTheDocument();
       expect(screen.getByLabelText('Until date')).toBeInTheDocument();
@@ -178,6 +208,42 @@ describe('GraphPage', () => {
     );
     await waitFor(() => {
       expect(getGraph).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('renders stats bar with note and link counts', async () => {
+    (getGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
+      nodes: [
+        { id: 'n1', title: 'Note A', tags: [], created_at: '2026-01-01T00:00:00Z', link_count: 1 },
+        { id: 'n2', title: 'Note B', tags: [], created_at: '2026-01-01T00:00:00Z', link_count: 1 },
+      ],
+      edges: [{ source: 'n1', target: 'n2' }],
+    });
+    render(
+      <MemoryRouter>
+        <GraphPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText('2 notes')).toBeInTheDocument();
+      expect(screen.getByText('1 link')).toBeInTheDocument();
+    });
+  });
+
+  it('renders search button', async () => {
+    (getGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
+      nodes: [
+        { id: 'n1', title: 'Test', tags: [], created_at: '2026-01-01T00:00:00Z', link_count: 0 },
+      ],
+      edges: [],
+    });
+    render(
+      <MemoryRouter>
+        <GraphPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTitle('Search nodes (/)')).toBeInTheDocument();
     });
   });
 });

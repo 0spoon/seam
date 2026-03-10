@@ -91,10 +91,10 @@ graph TD
         Queue["AI task queue"]
     end
 
-    Backend --> SQLite["SQLite (per-user)\nMetadata + FTS5"]
-    Backend --> Chroma["ChromaDB\nVector embeddings"]
-    Backend --> Ollama["Ollama\nLocal LLM"]
-    Backend --> FS["Filesystem\nPlain .md files"]
+    Backend --> SQLite["SQLite (per-user)<br/>Metadata + FTS5"]
+    Backend --> Chroma["ChromaDB<br/>Vector embeddings"]
+    Backend --> Ollama["Ollama<br/>Local LLM"]
+    Backend --> FS["Filesystem<br/>Plain .md files"]
 
     FS -.->|"fsnotify"| Backend
 

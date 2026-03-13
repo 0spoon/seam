@@ -140,8 +140,19 @@ func TestService_Refresh_Success(t *testing.T) {
 	tokens, err := svc.Refresh(ctx, resp.Tokens.RefreshToken)
 	require.NoError(t, err)
 	require.NotEmpty(t, tokens.AccessToken)
-	// Refresh token should be the same (not rotated).
-	require.Equal(t, resp.Tokens.RefreshToken, tokens.RefreshToken)
+	// Refresh token should be rotated (different from the original).
+	require.NotEqual(t, resp.Tokens.RefreshToken, tokens.RefreshToken)
+	require.NotEmpty(t, tokens.RefreshToken)
+
+	// Old refresh token should no longer work.
+	_, err = svc.Refresh(ctx, resp.Tokens.RefreshToken)
+	require.Error(t, err)
+	require.ErrorIs(t, err, auth.ErrInvalidCredentials)
+
+	// New refresh token should work.
+	tokens2, err := svc.Refresh(ctx, tokens.RefreshToken)
+	require.NoError(t, err)
+	require.NotEmpty(t, tokens2.AccessToken)
 }
 
 func TestService_Refresh_InvalidToken(t *testing.T) {

@@ -179,8 +179,8 @@ func (s *Service) Login(ctx context.Context, req LoginReq) (*AuthResponse, error
 	}, nil
 }
 
-// Refresh issues a new access token using a valid refresh token.
-// The refresh token itself is NOT rotated.
+// Refresh issues a new access token and rotates the refresh token.
+// The old refresh token is invalidated and a new one is issued.
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	if refreshToken == "" {
 		return nil, fmt.Errorf("auth.Service.Refresh: %w", ErrInvalidCredentials)
@@ -196,7 +196,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	}
 
 	if time.Now().UTC().After(expiresAt) {
-		// Token expired -- delete it and reject.
 		_ = s.store.DeleteRefreshToken(ctx, tokenHash)
 		return nil, fmt.Errorf("auth.Service.Refresh: %w", ErrTokenExpired)
 	}
@@ -206,15 +205,15 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		return nil, fmt.Errorf("auth.Service.Refresh: %w", err)
 	}
 
-	accessToken, err := s.jwtManager.GenerateAccessToken(user.ID, user.Username)
+	// Rotate: delete the old refresh token and issue a new one.
+	_ = s.store.DeleteRefreshToken(ctx, tokenHash)
+
+	tokens, err := s.generateTokenPair(ctx, user)
 	if err != nil {
 		return nil, fmt.Errorf("auth.Service.Refresh: %w", err)
 	}
 
-	return &TokenPair{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken, // same refresh token
-	}, nil
+	return tokens, nil
 }
 
 // GetMe retrieves the authenticated user's profile.
@@ -258,6 +257,13 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, n
 
 	if err := s.store.UpdateUserPassword(ctx, userID, string(hash)); err != nil {
 		return fmt.Errorf("auth.Service.ChangePassword: %w", err)
+	}
+
+	// Revoke all existing refresh tokens so compromised sessions cannot
+	// continue using the old password.
+	if err := s.store.DeleteRefreshTokensByUser(ctx, userID); err != nil {
+		s.logger.Error("failed to revoke tokens after password change", "user_id", userID, "error", err)
+		return fmt.Errorf("auth.Service.ChangePassword: revoke tokens: %w", err)
 	}
 
 	s.logger.Info("password changed", "user_id", userID)

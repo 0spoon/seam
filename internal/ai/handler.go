@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/time/rate"
@@ -41,7 +42,13 @@ type Handler struct {
 
 	// Per-user rate limiters for AI endpoints.
 	limiterMu sync.Mutex
-	limiters  map[string]*rate.Limiter
+	limiters  map[string]*userLimiter
+}
+
+// userLimiter wraps a rate.Limiter with a last-seen timestamp for eviction.
+type userLimiter struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 // NewHandler creates a new AI Handler.
@@ -59,7 +66,7 @@ func NewHandler(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{
+	h := &Handler{
 		queue:       queue,
 		chatSvc:     chatSvc,
 		synthesizer: synthesizer,
@@ -69,20 +76,39 @@ func NewHandler(
 		suggester:   suggester,
 		dbManager:   dbManager,
 		logger:      logger,
-		limiters:    make(map[string]*rate.Limiter),
+		limiters:    make(map[string]*userLimiter),
 	}
+	go h.evictStaleLimiters()
+	return h
 }
 
 // getLimiter returns the per-user rate limiter, creating one if necessary.
 func (h *Handler) getLimiter(userID string) *rate.Limiter {
 	h.limiterMu.Lock()
 	defer h.limiterMu.Unlock()
-	if lim, ok := h.limiters[userID]; ok {
-		return lim
+	if entry, ok := h.limiters[userID]; ok {
+		entry.lastSeen = time.Now()
+		return entry.limiter
 	}
 	lim := rate.NewLimiter(defaultRateLimit, defaultRateBurst)
-	h.limiters[userID] = lim
+	h.limiters[userID] = &userLimiter{limiter: lim, lastSeen: time.Now()}
 	return lim
+}
+
+// evictStaleLimiters removes limiters that haven't been seen in 10 minutes.
+func (h *Handler) evictStaleLimiters() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		h.limiterMu.Lock()
+		cutoff := time.Now().Add(-10 * time.Minute)
+		for uid, entry := range h.limiters {
+			if entry.lastSeen.Before(cutoff) {
+				delete(h.limiters, uid)
+			}
+		}
+		h.limiterMu.Unlock()
+	}
 }
 
 // rateLimitMiddleware enforces per-user rate limiting on AI endpoints.
@@ -239,6 +265,11 @@ func (h *Handler) synthesizeStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Disable the global WriteTimeout for this SSE stream. Each write
+	// resets the deadline so idle connections still get cleaned up.
+	rc := http.NewResponseController(w)
+	rc.SetWriteDeadline(time.Time{})
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -248,6 +279,9 @@ func (h *Handler) synthesizeStream(w http.ResponseWriter, r *http.Request) {
 	tokenCh, errCh := h.synthesizer.SynthesizeStream(r.Context(), userID, payload)
 
 	for token := range tokenCh {
+		// Reset write deadline for each token to allow long-running streams
+		// while still detecting dead connections.
+		rc.SetWriteDeadline(time.Now().Add(30 * time.Second))
 		data, _ := json.Marshal(map[string]string{"token": token})
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()

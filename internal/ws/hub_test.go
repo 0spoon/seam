@@ -27,7 +27,10 @@ func setupTestServer(t *testing.T, hub *Hub) *httptest.Server {
 			return
 		}
 		userID := r.URL.Query().Get("user")
-		hub.Register(userID, conn)
+		if err := hub.Register(userID, conn); err != nil {
+			conn.Close(websocket.StatusTryAgainLater, "too many connections")
+			return
+		}
 		defer hub.Unregister(userID, conn)
 		// Read loop keeps the connection alive and detects client disconnect.
 		for {

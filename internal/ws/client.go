@@ -93,7 +93,11 @@ func ServeWS(hub *Hub, jwtManager *auth.JWTManager, handler MessageHandler, allo
 		logger.Info("ws.ServeWS: client authenticated")
 
 		// Step 3: Register and run the read loop with keepalive.
-		hub.Register(userID, conn)
+		if err := hub.Register(userID, conn); err != nil {
+			logger.Warn("ws.ServeWS: too many connections", "error", err)
+			conn.Close(websocket.StatusTryAgainLater, "too many connections")
+			return
+		}
 		defer hub.Unregister(userID, conn)
 
 		// Start ping/pong keepalive. The coder/websocket library supports

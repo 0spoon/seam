@@ -200,10 +200,11 @@ func New(cfg Config) *Server {
 
 	return &Server{
 		httpServer: &http.Server{
-			Addr:        cfg.Listen,
-			Handler:     r,
-			ReadTimeout: 15 * time.Second,
-			IdleTimeout: 60 * time.Second,
+			Addr:         cfg.Listen,
+			Handler:      r,
+			ReadTimeout:  15 * time.Second,
+			WriteTimeout: 30 * time.Second,
+			IdleTimeout:  60 * time.Second,
 		},
 		router: r,
 		logger: cfg.Logger,

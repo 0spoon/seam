@@ -15,6 +15,10 @@ import (
 // writeTimeout is the maximum duration for writing a message to a connection.
 const writeTimeout = 5 * time.Second
 
+// maxConnsPerUser is the maximum number of concurrent WebSocket connections
+// allowed per user. Additional connections are rejected.
+const maxConnsPerUser = 10
+
 // Message represents a WebSocket message.
 type Message struct {
 	Type    string          `json:"type"`
@@ -39,19 +43,27 @@ func NewHub(logger *slog.Logger) *Hub {
 	}
 }
 
+// ErrTooManyConns is returned when a user exceeds the per-user connection limit.
+var ErrTooManyConns = fmt.Errorf("too many WebSocket connections")
+
 // Register adds a WebSocket connection for the given user.
-func (h *Hub) Register(userID string, conn *websocket.Conn) {
+// Returns ErrTooManyConns if the user already has maxConnsPerUser connections.
+func (h *Hub) Register(userID string, conn *websocket.Conn) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if h.conns[userID] == nil {
 		h.conns[userID] = make(map[*websocket.Conn]struct{})
 	}
+	if len(h.conns[userID]) >= maxConnsPerUser {
+		return ErrTooManyConns
+	}
 	h.conns[userID][conn] = struct{}{}
 	h.logger.Debug("ws.Hub.Register: connection registered",
 		"user_id", userID,
 		"user_conns", len(h.conns[userID]),
 	)
+	return nil
 }
 
 // Unregister removes a WebSocket connection for the given user.

@@ -105,6 +105,20 @@ func (s *Service) Get(ctx context.Context, userID, projectID string) (*Project, 
 	return p, nil
 }
 
+// GetBySlug retrieves a project by slug for the given user.
+func (s *Service) GetBySlug(ctx context.Context, userID, slug string) (*Project, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("project.Service.GetBySlug: open db: %w", err)
+	}
+
+	p, err := s.store.GetBySlug(ctx, db, slug)
+	if err != nil {
+		return nil, fmt.Errorf("project.Service.GetBySlug: %w", err)
+	}
+	return p, nil
+}
+
 // List returns all projects for the given user.
 func (s *Service) List(ctx context.Context, userID string) ([]*Project, error) {
 	db, err := s.userDBManager.Open(ctx, userID)

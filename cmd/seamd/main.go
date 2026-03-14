@@ -15,12 +15,14 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/auth"
 	"github.com/katata/seam/internal/capture"
 	"github.com/katata/seam/internal/chat"
 	"github.com/katata/seam/internal/config"
 	"github.com/katata/seam/internal/graph"
+	seamMCP "github.com/katata/seam/internal/mcp"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/review"
@@ -583,6 +585,22 @@ func run() error {
 	reviewSvc := review.NewService(userDBMgr, graphSvc, logger)
 	reviewHandler := review.NewHandler(reviewSvc, logger)
 
+	// Create agent memory / MCP components.
+	agentStore := agent.NewSQLStore()
+	agentSvc := agent.NewService(agent.ServiceConfig{
+		Store:          agentStore,
+		NoteService:    noteSvc,
+		ProjectService: projectSvc,
+		SearchService:  searchSvc,
+		UserDBManager:  userDBMgr,
+		Logger:         logger,
+	})
+	mcpSrv := seamMCP.New(seamMCP.Config{
+		AgentService: agentSvc,
+		Logger:       logger,
+	})
+	mcpHandler := mcpSrv.Handler(jwtMgr)
+
 	// Create and start the HTTP server.
 	srv := server.New(server.Config{
 		Listen:           cfg.Listen,
@@ -603,6 +621,7 @@ func run() error {
 		ChatHandler:      chatHistoryHandler,
 		ReviewHandler:    reviewHandler,
 		WSMessageHandler: wsHandler,
+		MCPHandler:       mcpHandler,
 	})
 
 	// Start server in a goroutine.

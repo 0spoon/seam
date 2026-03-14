@@ -55,6 +55,7 @@ type Config struct {
 	ChatHandler      *chat.Handler
 	ReviewHandler    *review.Handler
 	WSMessageHandler ws.MessageHandler
+	MCPHandler       http.Handler // MCP endpoint handler (optional, mounts at /api/mcp)
 }
 
 // New creates a new Server with all routes and middleware configured.
@@ -77,8 +78,8 @@ func New(cfg Config) *Server {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   corsOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		ExposedHeaders:   []string{"X-Request-ID", "X-Total-Count"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "Mcp-Session-Id"},
+		ExposedHeaders:   []string{"X-Request-ID", "X-Total-Count", "Mcp-Session-Id"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -171,6 +172,11 @@ func New(cfg Config) *Server {
 			})
 		}
 	})
+
+	// MCP endpoint (auth handled internally via mcp-go's HTTPContextFunc).
+	if cfg.MCPHandler != nil {
+		r.Handle("/api/mcp", cfg.MCPHandler)
+	}
 
 	// C-6: Serve the production frontend from web/dist if configured.
 	if cfg.WebDistDir != "" {

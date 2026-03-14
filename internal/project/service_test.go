@@ -223,6 +223,33 @@ func TestService_Delete_InvalidCascade(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestService_GetBySlug_Success(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, testUserID, "Lookup Project", "desc")
+	require.NoError(t, err)
+
+	got, err := svc.GetBySlug(ctx, testUserID, "lookup-project")
+	require.NoError(t, err)
+	require.Equal(t, created.ID, got.ID)
+	require.Equal(t, "Lookup Project", got.Name)
+	require.Equal(t, "lookup-project", got.Slug)
+}
+
+func TestService_GetBySlug_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	// Ensure the user DB is created so Open succeeds.
+	_, err := svc.Create(ctx, testUserID, "Existing", "")
+	require.NoError(t, err)
+
+	_, err = svc.GetBySlug(ctx, testUserID, "nonexistent-slug")
+	require.Error(t, err)
+	require.ErrorIs(t, err, project.ErrNotFound)
+}
+
 func TestSlugify(t *testing.T) {
 	tests := []struct {
 		name     string

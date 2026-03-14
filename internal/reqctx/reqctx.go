@@ -23,6 +23,12 @@ func UserIDFromContext(ctx context.Context) string {
 	return v
 }
 
+// UsernameFromContext extracts the username from the request context.
+func UsernameFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(UsernameKey).(string)
+	return v
+}
+
 // RequestIDFromContext extracts the request ID from the request context.
 func RequestIDFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(RequestIDKey).(string)

@@ -20,11 +20,21 @@ func TestServerDB(t *testing.T) *sql.DB {
 	return OpenTestDB(t, migrations.ServerSQL)
 }
 
-// TestUserDB returns an isolated in-memory SQLite database with per-user
-// seam.db migrations applied.
+// TestUserDB returns an isolated in-memory SQLite database with all per-user
+// seam.db migrations applied. Runs migrations in order so new tables
+// (e.g., agent_sessions) are available in tests.
 func TestUserDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return OpenTestDB(t, migrations.UserSQL)
+
+	db := OpenTestDB(t, migrations.UserSQL)
+	for _, m := range migrations.UserMigrations() {
+		if m.Version <= 1 {
+			continue // already applied by OpenTestDB
+		}
+		_, err := db.Exec(m.SQL)
+		require.NoError(t, err)
+	}
+	return db
 }
 
 // TestDataDir returns a temporary directory suitable for use as a data_dir

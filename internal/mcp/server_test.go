@@ -35,6 +35,7 @@ type mockAgentService struct {
 	memoryAppendFn          func(ctx context.Context, userID, category, name, content string) error
 	memoryListFn            func(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	memoryDeleteFn          func(ctx context.Context, userID, category, name string) error
+	contextGatherFn         func(ctx context.Context, userID, query string, maxChars int) ([]agent.KnowledgeHit, error)
 }
 
 func (m *mockAgentService) SessionStart(ctx context.Context, userID, name string, maxContextChars int) (*agent.Briefing, error) {
@@ -112,6 +113,13 @@ func (m *mockAgentService) MemoryDelete(ctx context.Context, userID, category, n
 		panic("mockAgentService.MemoryDelete not implemented")
 	}
 	return m.memoryDeleteFn(ctx, userID, category, name)
+}
+
+func (m *mockAgentService) ContextGather(ctx context.Context, userID, query string, maxChars int) ([]agent.KnowledgeHit, error) {
+	if m.contextGatherFn == nil {
+		return []agent.KnowledgeHit{}, nil
+	}
+	return m.contextGatherFn(ctx, userID, query, maxChars)
 }
 
 // newJWTManager creates a JWTManager for testing.

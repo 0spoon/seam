@@ -369,13 +369,18 @@ func (s *Server) handleContextGather(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: query"), nil
 	}
-	_ = req.GetInt("max_context_chars", 3000)
+	maxChars := req.GetInt("max_context_chars", 3000)
+	// scope is accepted but not used for filtering in v1 (requires ChromaDB metadata changes)
 	_ = req.GetString("scope", "all")
 
-	// For v1, context_gather delegates to memory search + budget truncation.
-	// Full implementation will use semantic search with budget.
-	_ = userID
-	_ = query
+	results, err := s.cfg.AgentService.ContextGather(ctx, userID, query, maxChars)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("context_gather failed: %v", err)), nil
+	}
 
-	return mcp.NewToolResultText(`{"results":[],"message":"context_gather: not yet fully implemented"}`), nil
+	data, jsonErr := json.Marshal(map[string]any{"results": results})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
 }

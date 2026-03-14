@@ -31,6 +31,8 @@ type AgentService interface {
 	MemoryAppend(ctx context.Context, userID, category, name, content string) error
 	MemoryList(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	MemoryDelete(ctx context.Context, userID, category, name string) error
+
+	ContextGather(ctx context.Context, userID, query string, maxChars int) ([]agent.KnowledgeHit, error)
 }
 
 // NoteReader defines the interface for reading notes, used by notes_read tool.

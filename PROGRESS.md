@@ -17,6 +17,7 @@
   - Session lifecycle: SessionStart (with parent resolution + orphan reconciliation), SessionEnd, SessionList
   - Session notes: SessionPlanSet, SessionProgressUpdate, SessionContextSet
   - Memory CRUD: MemoryWrite, MemoryRead, MemoryAppend, MemoryList, MemoryDelete
+  - ContextGather: budgeted search with semantic-to-FTS fallback and truncation
   - Agent-memory project auto-creation with per-user caching
   - Knowledge search with semantic-to-FTS fallback
 - `internal/agent/briefing.go` - Budget allocation with proportional redistribution, word-boundary truncation
@@ -25,8 +26,11 @@
 ## Phase 3: MCP Server + Tools
 **Status: COMPLETE**
 
-- `internal/mcp/server.go` - MCP server with auth middleware (WithHTTPContextFunc for JWT), logging middleware, tool handler middleware
-- `internal/mcp/tools.go` - 12 tools registered: session_start, session_plan_set, session_progress_update, session_context_set, session_end, session_list, memory_read, memory_write, memory_append, memory_list, memory_delete, context_gather
+- `internal/mcp/server.go` - MCP server with auth middleware (WithHTTPContextFunc for JWT), logging middleware, tool handler middleware; AgentService interface includes ContextGather
+- `internal/mcp/tools.go` - 12 tools registered and fully implemented:
+  - Session tools: session_start, session_plan_set, session_progress_update, session_context_set, session_end, session_list
+  - Memory tools: memory_read, memory_write, memory_append, memory_list, memory_delete
+  - Context: context_gather (uses service's searchKnowledge with budget truncation)
 - `internal/mcp/logging.go` - Logging middleware for tool calls
 - `internal/server/server.go` - MCPHandler field in Config, mounted at /api/mcp, CORS includes Mcp-Session-Id
 - All MCP server and tool tests pass
@@ -41,7 +45,14 @@
   - `mcpSrv.Handler(jwtMgr)` passed as MCPHandler to server.Config
 - Full build succeeds, all tests pass
 
-## Notes
-- `context_gather` tool returns a stub response (deferred to v2)
-- notes_search, notes_read, notes_list, notes_create MCP tools not yet implemented (not in current test expectations)
-- Tool call audit logging to agent_tool_calls table is slog-only (persistence deferred)
+## Test Summary
+- **160+ tests** across all packages (agent store, service, types, briefing, MCP server, tools, logging)
+- All tests passing
+
+## Deferred to v2
+- `AIQueue`/embed task enqueuing in agent service (watcher suppression means agent notes won't auto-embed; explicit enqueue needed for scope filtering)
+- Embedder metadata for scope filtering (`agent:true`, `memory_type`, `session_name`)
+- ChromaDB `where` filter support for `scope: agent|user` vs `scope: all`
+- notes_search, notes_read, notes_list, notes_create MCP tools (not in current test expectations)
+- Tool call audit persistence to agent_tool_calls table (currently slog-only)
+- WebSocket events for agent note changes (real-time UI updates)

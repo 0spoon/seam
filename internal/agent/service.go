@@ -407,6 +407,23 @@ func (s *Service) MemoryDelete(ctx context.Context, userID, category, name strin
 	return nil
 }
 
+// --- Context Gathering ---
+
+// ContextGather searches for relevant context across notes, returning results
+// truncated to the character budget.
+func (s *Service) ContextGather(ctx context.Context, userID, query string, maxChars int) ([]KnowledgeHit, error) {
+	if maxChars <= 0 {
+		maxChars = 3000
+	}
+
+	hits := s.searchKnowledge(ctx, userID, query, 10)
+	if len(hits) == 0 {
+		return []KnowledgeHit{}, nil
+	}
+
+	return truncateKnowledge(hits, maxChars), nil
+}
+
 // --- Internal Helpers ---
 
 // upsertSessionNote creates or updates a session note (plan, context).

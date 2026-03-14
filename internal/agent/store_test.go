@@ -824,6 +824,49 @@ func TestSQLStore_ReconcileChildren_DeepHierarchy(t *testing.T) {
 	require.Equal(t, parentA.ID, gotAB.ParentSessionID)
 }
 
+func TestSQLStore_ReconcileChildren_SkipsGrandchildren(t *testing.T) {
+	db := testutil.TestUserDB(t)
+	store := NewSQLStore()
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Create an orphan child and an orphan grandchild before the parent.
+	orphanChild := &Session{
+		ID: "01TESTGRAND0000000000001", Name: "root/child",
+		Status: StatusActive, CreatedAt: now, UpdatedAt: now,
+	}
+	orphanGrandchild := &Session{
+		ID: "01TESTGRAND0000000000002", Name: "root/child/grandchild",
+		Status: StatusActive, CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, store.CreateSession(ctx, db, orphanChild))
+	require.NoError(t, store.CreateSession(ctx, db, orphanGrandchild))
+
+	// Create the parent "root".
+	parent := &Session{
+		ID: "01TESTGRAND0000000000003", Name: "root",
+		Status: StatusActive, CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+	}
+	require.NoError(t, store.CreateSession(ctx, db, parent))
+
+	// Reconcile "root" -- should only pick up direct child "root/child",
+	// NOT grandchild "root/child/grandchild".
+	reconciled, err := store.ReconcileChildren(ctx, db, parent.ID, parent.Name)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), reconciled, "should only reconcile direct child, not grandchild")
+
+	// Verify child is linked to parent.
+	gotChild, err := store.GetSession(ctx, db, orphanChild.ID)
+	require.NoError(t, err)
+	require.Equal(t, parent.ID, gotChild.ParentSessionID)
+
+	// Verify grandchild is NOT linked to parent (still orphaned).
+	gotGrandchild, err := store.GetSession(ctx, db, orphanGrandchild.ID)
+	require.NoError(t, err)
+	require.Empty(t, gotGrandchild.ParentSessionID, "grandchild should not be reconciled to grandparent")
+}
+
 func TestSQLStore_LogToolCall_AllFields(t *testing.T) {
 	db := testutil.TestUserDB(t)
 	store := NewSQLStore()

@@ -407,6 +407,17 @@ func (s *Service) MemoryDelete(ctx context.Context, userID, category, name strin
 	return nil
 }
 
+// --- Tool Call Audit ---
+
+// LogToolCall persists a tool call audit record to the user's database.
+func (s *Service) LogToolCall(ctx context.Context, userID string, tc *ToolCallRecord) error {
+	db, err := s.cfg.UserDBManager.Open(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("agent.Service.LogToolCall: open db: %w", err)
+	}
+	return s.cfg.Store.LogToolCall(ctx, db, tc)
+}
+
 // --- Context Gathering ---
 
 // ContextGather searches for relevant context across notes, returning results

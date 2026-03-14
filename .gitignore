@@ -42,5 +42,6 @@ Thumbs.db
 
 # Misc
 .opencode/
+opencode.jsonc
 *.log
 tmp/

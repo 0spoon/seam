@@ -125,8 +125,7 @@ func TestSessionStart_ServiceError_ReturnsError(t *testing.T) {
 		"name": "fail-session",
 	})
 	require.True(t, result.IsError)
-	require.Contains(t, textOf(t, result), "session_start failed")
-	require.Contains(t, textOf(t, result), "database connection lost")
+	require.Contains(t, textOf(t, result), "session_start: internal error")
 }
 
 func TestSessionStart_CustomMaxContextChars_PassedToService(t *testing.T) {
@@ -363,8 +362,7 @@ func TestSessionEnd_ServiceError_ReturnsError(t *testing.T) {
 		"findings":     "too long",
 	})
 	require.True(t, result.IsError)
-	require.Contains(t, textOf(t, result), "session_end failed")
-	require.Contains(t, textOf(t, result), "findings exceed maximum length")
+	require.Contains(t, textOf(t, result), "session_end: findings exceed maximum length")
 }
 
 // ---------------------------------------------------------------------------
@@ -497,8 +495,7 @@ func TestMemoryRead_NotFound_ReturnsError(t *testing.T) {
 		"name":     "gone",
 	})
 	require.True(t, result.IsError)
-	require.Contains(t, textOf(t, result), "memory_read failed")
-	require.Contains(t, textOf(t, result), "not found")
+	require.Contains(t, textOf(t, result), "memory_read: not found")
 }
 
 // ---------------------------------------------------------------------------
@@ -601,8 +598,7 @@ func TestMemoryAppend_ServiceError_ReturnsError(t *testing.T) {
 		"content":  "more data",
 	})
 	require.True(t, result.IsError)
-	require.Contains(t, textOf(t, result), "memory_append failed")
-	require.Contains(t, textOf(t, result), "disk full")
+	require.Contains(t, textOf(t, result), "memory_append: internal error")
 }
 
 // ---------------------------------------------------------------------------
@@ -696,8 +692,7 @@ func TestMemoryDelete_NotFound_ReturnsError(t *testing.T) {
 		"name":     "gone",
 	})
 	require.True(t, result.IsError)
-	require.Contains(t, textOf(t, result), "memory_delete failed")
-	require.Contains(t, textOf(t, result), "not found")
+	require.Contains(t, textOf(t, result), "memory_delete: not found")
 }
 
 // ---------------------------------------------------------------------------

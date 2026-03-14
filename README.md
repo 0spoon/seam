@@ -447,6 +447,74 @@ Seam's frontend follows the **"Dark Cartography"** aesthetic -- warm, precise, a
 
 ---
 
+## MCP Agent Memory
+
+Seam exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp`, giving AI agents persistent, structured long-term memory. Agents use standard MCP tools to track sessions, store domain knowledge, and search across their memory and the user's knowledge base.
+
+### Connecting
+
+Any MCP-compatible client (Claude Code, Cursor, etc.) can connect via Streamable HTTP:
+
+```json
+{
+  "mcpServers": {
+    "seam": {
+      "url": "http://localhost:8080/api/mcp",
+      "headers": {
+        "Authorization": "Bearer <jwt_access_token>"
+      }
+    }
+  }
+}
+```
+
+Authentication uses the same JWT tokens as the REST API. Obtain a token via `POST /api/auth/login`.
+
+### Available Tools
+
+**Session Management** -- track agent working sessions with plans, progress, and findings.
+
+| Tool | Description |
+|---|---|
+| `session_start` | Start or resume a named session. Returns a briefing with budgeted context. |
+| `session_plan_set` | Set/update the session plan (markdown). |
+| `session_progress_update` | Log task progress (pending/in_progress/completed/blocked). |
+| `session_context_set` | Set/update session context notes. |
+| `session_end` | End a session with compact findings (max 1500 chars). |
+| `session_list` | List sessions filtered by status. |
+
+**Knowledge Memory** -- persistent domain knowledge that survives across sessions.
+
+| Tool | Description |
+|---|---|
+| `memory_write` | Create or update a knowledge note by category and name. |
+| `memory_read` | Read a knowledge note. |
+| `memory_append` | Append content to an existing note. |
+| `memory_list` | List knowledge notes, optionally filtered by category. |
+| `memory_delete` | Delete a knowledge note. |
+
+**Context Gathering** -- budgeted search across all notes.
+
+| Tool | Description |
+|---|---|
+| `context_gather` | Search notes with a character budget. Returns ranked snippets. |
+
+### Hierarchical Sessions
+
+Sessions form a tree using `/` as a path separator. Child sessions automatically see their parent's plan and completed siblings' findings in their briefing:
+
+```
+refactor-auth                    <- main agent
+refactor-auth/analyze            <- subagent A (sees parent plan)
+refactor-auth/implement          <- subagent B (sees parent plan + A's findings)
+```
+
+### Rate Limiting
+
+MCP tool calls are rate-limited to 60 requests per minute per user with a burst allowance of 20.
+
+---
+
 ## Documentation
 
 | Document | Description |

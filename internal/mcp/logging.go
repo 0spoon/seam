@@ -2,21 +2,25 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/oklog/ulid/v2"
 
+	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/reqctx"
 )
 
-// ToolCallLogger defines the interface for logging tool calls.
+// ToolCallLogger persists tool call audit records to the database.
 type ToolCallLogger interface {
-	LogToolCall(ctx context.Context, userID, sessionID, toolName, arguments, result, errMsg string, durationMs int64) error
+	LogToolCall(ctx context.Context, userID string, tc *agent.ToolCallRecord) error
 }
 
-// loggingMiddleware returns a tool handler middleware that logs every tool call.
+// loggingMiddleware returns a tool handler middleware that logs every tool call
+// via structured logging and persists the audit record to the database.
 func (s *Server) loggingMiddleware() mcpserver.ToolHandlerMiddleware {
 	return func(next mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc {
 		return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -47,10 +51,13 @@ func (s *Server) loggingMiddleware() mcpserver.ToolHandlerMiddleware {
 					}
 				}
 			} else if result != nil {
-				// Extract text from content.
+				// Extract text from content (truncate for logging).
 				for _, c := range result.Content {
 					if tc, ok := c.(mcp.TextContent); ok {
 						resultText = tc.Text
+						if len(resultText) > 1000 {
+							resultText = resultText[:1000] + "..."
+						}
 						break
 					}
 				}
@@ -63,10 +70,24 @@ func (s *Server) loggingMiddleware() mcpserver.ToolHandlerMiddleware {
 				"error", errText,
 			)
 
-			// Log to structured store if available.
-			_ = argsJSON
-			_ = resultText
-			_ = duration
+			// Persist to database if logger is available.
+			if s.cfg.ToolCallLogger != nil && userID != "" {
+				tc := &agent.ToolCallRecord{
+					ID:         ulid.MustNew(ulid.Now(), rand.Reader).String(),
+					ToolName:   req.Params.Name,
+					Arguments:  argsJSON,
+					Result:     resultText,
+					Error:      errText,
+					DurationMs: duration,
+					CreatedAt:  time.Now().UTC(),
+				}
+				if logErr := s.cfg.ToolCallLogger.LogToolCall(ctx, userID, tc); logErr != nil {
+					s.logger.Warn("failed to persist tool call audit",
+						"tool", req.Params.Name,
+						"error", logErr,
+					)
+				}
+			}
 
 			return result, err
 		}

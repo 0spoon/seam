@@ -596,8 +596,9 @@ func run() error {
 		Logger:         logger,
 	})
 	mcpSrv := seamMCP.New(seamMCP.Config{
-		AgentService: agentSvc,
-		Logger:       logger,
+		AgentService:   agentSvc,
+		ToolCallLogger: agentSvc,
+		Logger:         logger,
 	})
 	mcpHandler := mcpSrv.Handler(jwtMgr)
 

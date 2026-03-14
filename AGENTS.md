@@ -14,6 +14,7 @@ make run                  # build and run the server
 make dev-web              # run React dev server (Vite, port 5173, proxies /api to :8080)
 make clean                # remove build artifacts + web/dist
 ```
+Note: When working on tasks, use `seam` MCP tools to track session progress and store memories.
 
 ## Testing
 

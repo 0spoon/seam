@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -10,6 +11,15 @@ import (
 
 	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/reqctx"
+)
+
+// Input validation limits.
+const (
+	maxCategoryLen = 100
+	maxNameLen     = 200
+	maxContentLen  = 512 * 1024 // 512 KB
+	maxQueryLen    = 10 * 1024  // 10 KB
+	maxSessionList = 100
 )
 
 // registerTools registers all MCP tools on the server.
@@ -150,7 +160,7 @@ func (s *Server) handleSessionStart(ctx context.Context, req mcp.CallToolRequest
 
 	briefing, err := s.cfg.AgentService.SessionStart(ctx, userID, name, maxChars)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session_start failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("session_start", err)), nil
 	}
 
 	data, jsonErr := json.Marshal(briefing)
@@ -170,10 +180,13 @@ func (s *Server) handleSessionPlanSet(ctx context.Context, req mcp.CallToolReque
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: content"), nil
 	}
+	if len(content) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("content too long: %d bytes exceeds limit of %d", len(content), maxContentLen)), nil
+	}
 
 	noteID, err := s.cfg.AgentService.SessionPlanSet(ctx, userID, sessionName, content)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session_plan_set failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("session_plan_set", err)), nil
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, noteID)), nil
@@ -197,7 +210,7 @@ func (s *Server) handleSessionProgressUpdate(ctx context.Context, req mcp.CallTo
 
 	noteID, err := s.cfg.AgentService.SessionProgressUpdate(ctx, userID, sessionName, task, status, notes)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session_progress_update failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("session_progress_update", err)), nil
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, noteID)), nil
@@ -213,10 +226,13 @@ func (s *Server) handleSessionContextSet(ctx context.Context, req mcp.CallToolRe
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: content"), nil
 	}
+	if len(content) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("content too long: %d bytes exceeds limit of %d", len(content), maxContentLen)), nil
+	}
 
 	noteID, err := s.cfg.AgentService.SessionContextSet(ctx, userID, sessionName, content)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session_context_set failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("session_context_set", err)), nil
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, noteID)), nil
@@ -234,7 +250,7 @@ func (s *Server) handleSessionEnd(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	if err := s.cfg.AgentService.SessionEnd(ctx, userID, sessionName, findings); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session_end failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("session_end", err)), nil
 	}
 
 	return mcp.NewToolResultText(`{"status":"completed"}`), nil
@@ -247,10 +263,13 @@ func (s *Server) handleSessionList(ctx context.Context, req mcp.CallToolRequest)
 		status = ""
 	}
 	limit := req.GetInt("limit", 20)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
 
 	sessions, err := s.cfg.AgentService.SessionList(ctx, userID, status, limit)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("session_list failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("session_list", err)), nil
 	}
 
 	data, jsonErr := json.Marshal(sessions)
@@ -270,10 +289,13 @@ func (s *Server) handleMemoryRead(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: name"), nil
 	}
+	if errMsg := validateCategoryName(category, name); errMsg != "" {
+		return mcp.NewToolResultError(errMsg), nil
+	}
 
 	title, body, err := s.cfg.AgentService.MemoryRead(ctx, userID, category, name)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("memory_read failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("memory_read", err)), nil
 	}
 
 	result := map[string]string{"title": title, "body": body}
@@ -298,10 +320,16 @@ func (s *Server) handleMemoryWrite(ctx context.Context, req mcp.CallToolRequest)
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: content"), nil
 	}
+	if errMsg := validateCategoryName(category, name); errMsg != "" {
+		return mcp.NewToolResultError(errMsg), nil
+	}
+	if len(content) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("content too long: %d bytes exceeds limit of %d", len(content), maxContentLen)), nil
+	}
 
 	noteID, err := s.cfg.AgentService.MemoryWrite(ctx, userID, category, name, content)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("memory_write failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("memory_write", err)), nil
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, noteID)), nil
@@ -321,9 +349,15 @@ func (s *Server) handleMemoryAppend(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: content"), nil
 	}
+	if errMsg := validateCategoryName(category, name); errMsg != "" {
+		return mcp.NewToolResultError(errMsg), nil
+	}
+	if len(content) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("content too long: %d bytes exceeds limit of %d", len(content), maxContentLen)), nil
+	}
 
 	if err := s.cfg.AgentService.MemoryAppend(ctx, userID, category, name, content); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("memory_append failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("memory_append", err)), nil
 	}
 
 	return mcp.NewToolResultText(`{"status":"appended"}`), nil
@@ -332,10 +366,13 @@ func (s *Server) handleMemoryAppend(ctx context.Context, req mcp.CallToolRequest
 func (s *Server) handleMemoryList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	userID := reqctx.UserIDFromContext(ctx)
 	category := req.GetString("category", "")
+	if len(category) > maxCategoryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("category too long: %d chars exceeds limit of %d", len(category), maxCategoryLen)), nil
+	}
 
 	items, err := s.cfg.AgentService.MemoryList(ctx, userID, category)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("memory_list failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("memory_list", err)), nil
 	}
 
 	data, jsonErr := json.Marshal(items)
@@ -355,9 +392,12 @@ func (s *Server) handleMemoryDelete(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: name"), nil
 	}
+	if errMsg := validateCategoryName(category, name); errMsg != "" {
+		return mcp.NewToolResultError(errMsg), nil
+	}
 
 	if err := s.cfg.AgentService.MemoryDelete(ctx, userID, category, name); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("memory_delete failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("memory_delete", err)), nil
 	}
 
 	return mcp.NewToolResultText(`{"status":"deleted"}`), nil
@@ -369,13 +409,16 @@ func (s *Server) handleContextGather(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: query"), nil
 	}
+	if len(query) > maxQueryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("query too long: %d bytes exceeds limit of %d", len(query), maxQueryLen)), nil
+	}
 	maxChars := req.GetInt("max_context_chars", 3000)
 	// scope is accepted but not used for filtering in v1 (requires ChromaDB metadata changes)
 	_ = req.GetString("scope", "all")
 
 	results, err := s.cfg.AgentService.ContextGather(ctx, userID, query, maxChars)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("context_gather failed: %v", err)), nil
+		return mcp.NewToolResultError(sanitizeError("context_gather", err)), nil
 	}
 
 	data, jsonErr := json.Marshal(map[string]any{"results": results})
@@ -383,4 +426,55 @@ func (s *Server) handleContextGather(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultError("failed to marshal results"), nil
 	}
 	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- Error Sanitization ---
+
+// sanitizeError maps domain errors to user-safe messages. Internal error details
+// (file paths, DB errors, etc.) are not exposed to the client.
+func sanitizeError(tool string, err error) string {
+	switch {
+	case errors.Is(err, agent.ErrNotFound):
+		return tool + ": not found"
+	case errors.Is(err, agent.ErrSessionNotActive):
+		return tool + ": session is not active"
+	case errors.Is(err, agent.ErrFindingsTooLong):
+		return tool + ": findings exceed maximum length (1500 chars)"
+	case errors.Is(err, agent.ErrFindingsRequired):
+		return tool + ": findings are required"
+	case errors.Is(err, agent.ErrInvalidSessionName):
+		return tool + ": invalid session name"
+	default:
+		return tool + ": internal error"
+	}
+}
+
+// --- Input Validation ---
+
+// validateCategoryName checks category and name parameters for length and content.
+func validateCategoryName(category, name string) string {
+	if len(category) > maxCategoryLen {
+		return fmt.Sprintf("category too long: %d chars exceeds limit of %d", len(category), maxCategoryLen)
+	}
+	if len(name) > maxNameLen {
+		return fmt.Sprintf("name too long: %d chars exceeds limit of %d", len(name), maxNameLen)
+	}
+	if hasControlChars(category) {
+		return "category contains invalid control characters"
+	}
+	if hasControlChars(name) {
+		return "name contains invalid control characters"
+	}
+	return ""
+}
+
+// hasControlChars returns true if s contains control characters (bytes 0x00-0x1F
+// except \t, \n, \r).
+func hasControlChars(s string) bool {
+	for _, c := range s {
+		if c < 0x20 && c != '\t' && c != '\n' && c != '\r' {
+			return true
+		}
+	}
+	return false
 }

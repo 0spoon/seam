@@ -116,13 +116,19 @@ func (s *SQLStore) ListChildSessions(ctx context.Context, db DBTX, parentID stri
 }
 
 // ReconcileChildren links orphan child sessions to a newly created parent.
-// Orphans are sessions whose name starts with parentName + "/" and have
-// NULL parent_session_id. Returns the number of reconciled rows.
+// Orphans are sessions that are direct children (name starts with parentName + "/"
+// and contain no further "/" after that prefix) and have NULL parent_session_id.
+// Returns the number of reconciled rows.
+//
+// Uses LIKE with an additional NOT LIKE to exclude grandchildren:
+// "parent/%" matches all descendants, but NOT "parent/%/%" excludes
+// sessions with further nesting (grandchildren and deeper).
 func (s *SQLStore) ReconcileChildren(ctx context.Context, db DBTX, parentID, parentName string) (int64, error) {
 	result, err := db.ExecContext(ctx,
 		`UPDATE agent_sessions SET parent_session_id = ?
-		 WHERE name LIKE ? AND parent_session_id IS NULL AND id != ?`,
-		parentID, parentName+"/%", parentID,
+		 WHERE name LIKE ? AND name NOT LIKE ?
+		 AND parent_session_id IS NULL AND id != ?`,
+		parentID, parentName+"/%", parentName+"/%/%", parentID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("agent.SQLStore.ReconcileChildren: %w", err)

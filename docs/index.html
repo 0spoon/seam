@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Seam - Local-first, AI-powered knowledge management</title>
+  <meta name="description" content="Your second brain. Local-first, AI-powered knowledge management built on markdown.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="container">
+    <a href="#" class="nav-brand">
+      <svg width="28" height="28" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="60" cy="60" r="56" stroke="#c4915c" stroke-width="2" fill="none"/>
+        <path d="M30 45C40 35 60 30 75 40C90 50 80 70 65 75C50 80 35 70 45 55C55 40 75 45 70 60" stroke="#c4915c" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+        <circle cx="30" cy="45" r="4" fill="#c4915c"/>
+        <circle cx="70" cy="60" r="4" fill="#c4915c"/>
+      </svg>
+      Seam
+    </a>
+    <button class="nav-toggle" aria-label="Toggle navigation" onclick="document.querySelector('.nav-links').classList.toggle('open')">&#9776;</button>
+    <ul class="nav-links">
+      <li><a href="#mcp">Agent Memory</a></li>
+      <li><a href="#use-cases">Use Cases</a></li>
+      <li><a href="#tools">Tools</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#getting-started">Get Started</a></li>
+      <li><a href="https://github.com/0x3k/seam">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <img src="logo.svg" alt="Seam logo" class="hero-logo">
+  <h1><span>Seam</span></h1>
+  <p class="hero-tagline">Your second brain. Local-first, AI-powered knowledge management built on markdown.</p>
+  <p class="hero-sub">where things connect</p>
+  <div class="hero-cta">
+    <a href="#getting-started" class="btn btn-primary">Get Started</a>
+    <a href="https://github.com/0x3k/seam" class="btn btn-outline">View on GitHub</a>
+  </div>
+</section>
+
+<!-- MCP Agent Memory -->
+<section id="mcp" class="section mcp-section">
+  <div class="container">
+    <h2 class="mcp-headline">Give Your AI Agents a <span>Second Brain</span></h2>
+    <p class="mcp-pitch">
+      Seam exposes an MCP server that gives AI coding agents persistent, structured memory.
+      Claude Code, Cursor, or any MCP-compatible tool can track sessions, store domain knowledge,
+      and search across your entire knowledge base&mdash;across conversations, without losing context.
+    </p>
+
+    <div class="mcp-columns">
+      <div class="mcp-card">
+        <h3>Session Management</h3>
+        <p>
+          Agents start sessions, set plans, track task progress, and record findings.
+          Hierarchical sessions let parent agents spawn sub-agents that inherit context.
+        </p>
+        <code>session_start("refactor-auth")
+-> agent gets a briefing with budgeted
+   context from prior sessions</code>
+      </div>
+      <div class="mcp-card">
+        <h3>Knowledge Memory</h3>
+        <p>
+          Persistent domain notes organized by category that survive across sessions.
+          An agent learns your project patterns once and remembers them forever.
+        </p>
+        <code>memory_write("patterns",
+  "error-handling",
+  "This codebase uses sentinel errors...")</code>
+      </div>
+      <div class="mcp-card">
+        <h3>Context Gathering</h3>
+        <p>
+          Budgeted search across all your notes. The agent asks a question,
+          Seam returns ranked snippets within a character budget.
+        </p>
+        <code>context_gather(
+  "how does auth work?",
+  maxChars: 4000)
+-> returns relevant note snippets
+   with citations</code>
+      </div>
+    </div>
+
+    <div class="mcp-config">
+      <h3>Connection Configuration</h3>
+      <pre><code>{
+  <span class="key">"mcpServers"</span>: {
+    <span class="key">"seam"</span>: {
+      <span class="key">"url"</span>: <span class="str">"http://localhost:8080/api/mcp"</span>,
+      <span class="key">"headers"</span>: {
+        <span class="key">"Authorization"</span>: <span class="str">"Bearer &lt;token&gt;"</span>
+      }
+    }
+  }
+}</code></pre>
+    </div>
+
+    <div class="session-diagram">
+      <h3>Hierarchical Sessions</h3>
+      <div class="session-tree">
+        <div><span class="node">refactor-auth</span> <span class="label">&larr; main agent</span></div>
+        <div><span class="branch">&boxur;&boxh;&boxh; </span><span class="node">refactor-auth/analyze</span> <span class="label">&larr; subagent A (sees parent plan)</span></div>
+        <div><span class="branch">&boxur;&boxh;&boxh; </span><span class="node">refactor-auth/implement</span> <span class="label">&larr; subagent B (sees parent plan + A's findings)</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Use Cases -->
+<section id="use-cases" class="section">
+  <div class="container">
+    <h2 class="section-title">What Seam Enables</h2>
+    <p class="section-subtitle">Concrete workflows that turn disconnected information into connected knowledge.</p>
+
+    <div class="use-cases-grid">
+      <div class="use-case-card">
+        <h3>Research &amp; Learning</h3>
+        <p>
+          Reading about distributed systems? Capture articles via URL, link concepts with
+          [[wikilinks]], then ask Seam: "summarize everything I know about consensus
+          algorithms"&mdash;and get a synthesis across all your notes with citations.
+        </p>
+      </div>
+      <div class="use-case-card">
+        <h3>Personal Knowledge Base</h3>
+        <p>
+          Dump thoughts into Inbox with a keyboard shortcut. Voice-record ideas while walking.
+          Seam transcribes, summarizes, and suggests links to related notes&mdash;turning fragments
+          into a connected knowledge graph.
+        </p>
+      </div>
+      <div class="use-case-card">
+        <h3>AI-Augmented Writing</h3>
+        <p>
+          Write bullet points, let AI expand them into paragraphs. Paste a long doc, get a summary.
+          Extract action items from meeting notes. All running locally via Ollama&mdash;no cloud,
+          no API costs.
+        </p>
+      </div>
+      <div class="use-case-card">
+        <h3>Project Management</h3>
+        <p>
+          Organize notes by project. See your knowledge graph filtered by project. Run the review
+          queue to find orphaned notes, untagged content, and potential connections you missed.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Tools & Capabilities -->
+<section id="tools" class="section">
+  <div class="container">
+    <h2 class="section-title">Everything You Need</h2>
+    <p class="section-subtitle">A complete toolkit for capturing, organizing, retrieving, and visualizing knowledge.</p>
+
+    <div class="tools-grid">
+      <div class="tool-group">
+        <h3>Capture</h3>
+        <ul>
+          <li>Quick capture (keyboard shortcut)</li>
+          <li>URL-to-note (auto-fetches title, metadata, content)</li>
+          <li>Voice transcription (local Whisper)</li>
+          <li>Templates with variable substitution</li>
+        </ul>
+      </div>
+      <div class="tool-group">
+        <h3>Organize</h3>
+        <ul>
+          <li>Projects as first-class entities</li>
+          <li>[[Wikilinks]] with autocomplete</li>
+          <li>#Tags (inline + frontmatter)</li>
+          <li>AI auto-link suggestions on save</li>
+        </ul>
+      </div>
+      <div class="tool-group">
+        <h3>Retrieve</h3>
+        <ul>
+          <li>Full-text search (SQLite FTS5, BM25)</li>
+          <li>Semantic search (embeddings)</li>
+          <li>Ask Seam &mdash; RAG chat with citations</li>
+          <li>AI synthesis across notes</li>
+        </ul>
+      </div>
+      <div class="tool-group">
+        <h3>Visualize</h3>
+        <ul>
+          <li>Interactive knowledge graph</li>
+          <li>Timeline view</li>
+          <li>Backlinks + two-hop paths</li>
+          <li>Orphan detection</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section id="architecture" class="section arch-section">
+  <div class="container">
+    <h2 class="section-title" style="text-align:center">Architecture</h2>
+    <div class="tech-stack">
+      <span class="tech-badge">Go</span>
+      <span class="tech-badge">React 19</span>
+      <span class="tech-badge">SQLite FTS5</span>
+      <span class="tech-badge">Ollama</span>
+      <span class="tech-badge">ChromaDB</span>
+    </div>
+    <p class="arch-desc">
+      Seam is a monolithic Go backend serving a React single-page app. Notes are stored as
+      markdown files on disk, indexed in SQLite with FTS5 for full-text search. Embeddings
+      are generated locally via Ollama and stored in ChromaDB for semantic search. The MCP
+      server runs as an integrated HTTP endpoint, giving AI agents direct access to the
+      knowledge layer.
+    </p>
+  </div>
+</section>
+
+<!-- Getting Started -->
+<section id="getting-started" class="section getting-started">
+  <div class="container">
+    <h2 class="section-title">Getting Started</h2>
+    <p class="section-subtitle">Up and running in a few minutes.</p>
+
+    <div class="prereqs">
+      <span class="prereq">Go 1.22+</span>
+      <span class="prereq">Node.js 20+</span>
+      <span class="prereq">Ollama (optional)</span>
+      <span class="prereq">ChromaDB (optional)</span>
+    </div>
+
+    <pre><code><span class="comment"># Clone the repository</span>
+<span class="cmd">git clone https://github.com/0x3k/seam.git</span>
+<span class="cmd">cd seam</span>
+
+<span class="comment"># Build the frontend</span>
+<span class="cmd">cd frontend && npm install && npm run build && cd ..</span>
+
+<span class="comment"># Configure</span>
+<span class="cmd">cp .env.example .env</span>
+<span class="comment"># Edit .env with your preferred settings</span>
+
+<span class="comment"># Run</span>
+<span class="cmd">go run ./cmd/seam</span></code></pre>
+
+    <p class="note">See the <a href="https://github.com/0x3k/seam#readme">full README</a> for detailed configuration and usage instructions.</p>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <div class="footer-links">
+      <a href="https://github.com/0x3k/seam">GitHub</a>
+      <a href="https://github.com/0x3k/seam/blob/main/LICENSE">License</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

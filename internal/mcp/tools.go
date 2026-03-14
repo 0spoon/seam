@@ -232,7 +232,8 @@ func (s *Server) handleSessionPlanSet(ctx context.Context, req mcp.CallToolReque
 		return mcp.NewToolResultError(sanitizeError("session_plan_set", err)), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, noteID)), nil
+	data, _ := json.Marshal(map[string]string{"note_id": noteID})
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (s *Server) handleSessionProgressUpdate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -256,7 +257,8 @@ func (s *Server) handleSessionProgressUpdate(ctx context.Context, req mcp.CallTo
 		return mcp.NewToolResultError(sanitizeError("session_progress_update", err)), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, noteID)), nil
+	data, _ := json.Marshal(map[string]string{"note_id": noteID})
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (s *Server) handleSessionContextSet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -278,7 +280,8 @@ func (s *Server) handleSessionContextSet(ctx context.Context, req mcp.CallToolRe
 		return mcp.NewToolResultError(sanitizeError("session_context_set", err)), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, noteID)), nil
+	data, _ := json.Marshal(map[string]string{"note_id": noteID})
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (s *Server) handleSessionEnd(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -375,7 +378,8 @@ func (s *Server) handleMemoryWrite(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(sanitizeError("memory_write", err)), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, noteID)), nil
+	data, _ := json.Marshal(map[string]string{"note_id": noteID})
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (s *Server) handleMemoryAppend(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -596,7 +600,8 @@ func (s *Server) handleNotesCreate(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(sanitizeError("notes_create", err)), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, n.ID)), nil
+	data, _ := json.Marshal(map[string]string{"note_id": n.ID})
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 // --- Error Sanitization ---

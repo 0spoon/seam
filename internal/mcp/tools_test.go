@@ -20,8 +20,22 @@ import (
 	"github.com/katata/seam/internal/search"
 )
 
-// newServer creates a seamcp.Server with the given mock and a discard logger.
+// newTestServer creates a seamcp.Server with the given mock and a discard logger.
+// The server is registered for cleanup via t.Cleanup.
 // Used by tests across the mcp_test package.
+func newTestServer(t *testing.T, mock *mockAgentService) *seamcp.Server {
+	t.Helper()
+	srv := seamcp.New(seamcp.Config{
+		AgentService: mock,
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	t.Cleanup(func() { srv.Close() })
+	return srv
+}
+
+// newServer creates a seamcp.Server without test cleanup (for use in server_test.go
+// helpers that do not have access to *testing.T at call time).
+// Deprecated: prefer newTestServer when *testing.T is available.
 func newServer(mock *mockAgentService) *seamcp.Server {
 	return seamcp.New(seamcp.Config{
 		AgentService: mock,

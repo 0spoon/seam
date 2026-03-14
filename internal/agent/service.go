@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/oklog/ulid/v2"
 
@@ -145,7 +146,13 @@ func (s *Service) SessionStart(ctx context.Context, userID, name string, maxCont
 	// Check if session already exists (resume case).
 	existing, getErr := s.cfg.Store.GetSessionByName(ctx, db, name)
 	if getErr == nil {
-		// Resume existing session.
+		// Resume existing session. If session is not active, the briefing still
+		// returns the data (status field indicates current state). The agent can
+		// decide whether to act on a completed/archived session.
+		if existing.Status != StatusActive {
+			s.cfg.Logger.Info("resuming non-active session",
+				"session", name, "status", existing.Status)
+		}
 		return s.assembleBriefing(ctx, userID, db, existing, maxContextChars)
 	}
 	if !errors.Is(getErr, ErrNotFound) {
@@ -189,9 +196,9 @@ func (s *Service) SessionEnd(ctx context.Context, userID, sessionName, findings 
 	if findings == "" {
 		return fmt.Errorf("agent.Service.SessionEnd: %w", ErrFindingsRequired)
 	}
-	if len(findings) > MaxFindingsChars {
+	if utf8.RuneCountInString(findings) > MaxFindingsChars {
 		return fmt.Errorf("agent.Service.SessionEnd: %d chars exceeds %d: %w",
-			len(findings), MaxFindingsChars, ErrFindingsTooLong)
+			utf8.RuneCountInString(findings), MaxFindingsChars, ErrFindingsTooLong)
 	}
 
 	db, err := s.cfg.UserDBManager.Open(ctx, userID)
@@ -252,8 +259,11 @@ func (s *Service) SessionProgressUpdate(ctx context.Context, userID, sessionName
 
 	// Find existing progress note.
 	noteID, err := s.findSessionNote(ctx, userID, sessionName, "progress")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return "", fmt.Errorf("agent.Service.SessionProgressUpdate: find: %w", err)
+	}
 	if err != nil {
-		// Create the note.
+		// Create the note (ErrNotFound).
 		projectID, projErr := s.ensureAgentMemoryProject(ctx, userID)
 		if projErr != nil {
 			return "", fmt.Errorf("agent.Service.SessionProgressUpdate: %w", projErr)
@@ -310,6 +320,9 @@ func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, conte
 		s.enqueueEmbed(ctx, userID, noteID)
 		return noteID, nil
 	}
+	if !errors.Is(err, ErrNotFound) {
+		return "", fmt.Errorf("agent.Service.MemoryWrite: find: %w", err)
+	}
 
 	// Create new.
 	projectID, projErr := s.ensureAgentMemoryProject(ctx, userID)
@@ -357,7 +370,12 @@ func (s *Service) MemoryAppend(ctx context.Context, userID, category, name, cont
 		return fmt.Errorf("agent.Service.MemoryAppend: get: %w", err)
 	}
 
-	newBody := n.Body + content
+	// Ensure separator between existing content and appended text.
+	newBody := n.Body
+	if newBody != "" && !strings.HasSuffix(newBody, "\n") {
+		newBody += "\n"
+	}
+	newBody += content
 	if _, err := s.cfg.NoteService.Update(ctx, userID, noteID, note.UpdateNoteReq{
 		Body: &newBody,
 	}); err != nil {
@@ -476,14 +494,16 @@ func (s *Service) NotesCreate(ctx context.Context, userID, title, body, projectS
 		projectID = p.ID
 	}
 
-	// Always append created-by:agent tag.
-	tags = append(tags, TagCreatedByAgent)
+	// Always append created-by:agent tag. Copy to avoid mutating caller's slice.
+	allTags := make([]string, len(tags)+1)
+	copy(allTags, tags)
+	allTags[len(tags)] = TagCreatedByAgent
 
 	n, err := s.cfg.NoteService.Create(ctx, userID, note.CreateNoteReq{
 		Title:     title,
 		Body:      body,
 		ProjectID: projectID,
-		Tags:      tags,
+		Tags:      allTags,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent.Service.NotesCreate: %w", err)
@@ -541,6 +561,9 @@ func (s *Service) upsertSessionNote(ctx context.Context, userID, sessionName, no
 		}
 		s.enqueueEmbed(ctx, userID, noteID)
 		return noteID, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return "", fmt.Errorf("agent.Service.upsertSessionNote: find: %w", err)
 	}
 
 	// Create new note.
@@ -626,7 +649,7 @@ func (s *Service) findKnowledgeNote(ctx context.Context, userID, category, name 
 }
 
 // assembleBriefing builds a budgeted context package for a session.
-func (s *Service) assembleBriefing(ctx context.Context, userID string, db interface{}, sess *Session, maxChars int) (*Briefing, error) {
+func (s *Service) assembleBriefing(ctx context.Context, userID string, db DBTX, sess *Session, maxChars int) (*Briefing, error) {
 	briefing := &Briefing{Session: sess}
 
 	// Determine what sections we have data for.
@@ -653,16 +676,14 @@ func (s *Service) assembleBriefing(ctx context.Context, userID string, db interf
 	// Load parent plan if this is a child session.
 	hasParent := false
 	if sess.ParentSessionID != "" {
-		if dbTyped, ok := db.(DBTX); ok {
-			parent, err := s.cfg.Store.GetSession(ctx, dbTyped, sess.ParentSessionID)
-			if err == nil {
-				parentPlanID, ppErr := s.findSessionNote(ctx, userID, parent.Name, "plan")
-				if ppErr == nil {
-					ppNote, noteErr := s.cfg.NoteService.Get(ctx, userID, parentPlanID)
-					if noteErr == nil {
-						parentPlan = ppNote.Body
-						hasParent = true
-					}
+		parent, err := s.cfg.Store.GetSession(ctx, db, sess.ParentSessionID)
+		if err == nil {
+			parentPlanID, ppErr := s.findSessionNote(ctx, userID, parent.Name, "plan")
+			if ppErr == nil {
+				ppNote, noteErr := s.cfg.NoteService.Get(ctx, userID, parentPlanID)
+				if noteErr == nil {
+					parentPlan = ppNote.Body
+					hasParent = true
 				}
 			}
 		}
@@ -670,19 +691,17 @@ func (s *Service) assembleBriefing(ctx context.Context, userID string, db interf
 
 	// Load sibling findings (completed children of the same parent).
 	if sess.ParentSessionID != "" {
-		if dbTyped, ok := db.(DBTX); ok {
-			children, err := s.cfg.Store.ListChildSessions(ctx, dbTyped, sess.ParentSessionID)
-			if err == nil {
-				for _, child := range children {
-					if child.ID == sess.ID {
-						continue // skip self
-					}
-					if child.Status == StatusCompleted && child.Findings != "" {
-						siblings = append(siblings, SiblingFinding{
-							SessionName: child.Name,
-							Findings:    child.Findings,
-						})
-					}
+		children, err := s.cfg.Store.ListChildSessions(ctx, db, sess.ParentSessionID)
+		if err == nil {
+			for _, child := range children {
+				if child.ID == sess.ID {
+					continue // skip self
+				}
+				if child.Status == StatusCompleted && child.Findings != "" {
+					siblings = append(siblings, SiblingFinding{
+						SessionName: child.Name,
+						Findings:    child.Findings,
+					})
 				}
 			}
 		}
@@ -735,6 +754,7 @@ func (s *Service) searchKnowledge(ctx context.Context, userID, query string, lim
 			hits = append(hits, KnowledgeHit{
 				Title:   r.Title,
 				Snippet: r.Snippet,
+				Source:  "semantic",
 				Score:   r.Score,
 			})
 		}
@@ -752,6 +772,7 @@ func (s *Service) searchKnowledge(ctx context.Context, userID, query string, lim
 		hits = append(hits, KnowledgeHit{
 			Title:   r.Title,
 			Snippet: r.Snippet,
+			Source:  "fts",
 			Score:   float64(r.Rank),
 		})
 	}

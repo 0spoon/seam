@@ -250,6 +250,11 @@ func TestValidateSessionName_BoundaryAndEdgeCases(t *testing.T) {
 		{
 			name:    "very_long_name",
 			input:   strings.Repeat("a", 1000),
+			wantErr: true,
+		},
+		{
+			name:    "max_length_name",
+			input:   strings.Repeat("a", MaxSessionNameLen),
 			wantErr: false,
 		},
 		{
@@ -270,6 +275,11 @@ func TestValidateSessionName_BoundaryAndEdgeCases(t *testing.T) {
 		{
 			name:    "long_hierarchy_segments",
 			input:   strings.Repeat("segment", 20) + "/" + strings.Repeat("child", 20),
+			wantErr: true,
+		},
+		{
+			name:    "short_hierarchy_segments",
+			input:   "segment-one/child-two",
 			wantErr: false,
 		},
 	}

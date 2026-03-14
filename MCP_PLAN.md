@@ -1196,6 +1196,82 @@ All phases implemented. Final review identified and fixed the following gaps:
 | Test-to-code ratio | ~2.1:1 |
 | All unit tests | PASS |
 | All integration tests | PASS |
+| Post-review bugs fixed | 12 (1 high, 2 medium, 9 low) |
+
+### Bugs Fixed During Code Quality Review
+
+Post-implementation code quality review identified and fixed 12 bugs/issues:
+
+#### High Severity
+
+4. **`assembleBriefing` took `interface{}` instead of `DBTX`**: The `db` parameter was
+   declared as `interface{}` with conditional type assertions. If the assertion failed,
+   parent plan and sibling findings sections would be silently skipped. Changed to accept
+   `DBTX` directly, eliminating the fragile type assertion. (`service.go:629`)
+
+#### Medium Severity
+
+5. **Find-then-upsert patterns treated all errors as "not found"**: Three call sites
+   (`upsertSessionNote`, `SessionProgressUpdate`, `MemoryWrite`) would create duplicate
+   notes on transient DB errors because any error from `findSessionNote`/`findKnowledgeNote`
+   was treated as "not found". Fixed to check `errors.Is(err, ErrNotFound)` explicitly
+   and propagate other errors. (`service.go:254, 302, 533`)
+
+6. **Goroutine leak in `evictStaleLimiters`**: The background goroutine for rate limiter
+   eviction ran forever with no shutdown mechanism. Added `done` channel, `Close()` method,
+   and `select` on `done` in the eviction loop. (`server.go:104-107, 186-199`)
+
+#### Low Severity
+
+7. **`MemoryAppend` concatenated without separator**: Appending to a note whose body did
+   not end with a newline would merge the new content into the last line. Added automatic
+   newline separator when the existing body does not end with one. (`service.go:360`)
+
+8. **`NotesCreate` mutated caller's `tags` slice**: `append(tags, TagCreatedByAgent)` could
+   modify the original backing array if the slice had spare capacity. Changed to copy the
+   slice before appending. (`service.go:480`)
+
+9. **`KnowledgeHit.Source` field never populated**: Both semantic and FTS search paths left
+   the `Source` field as empty string. Now populates with `"semantic"` or `"fts"`.
+   (`service.go:735-757`)
+
+10. **`truncateToChars` byte-level slicing and budget overflow**: Used `len()` (bytes, not
+    runes) for string comparison and appended "..." beyond the `maxChars` budget. Fixed to
+    use `utf8.RuneCountInString`, `[]rune` slicing, and reserves 3 chars for the ellipsis
+    within the budget. (`briefing.go:77-93`)
+
+11. **`SessionEnd` findings length check counted bytes, not characters**: `len(findings)`
+    counts bytes, not runes. Multi-byte UTF-8 characters would hit the limit prematurely.
+    Changed to `utf8.RuneCountInString(findings)`. (`service.go:192`)
+
+12. **`ListSessions` OFFSET without LIMIT**: If `limit == 0` and `offset > 0`, the SQL
+    would have `OFFSET ?` without `LIMIT ?`, causing a SQLite syntax error. Moved OFFSET
+    inside the LIMIT guard. (`store.go:97-104`)
+
+13. **JSON injection risk in MCP response formatting**: Used `fmt.Sprintf` with string
+    interpolation for JSON responses (e.g., `{"note_id":"%s"}`). While safe for ULIDs,
+    replaced with `json.Marshal` for defense in depth. (`tools.go:235, 259, 281, 378, 599`)
+
+14. **No session name length limit**: `ValidateSessionName` had no maximum length check.
+    Added `MaxSessionNameLen = 200` constant and length validation. (`types.go:132`)
+
+15. **SessionStart resuming completed sessions without warning**: Calling `session_start`
+    on a completed/archived session silently returned a briefing without any indication.
+    Added info-level log when resuming non-active sessions. Status field in the briefing
+    already indicates the session state. (`service.go:147`)
+
+### Files Modified in Code Quality Review
+
+| File | Changes |
+|---|---|
+| `internal/agent/service.go` | Fixed `assembleBriefing` signature, find-then-upsert error handling, `MemoryAppend` separator, `NotesCreate` slice copy, `KnowledgeHit.Source`, `SessionEnd` UTF-8 length check, non-active session resume logging |
+| `internal/agent/briefing.go` | Fixed `truncateToChars` to use rune-aware slicing and account for "..." in budget |
+| `internal/agent/store.go` | Fixed OFFSET-without-LIMIT guard in `ListSessions` |
+| `internal/agent/types.go` | Added `MaxSessionNameLen` constant and length validation in `ValidateSessionName` |
+| `internal/agent/types_test.go` | Updated boundary tests for new session name length limit |
+| `internal/mcp/server.go` | Added `done` channel, `Close()` method, fixed `evictStaleLimiters` goroutine leak |
+| `internal/mcp/tools.go` | Replaced `fmt.Sprintf` JSON formatting with `json.Marshal` |
+| `internal/mcp/tools_test.go` | Added `newTestServer` helper with `t.Cleanup` |
 
 ### Remaining v2 Items
 

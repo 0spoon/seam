@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // budgetAllocation holds the character budget for each briefing section.
 type budgetAllocation struct {
@@ -72,20 +75,30 @@ func allocateBudget(maxChars int, hasSession, hasParent, hasSiblings, hasKnowled
 	return alloc
 }
 
-// truncateToChars truncates text to at most maxChars characters, trying to
-// break at a word boundary. Appends "..." if truncated.
+// truncateToChars truncates text to at most maxChars characters (runes),
+// trying to break at a word boundary. Appends "..." if truncated, with
+// the ellipsis counted within the budget.
 func truncateToChars(text string, maxChars int) string {
 	if maxChars <= 0 {
 		return ""
 	}
-	if len(text) <= maxChars {
+	if utf8.RuneCountInString(text) <= maxChars {
 		return text
 	}
 
-	// Find the last space before the limit.
-	truncated := text[:maxChars]
+	// Reserve 3 chars for "..." suffix.
+	cutAt := maxChars - 3
+	if cutAt <= 0 {
+		// Budget too small for meaningful truncation.
+		return string([]rune(text)[:maxChars])
+	}
+
+	runes := []rune(text)
+	truncated := string(runes[:cutAt])
+
+	// Try to break at a word boundary.
 	lastSpace := strings.LastIndex(truncated, " ")
-	if lastSpace > maxChars/2 {
+	if lastSpace > cutAt/2 {
 		truncated = truncated[:lastSpace]
 	}
 

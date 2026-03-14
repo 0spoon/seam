@@ -97,10 +97,11 @@ func (s *SQLStore) ListSessions(ctx context.Context, db DBTX, status string, lim
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)
-	}
-	if offset > 0 {
-		query += " OFFSET ?"
-		args = append(args, offset)
+		// OFFSET only valid with LIMIT in SQLite.
+		if offset > 0 {
+			query += " OFFSET ?"
+			args = append(args, offset)
+		}
 	}
 
 	return s.querySessionRows(ctx, db, query, args...)

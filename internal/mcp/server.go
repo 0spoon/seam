@@ -68,6 +68,9 @@ type Server struct {
 	// Per-user rate limiters for MCP tool calls.
 	limiterMu sync.Mutex
 	limiters  map[string]*mcpUserLimiter
+
+	// done is closed to signal the eviction goroutine to stop.
+	done chan struct{}
 }
 
 // mcpUserLimiter wraps a rate.Limiter with a last-seen timestamp for eviction.
@@ -86,6 +89,7 @@ func New(cfg Config) *Server {
 		cfg:      cfg,
 		logger:   cfg.Logger,
 		limiters: make(map[string]*mcpUserLimiter),
+		done:     make(chan struct{}),
 	}
 
 	mcpSrv := mcpserver.NewMCPServer(
@@ -132,6 +136,16 @@ func (s *Server) Handler(jwtMgr *auth.JWTManager) http.Handler {
 // MCPServer returns the underlying MCPServer for testing.
 func (s *Server) MCPServer() *mcpserver.MCPServer {
 	return s.mcp
+}
+
+// Close stops background goroutines. Safe to call multiple times.
+func (s *Server) Close() {
+	select {
+	case <-s.done:
+		// Already closed.
+	default:
+		close(s.done)
+	}
 }
 
 // authCheckMiddleware rejects tool calls when no user ID is present in context.
@@ -186,14 +200,19 @@ func (s *Server) getLimiter(userID string) *rate.Limiter {
 func (s *Server) evictStaleLimiters() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		cutoff := time.Now().Add(-10 * time.Minute)
-		s.limiterMu.Lock()
-		for uid, entry := range s.limiters {
-			if entry.lastSeen.Before(cutoff) {
-				delete(s.limiters, uid)
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+			cutoff := time.Now().Add(-10 * time.Minute)
+			s.limiterMu.Lock()
+			for uid, entry := range s.limiters {
+				if entry.lastSeen.Before(cutoff) {
+					delete(s.limiters, uid)
+				}
 			}
+			s.limiterMu.Unlock()
 		}
-		s.limiterMu.Unlock()
 	}
 }

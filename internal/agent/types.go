@@ -30,6 +30,7 @@ const TagCreatedByAgent = "created-by:agent"
 const (
 	MaxFindingsChars       = 1500
 	DefaultMaxContextChars = 4000
+	MaxSessionNameLen      = 200
 )
 
 // Domain errors.
@@ -132,6 +133,10 @@ var sessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_\-/]+$`)
 func ValidateSessionName(name string) error {
 	if name == "" {
 		return fmt.Errorf("agent.ValidateSessionName: empty name: %w", ErrInvalidSessionName)
+	}
+	if len(name) > MaxSessionNameLen {
+		return fmt.Errorf("agent.ValidateSessionName: name too long (%d chars, max %d): %w",
+			len(name), MaxSessionNameLen, ErrInvalidSessionName)
 	}
 	if !sessionNameRe.MatchString(name) {
 		return fmt.Errorf("agent.ValidateSessionName: invalid characters in %q: %w", name, ErrInvalidSessionName)

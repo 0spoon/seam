@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/katata/seam/internal/agent"
+	"github.com/katata/seam/internal/note"
+	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/reqctx"
 )
 
@@ -42,6 +45,12 @@ func (s *Server) registerTools() {
 
 		// Context gathering.
 		mcpserver.ServerTool{Tool: contextGatherTool(), Handler: s.handleContextGather},
+
+		// User note access tools.
+		mcpserver.ServerTool{Tool: notesSearchTool(), Handler: s.handleNotesSearch},
+		mcpserver.ServerTool{Tool: notesReadTool(), Handler: s.handleNotesRead},
+		mcpserver.ServerTool{Tool: notesListTool(), Handler: s.handleNotesList},
+		mcpserver.ServerTool{Tool: notesCreateTool(), Handler: s.handleNotesCreate},
 	)
 }
 
@@ -144,6 +153,40 @@ func contextGatherTool() mcp.Tool {
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 		mcp.WithNumber("max_context_chars", mcp.Description("Maximum characters for results (default: 3000)")),
 		mcp.WithString("scope", mcp.Enum("agent", "user", "all"), mcp.Description("Search scope (default: all)")),
+	)
+}
+
+func notesSearchTool() mcp.Tool {
+	return mcp.NewTool("notes_search",
+		mcp.WithDescription("Full-text search across user notes."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of results (default: 10)")),
+	)
+}
+
+func notesReadTool() mcp.Tool {
+	return mcp.NewTool("notes_read",
+		mcp.WithDescription("Read a note by ID. Returns full title, body, and tags."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Note ID")),
+	)
+}
+
+func notesListTool() mcp.Tool {
+	return mcp.NewTool("notes_list",
+		mcp.WithDescription("List notes with optional project and tag filtering."),
+		mcp.WithString("project", mcp.Description("Project slug to filter by")),
+		mcp.WithString("tag", mcp.Description("Tag to filter by")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of results (default: 20)")),
+	)
+}
+
+func notesCreateTool() mcp.Tool {
+	return mcp.NewTool("notes_create",
+		mcp.WithDescription("Create a user note. Auto-tagged with 'created-by:agent'."),
+		mcp.WithString("title", mcp.Required(), mcp.Description("Note title")),
+		mcp.WithString("body", mcp.Required(), mcp.Description("Note body (markdown)")),
+		mcp.WithString("project", mcp.Description("Project slug (optional)")),
+		mcp.WithString("tags", mcp.Description("Comma-separated tags (optional)")),
 	)
 }
 
@@ -428,6 +471,134 @@ func (s *Server) handleContextGather(ctx context.Context, req mcp.CallToolReques
 	return mcp.NewToolResultText(string(data)), nil
 }
 
+func (s *Server) handleNotesSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	query, err := req.RequireString("query")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: query"), nil
+	}
+	if len(query) > maxQueryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("query too long: %d bytes exceeds limit of %d", len(query), maxQueryLen)), nil
+	}
+	limit := req.GetInt("limit", 10)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
+
+	results, err := s.cfg.AgentService.NotesSearch(ctx, userID, query, limit)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_search", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(results)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleNotesRead(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	noteID, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: id"), nil
+	}
+
+	n, err := s.cfg.AgentService.NotesRead(ctx, userID, noteID)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_read", err)), nil
+	}
+
+	result := map[string]interface{}{
+		"id":    n.ID,
+		"title": n.Title,
+		"body":  n.Body,
+		"tags":  n.Tags,
+	}
+	data, jsonErr := json.Marshal(result)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal result"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleNotesList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	projectSlug := req.GetString("project", "")
+	tag := req.GetString("tag", "")
+	limit := req.GetInt("limit", 20)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
+
+	notes, total, err := s.cfg.AgentService.NotesList(ctx, userID, projectSlug, tag, limit)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_list", err)), nil
+	}
+
+	// Return summaries (not full bodies) to keep response compact.
+	type noteSummary struct {
+		ID        string   `json:"id"`
+		Title     string   `json:"title"`
+		Tags      []string `json:"tags,omitempty"`
+		UpdatedAt string   `json:"updated_at"`
+	}
+	summaries := make([]noteSummary, 0, len(notes))
+	for _, n := range notes {
+		summaries = append(summaries, noteSummary{
+			ID:        n.ID,
+			Title:     n.Title,
+			Tags:      n.Tags,
+			UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	data, jsonErr := json.Marshal(map[string]interface{}{
+		"notes": summaries,
+		"total": total,
+	})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleNotesCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	title, err := req.RequireString("title")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: title"), nil
+	}
+	body, err := req.RequireString("body")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: body"), nil
+	}
+	if len(body) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("body too long: %d bytes exceeds limit of %d", len(body), maxContentLen)), nil
+	}
+
+	projectSlug := req.GetString("project", "")
+	tagsStr := req.GetString("tags", "")
+
+	// Parse comma-separated tags.
+	var tags []string
+	if tagsStr != "" {
+		for _, t := range strings.Split(tagsStr, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				tags = append(tags, t)
+			}
+		}
+	}
+
+	n, err := s.cfg.AgentService.NotesCreate(ctx, userID, title, body, projectSlug, tags)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_create", err)), nil
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf(`{"note_id":"%s"}`, n.ID)), nil
+}
+
 // --- Error Sanitization ---
 
 // sanitizeError maps domain errors to user-safe messages. Internal error details
@@ -436,6 +607,10 @@ func sanitizeError(tool string, err error) string {
 	switch {
 	case errors.Is(err, agent.ErrNotFound):
 		return tool + ": not found"
+	case errors.Is(err, note.ErrNotFound):
+		return tool + ": not found"
+	case errors.Is(err, project.ErrNotFound):
+		return tool + ": project not found"
 	case errors.Is(err, agent.ErrSessionNotActive):
 		return tool + ": session is not active"
 	case errors.Is(err, agent.ErrFindingsTooLong):

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -14,7 +15,9 @@ import (
 
 	"github.com/katata/seam/internal/agent"
 	seamcp "github.com/katata/seam/internal/mcp"
+	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/search"
 )
 
 // newServer creates a seamcp.Server with the given mock and a discard logger.
@@ -719,6 +722,202 @@ func TestContextGather_MissingQuery_ReturnsError(t *testing.T) {
 	result := directCall(t, srv, "context_gather", map[string]any{})
 	require.True(t, result.IsError)
 	require.Contains(t, textOf(t, result), "query")
+}
+
+// ---------------------------------------------------------------------------
+// Notes Search
+// ---------------------------------------------------------------------------
+
+func TestNotesSearch_Success_ReturnsResults(t *testing.T) {
+	mock := &mockAgentService{
+		notesSearchFn: func(_ context.Context, userID, query string, limit int) ([]search.FTSResult, error) {
+			require.Equal(t, toolTestUser, userID)
+			require.Equal(t, "middleware", query)
+			require.Equal(t, 5, limit)
+			return []search.FTSResult{
+				{NoteID: "n1", Title: "Auth Middleware", Snippet: "handles auth", Rank: 1.5},
+			}, nil
+		},
+	}
+	srv := newServer(mock)
+	result := directCall(t, srv, "notes_search", map[string]any{
+		"query": "middleware",
+		"limit": float64(5),
+	})
+
+	require.False(t, result.IsError)
+	text := textOf(t, result)
+	require.Contains(t, text, "Auth Middleware")
+	require.Contains(t, text, "n1")
+}
+
+func TestNotesSearch_MissingQuery_ReturnsError(t *testing.T) {
+	srv := newServer(&mockAgentService{})
+	result := directCall(t, srv, "notes_search", map[string]any{})
+
+	require.True(t, result.IsError)
+	require.Contains(t, textOf(t, result), "query")
+}
+
+// ---------------------------------------------------------------------------
+// Notes Read
+// ---------------------------------------------------------------------------
+
+func TestNotesRead_Success_ReturnsNote(t *testing.T) {
+	mock := &mockAgentService{
+		notesReadFn: func(_ context.Context, userID, noteID string) (*note.Note, error) {
+			require.Equal(t, toolTestUser, userID)
+			require.Equal(t, "note-abc", noteID)
+			return &note.Note{
+				ID:    "note-abc",
+				Title: "Test Note",
+				Body:  "Hello world",
+				Tags:  []string{"tag1", "tag2"},
+			}, nil
+		},
+	}
+	srv := newServer(mock)
+	result := directCall(t, srv, "notes_read", map[string]any{
+		"id": "note-abc",
+	})
+
+	require.False(t, result.IsError)
+	text := textOf(t, result)
+	require.Contains(t, text, "Test Note")
+	require.Contains(t, text, "Hello world")
+	require.Contains(t, text, "tag1")
+}
+
+func TestNotesRead_MissingID_ReturnsError(t *testing.T) {
+	srv := newServer(&mockAgentService{})
+	result := directCall(t, srv, "notes_read", map[string]any{})
+
+	require.True(t, result.IsError)
+	require.Contains(t, textOf(t, result), "id")
+}
+
+func TestNotesRead_NotFound_ReturnsError(t *testing.T) {
+	mock := &mockAgentService{
+		notesReadFn: func(context.Context, string, string) (*note.Note, error) {
+			return nil, fmt.Errorf("agent.Service.NotesRead: %w", note.ErrNotFound)
+		},
+	}
+	srv := newServer(mock)
+	result := directCall(t, srv, "notes_read", map[string]any{
+		"id": "nonexistent",
+	})
+
+	require.True(t, result.IsError)
+	require.Contains(t, textOf(t, result), "not found")
+}
+
+// ---------------------------------------------------------------------------
+// Notes List
+// ---------------------------------------------------------------------------
+
+func TestNotesList_Success_ReturnsSummaries(t *testing.T) {
+	mock := &mockAgentService{
+		notesListFn: func(_ context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error) {
+			require.Equal(t, toolTestUser, userID)
+			require.Equal(t, "my-project", projectSlug)
+			require.Equal(t, "important", tag)
+			require.Equal(t, 10, limit)
+			return []*note.Note{
+				{ID: "n1", Title: "Note One", Tags: []string{"important"}},
+				{ID: "n2", Title: "Note Two", Tags: []string{"important"}},
+			}, 2, nil
+		},
+	}
+	srv := newServer(mock)
+	result := directCall(t, srv, "notes_list", map[string]any{
+		"project": "my-project",
+		"tag":     "important",
+		"limit":   float64(10),
+	})
+
+	require.False(t, result.IsError)
+	text := textOf(t, result)
+	require.Contains(t, text, "Note One")
+	require.Contains(t, text, "Note Two")
+	require.Contains(t, text, `"total":2`)
+}
+
+func TestNotesList_DefaultParams_UsesDefaults(t *testing.T) {
+	mock := &mockAgentService{
+		notesListFn: func(_ context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error) {
+			require.Equal(t, "", projectSlug)
+			require.Equal(t, "", tag)
+			require.Equal(t, 20, limit)
+			return []*note.Note{}, 0, nil
+		},
+	}
+	srv := newServer(mock)
+	result := directCall(t, srv, "notes_list", map[string]any{})
+
+	require.False(t, result.IsError)
+}
+
+// ---------------------------------------------------------------------------
+// Notes Create
+// ---------------------------------------------------------------------------
+
+func TestNotesCreate_Success_ReturnsNoteID(t *testing.T) {
+	mock := &mockAgentService{
+		notesCreateFn: func(_ context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error) {
+			require.Equal(t, toolTestUser, userID)
+			require.Equal(t, "New Note", title)
+			require.Equal(t, "# Content", body)
+			require.Equal(t, "my-project", projectSlug)
+			require.Equal(t, []string{"tag1", "tag2"}, tags)
+			return &note.Note{ID: "new-note-id"}, nil
+		},
+	}
+	srv := newServer(mock)
+	result := directCall(t, srv, "notes_create", map[string]any{
+		"title":   "New Note",
+		"body":    "# Content",
+		"project": "my-project",
+		"tags":    "tag1, tag2",
+	})
+
+	require.False(t, result.IsError)
+	require.Contains(t, textOf(t, result), "new-note-id")
+}
+
+func TestNotesCreate_MissingTitle_ReturnsError(t *testing.T) {
+	srv := newServer(&mockAgentService{})
+	result := directCall(t, srv, "notes_create", map[string]any{
+		"body": "some body",
+	})
+
+	require.True(t, result.IsError)
+	require.Contains(t, textOf(t, result), "title")
+}
+
+func TestNotesCreate_MissingBody_ReturnsError(t *testing.T) {
+	srv := newServer(&mockAgentService{})
+	result := directCall(t, srv, "notes_create", map[string]any{
+		"title": "some title",
+	})
+
+	require.True(t, result.IsError)
+	require.Contains(t, textOf(t, result), "body")
+}
+
+func TestNotesCreate_NoTags_PassesEmptySlice(t *testing.T) {
+	mock := &mockAgentService{
+		notesCreateFn: func(_ context.Context, _, _, _, _ string, tags []string) (*note.Note, error) {
+			require.Empty(t, tags)
+			return &note.Note{ID: "note-no-tags"}, nil
+		},
+	}
+	srv := newServer(mock)
+	result := directCall(t, srv, "notes_create", map[string]any{
+		"title": "No Tags",
+		"body":  "content",
+	})
+
+	require.False(t, result.IsError)
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,9 @@ import (
 	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/auth"
 	seamcp "github.com/katata/seam/internal/mcp"
+	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/search"
 )
 
 // mockAgentService implements seamcp.AgentService with pluggable function fields.
@@ -36,6 +38,10 @@ type mockAgentService struct {
 	memoryListFn            func(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	memoryDeleteFn          func(ctx context.Context, userID, category, name string) error
 	contextGatherFn         func(ctx context.Context, userID, query string, maxChars int) ([]agent.KnowledgeHit, error)
+	notesSearchFn           func(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error)
+	notesReadFn             func(ctx context.Context, userID, noteID string) (*note.Note, error)
+	notesListFn             func(ctx context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error)
+	notesCreateFn           func(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error)
 }
 
 func (m *mockAgentService) SessionStart(ctx context.Context, userID, name string, maxContextChars int) (*agent.Briefing, error) {
@@ -120,6 +126,34 @@ func (m *mockAgentService) ContextGather(ctx context.Context, userID, query stri
 		return []agent.KnowledgeHit{}, nil
 	}
 	return m.contextGatherFn(ctx, userID, query, maxChars)
+}
+
+func (m *mockAgentService) NotesSearch(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error) {
+	if m.notesSearchFn == nil {
+		return []search.FTSResult{}, nil
+	}
+	return m.notesSearchFn(ctx, userID, query, limit)
+}
+
+func (m *mockAgentService) NotesRead(ctx context.Context, userID, noteID string) (*note.Note, error) {
+	if m.notesReadFn == nil {
+		panic("mockAgentService.NotesRead not implemented")
+	}
+	return m.notesReadFn(ctx, userID, noteID)
+}
+
+func (m *mockAgentService) NotesList(ctx context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error) {
+	if m.notesListFn == nil {
+		return []*note.Note{}, 0, nil
+	}
+	return m.notesListFn(ctx, userID, projectSlug, tag, limit)
+}
+
+func (m *mockAgentService) NotesCreate(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error) {
+	if m.notesCreateFn == nil {
+		panic("mockAgentService.NotesCreate not implemented")
+	}
+	return m.notesCreateFn(ctx, userID, title, body, projectSlug, tags)
 }
 
 // newJWTManager creates a JWTManager for testing.
@@ -244,6 +278,10 @@ func TestNew_RegistersAllTools(t *testing.T) {
 		"memory_list",
 		"memory_delete",
 		"context_gather",
+		"notes_search",
+		"notes_read",
+		"notes_list",
+		"notes_create",
 	}
 
 	require.Len(t, tools, len(expectedTools), "expected %d tools registered", len(expectedTools))
@@ -492,6 +530,10 @@ func TestAuthCheckMiddleware_AllTools_Unauthorized(t *testing.T) {
 		{"memory_list", "memory_list", map[string]any{}},
 		{"memory_delete", "memory_delete", map[string]any{"category": "x", "name": "x"}},
 		{"context_gather", "context_gather", map[string]any{"query": "x"}},
+		{"notes_search", "notes_search", map[string]any{"query": "x"}},
+		{"notes_read", "notes_read", map[string]any{"id": "x"}},
+		{"notes_list", "notes_list", map[string]any{}},
+		{"notes_create", "notes_create", map[string]any{"title": "x", "body": "x"}},
 	}
 
 	for _, tc := range tests {

@@ -16,7 +16,9 @@ import (
 
 	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/auth"
+	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/search"
 )
 
 // AgentService defines the interface for the agent service used by MCP tools.
@@ -36,6 +38,12 @@ type AgentService interface {
 	MemoryDelete(ctx context.Context, userID, category, name string) error
 
 	ContextGather(ctx context.Context, userID, query string, maxChars int) ([]agent.KnowledgeHit, error)
+
+	// User note access tools.
+	NotesSearch(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error)
+	NotesRead(ctx context.Context, userID, noteID string) (*note.Note, error)
+	NotesList(ctx context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error)
+	NotesCreate(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error)
 }
 
 // Default rate limit: 60 requests per minute per user with burst of 20.

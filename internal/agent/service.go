@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/search"
@@ -47,6 +49,7 @@ type ServiceConfig struct {
 	NoteService    NoteCreator
 	ProjectService ProjectCreator
 	SearchService  Searcher
+	AIQueue        *ai.Queue // may be nil if AI disabled; used to enqueue embed tasks
 	UserDBManager  userdb.Manager
 	Logger         *slog.Logger
 }
@@ -266,6 +269,7 @@ func (s *Service) SessionProgressUpdate(ctx context.Context, userID, sessionName
 		if createErr != nil {
 			return "", fmt.Errorf("agent.Service.SessionProgressUpdate: create: %w", createErr)
 		}
+		s.enqueueEmbed(ctx, userID, n.ID)
 		return n.ID, nil
 	}
 
@@ -303,6 +307,7 @@ func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, conte
 		}); updateErr != nil {
 			return "", fmt.Errorf("agent.Service.MemoryWrite: update: %w", updateErr)
 		}
+		s.enqueueEmbed(ctx, userID, noteID)
 		return noteID, nil
 	}
 
@@ -321,6 +326,7 @@ func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, conte
 	if createErr != nil {
 		return "", fmt.Errorf("agent.Service.MemoryWrite: create: %w", createErr)
 	}
+	s.enqueueEmbed(ctx, userID, n.ID)
 	return n.ID, nil
 }
 
@@ -357,6 +363,7 @@ func (s *Service) MemoryAppend(ctx context.Context, userID, category, name, cont
 	}); err != nil {
 		return fmt.Errorf("agent.Service.MemoryAppend: update: %w", err)
 	}
+	s.enqueueEmbed(ctx, userID, noteID)
 	return nil
 }
 
@@ -367,6 +374,10 @@ func (s *Service) MemoryList(ctx context.Context, userID, category string) ([]Me
 		return nil, fmt.Errorf("agent.Service.MemoryList: %w", err)
 	}
 
+	// When category is provided, filter by domain tag. The type:knowledge tag
+	// is also present on all knowledge notes but NoteFilter.Tag accepts only
+	// a single tag. Using domain:{category} is more specific and sufficient
+	// since only knowledge notes have domain: tags.
 	tag := "type:knowledge"
 	if category != "" {
 		tag = "domain:" + category
@@ -404,7 +415,84 @@ func (s *Service) MemoryDelete(ctx context.Context, userID, category, name strin
 	if err := s.cfg.NoteService.Delete(ctx, userID, noteID); err != nil {
 		return fmt.Errorf("agent.Service.MemoryDelete: %w", err)
 	}
+	s.enqueueDeleteEmbed(ctx, userID, noteID)
 	return nil
+}
+
+// --- User Note Access ---
+
+// NotesSearch performs full-text search across user notes.
+func (s *Service) NotesSearch(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error) {
+	if s.cfg.SearchService == nil {
+		return nil, fmt.Errorf("agent.Service.NotesSearch: search not configured")
+	}
+	results, _, err := s.cfg.SearchService.SearchFTS(ctx, userID, query, limit, 0)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesSearch: %w", err)
+	}
+	return results, nil
+}
+
+// NotesRead reads a user note by ID, returning the full note.
+func (s *Service) NotesRead(ctx context.Context, userID, noteID string) (*note.Note, error) {
+	n, err := s.cfg.NoteService.Get(ctx, userID, noteID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesRead: %w", err)
+	}
+	return n, nil
+}
+
+// NotesList lists user notes with optional project and tag filtering.
+func (s *Service) NotesList(ctx context.Context, userID string, projectSlug, tag string, limit int) ([]*note.Note, int, error) {
+	filter := note.NoteFilter{
+		Tag:   tag,
+		Limit: limit,
+	}
+
+	// Resolve project slug to ID if provided.
+	if projectSlug != "" {
+		p, err := s.cfg.ProjectService.GetBySlug(ctx, userID, projectSlug)
+		if err != nil {
+			return nil, 0, fmt.Errorf("agent.Service.NotesList: resolve project: %w", err)
+		}
+		filter.ProjectID = p.ID
+	}
+
+	notes, total, err := s.cfg.NoteService.List(ctx, userID, filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("agent.Service.NotesList: %w", err)
+	}
+	return notes, total, nil
+}
+
+// NotesCreate creates a user note with the "created-by:agent" tag auto-appended.
+func (s *Service) NotesCreate(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error) {
+	var projectID string
+	if projectSlug != "" {
+		p, err := s.cfg.ProjectService.GetBySlug(ctx, userID, projectSlug)
+		if err != nil {
+			return nil, fmt.Errorf("agent.Service.NotesCreate: resolve project: %w", err)
+		}
+		projectID = p.ID
+	}
+
+	// Always append created-by:agent tag.
+	tags = append(tags, TagCreatedByAgent)
+
+	n, err := s.cfg.NoteService.Create(ctx, userID, note.CreateNoteReq{
+		Title:     title,
+		Body:      body,
+		ProjectID: projectID,
+		Tags:      tags,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesCreate: %w", err)
+	}
+
+	// Enqueue embed task (watcher is suppressed by note.Service.Create).
+	s.enqueueEmbed(ctx, userID, n.ID)
+
+	return n, nil
 }
 
 // --- Tool Call Audit ---
@@ -451,6 +539,7 @@ func (s *Service) upsertSessionNote(ctx context.Context, userID, sessionName, no
 		}); updateErr != nil {
 			return "", fmt.Errorf("agent.Service.upsertSessionNote: update: %w", updateErr)
 		}
+		s.enqueueEmbed(ctx, userID, noteID)
 		return noteID, nil
 	}
 
@@ -469,6 +558,7 @@ func (s *Service) upsertSessionNote(ctx context.Context, userID, sessionName, no
 	if createErr != nil {
 		return "", fmt.Errorf("agent.Service.upsertSessionNote: create: %w", createErr)
 	}
+	s.enqueueEmbed(ctx, userID, n.ID)
 	return n.ID, nil
 }
 
@@ -759,6 +849,42 @@ func truncateKnowledge(hits []KnowledgeHit, maxChars int) []KnowledgeHit {
 		}
 	}
 	return result
+}
+
+// enqueueEmbed enqueues an embed task for a note. Silently skips if AIQueue is nil.
+// This is necessary because note.Service.Create suppresses watcher events,
+// so agent notes will not be auto-embedded by the watcher.
+func (s *Service) enqueueEmbed(ctx context.Context, userID, noteID string) {
+	if s.cfg.AIQueue == nil {
+		return
+	}
+	payload, _ := json.Marshal(ai.EmbedPayload{NoteID: noteID})
+	if err := s.cfg.AIQueue.Enqueue(ctx, &ai.Task{
+		UserID:   userID,
+		Type:     ai.TaskTypeEmbed,
+		Priority: ai.PriorityBackground,
+		Payload:  payload,
+	}); err != nil {
+		s.cfg.Logger.Warn("agent: failed to enqueue embed task",
+			"note_id", noteID, "error", err)
+	}
+}
+
+// enqueueDeleteEmbed enqueues a delete-embed task for a note.
+func (s *Service) enqueueDeleteEmbed(ctx context.Context, userID, noteID string) {
+	if s.cfg.AIQueue == nil {
+		return
+	}
+	payload, _ := json.Marshal(ai.DeleteEmbedPayload{NoteID: noteID})
+	if err := s.cfg.AIQueue.Enqueue(ctx, &ai.Task{
+		UserID:   userID,
+		Type:     ai.TaskTypeDeleteEmbed,
+		Priority: ai.PriorityBackground,
+		Payload:  payload,
+	}); err != nil {
+		s.cfg.Logger.Warn("agent: failed to enqueue delete embed task",
+			"note_id", noteID, "error", err)
+	}
 }
 
 // parseKnowledgeTitle extracts category and name from a knowledge note title.

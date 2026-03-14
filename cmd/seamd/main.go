@@ -592,6 +592,7 @@ func run() error {
 		NoteService:    noteSvc,
 		ProjectService: projectSvc,
 		SearchService:  searchSvc,
+		AIQueue:        aiQueue,
 		UserDBManager:  userDBMgr,
 		Logger:         logger,
 	})

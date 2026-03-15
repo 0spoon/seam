@@ -8,6 +8,10 @@
 - [x] Complete
 - [~] In progress
 
+## Changelog
+
+- **2026-03-15**: Implemented #3 (Temporal RAG), #4 (Task Tracking), #7 (Webhooks). Added features #21-#30.
+
 ---
 
 ## 1. Reflexive Knowledge Distillation
@@ -36,7 +40,7 @@ Use embedding similarity to detect near-duplicate notes and present merge sugges
 
 ## 3. Temporal Context Windows for RAG
 
-- [ ] **Status: Not started**
+- [x] **Status: Complete**
 - **Effort:** Medium
 - **Impact:** High
 
@@ -44,17 +48,21 @@ Add time-decay weighting to semantic search results. Recent notes should score h
 
 **Why it matters for agents:** Current RAG retrieval treats a note from today and one from six months ago equally. For tasks like "what have I been working on" or "current status of X", recency is a critical signal.
 
+**Implementation:** Exponential decay with 7-day half-life in `internal/search/recency.go`. FTS and semantic search both support `recency_bias` parameter (0.0-1.0). Wired through agent service and MCP tools (`context_gather`, `notes_search`).
+
 ---
 
 ## 4. Structured Task/Action Tracking
 
-- [ ] **Status: Not started**
+- [x] **Status: Complete**
 - **Effort:** Medium
 - **Impact:** High
 
 Extract and track actionable items (`- [ ]` checkboxes) across all notes into a unified task view. Parse checkbox state from markdown, surface overdue/stale tasks, and let agents query open actions scoped by project or tag.
 
 **Why it matters for agents:** Agents doing "extract-actions" via the writer produce action items that vanish into note bodies. A queryable task index lets agents follow up, prioritize, and report on outstanding work across the entire knowledge base.
+
+**Implementation:** New `internal/task` package with regex-based checkbox parsing, DB-synced task index, and toggle API that updates both DB and markdown file. REST API at `/api/tasks`. MCP tools: `tasks_list`, `tasks_summary`. Auto-syncs via file watcher on note create/modify.
 
 ---
 
@@ -84,13 +92,15 @@ Replace the current "last write wins" model with a CRDT-based merge strategy for
 
 ## 7. Conditional Webhooks and Event Subscriptions
 
-- [ ] **Status: Not started**
+- [x] **Status: Complete**
 - **Effort:** Medium
 - **Impact:** Medium
 
 Let users and agents register webhook rules: "when a note is created in project X with tag Y, call this URL" or "when a note links to note Z, notify me." Expose via MCP as `webhook_register` / `webhook_list` / `webhook_delete`.
 
 **Why it matters for agents:** Agents today are pull-based -- they only see the world when invoked. Event subscriptions enable reactive agent workflows: auto-summarize new captures, auto-link new notes, trigger reviews when projects grow past a threshold.
+
+**Implementation:** New `internal/webhook` package with HMAC-SHA256 signed deliveries, event type filtering, delivery tracking, and SSRF-safe URL validation. REST API at `/api/webhooks`. MCP tools: `webhook_register`, `webhook_list`, `webhook_delete`. File watcher dispatches `note.created`, `note.updated`, `note.deleted` events.
 
 ---
 
@@ -250,38 +260,172 @@ Allow users to define custom MCP tools as small Go plugins or scripts (shell, Py
 
 ---
 
+---
+
+## 21. Agent Memory Namespaces
+
+- [ ] **Status: Not started**
+- **Effort:** Small
+- **Impact:** High
+
+Add hierarchical namespaces to agent memory (e.g., `project/backend/conventions`, `tool/git/patterns`). Support glob-pattern reads (`memory_list category=project/*`) and namespace-scoped deletion. Currently memory is flat key-value under a single category.
+
+**Why it matters for agents:** As agents accumulate memory across many sessions, flat categories become unwieldy. Namespaces let agents organize learned knowledge into a tree structure that mirrors the project/topic hierarchy, making retrieval precise and cleanup targeted.
+
+---
+
+## 22. Context Budget Optimizer
+
+- [ ] **Status: Not started**
+- **Effort:** Medium
+- **Impact:** High
+
+Add a `context_optimize` MCP tool that, given a token budget and a goal, returns the optimal subset of notes/memory/session context that maximizes relevance while fitting within the budget. Uses embedding similarity + recency + link proximity to rank and pack content.
+
+**Why it matters for agents:** Agents have limited context windows. Currently they request context and hope it fits. A budget-aware optimizer lets agents say "give me the best 8000 tokens of context for this task" and get a curated, non-redundant selection.
+
+---
+
+## 23. Inline Code Block Execution
+
+- [ ] **Status: Not started**
+- **Effort:** Medium
+- **Impact:** Medium
+
+Detect fenced code blocks in notes (```bash, ```sql, ```python) and allow execution via an MCP tool (`code_run`). Results are appended below the code block as a collapsible output section. Sandboxed with configurable allowed languages.
+
+**Why it matters for agents:** Agents writing runbooks or data analysis notes can make them executable. A note documenting a database query becomes a live dashboard. Transforms notes from passive documentation to active tools.
+
+---
+
+## 24. Note Templates with Dynamic Placeholders
+
+- [ ] **Status: Not started**
+- **Effort:** Small
+- **Impact:** Medium
+
+Extend the existing template system with dynamic placeholders: `{{date}}`, `{{project}}`, `{{related_notes:query}}`, `{{task_summary:project}}`. Templates can pull live data when instantiated. Agents can create notes from templates via `note_from_template` MCP tool.
+
+**Why it matters for agents:** Agents generating recurring reports (weekly review, project status) need structured output. Dynamic templates eliminate boilerplate and ensure consistent formatting while pulling fresh data at creation time.
+
+---
+
+## 25. Semantic Link Suggestions
+
+- [ ] **Status: Not started**
+- **Effort:** Medium
+- **Impact:** High
+
+After a note is saved, run a background job that compares its embedding against all other notes and suggests wikilinks the author might want to add. Surface suggestions as annotations or in a sidebar. Expose via MCP as `links_suggest`.
+
+**Why it matters for agents:** The knowledge graph's value comes from connections. Agents (and users) often miss relevant links. Automated suggestions strengthen the graph, improve RAG retrieval, and surface unexpected connections.
+
+---
+
+## 26. Session Handoff Protocol
+
+- [ ] **Status: Not started**
+- **Effort:** Small
+- **Impact:** High
+
+When an agent session ends, generate a structured handoff document: what was accomplished, what's pending, what context the next session needs. Store as a special memory entry. The next `session_start` briefing automatically includes the most recent handoff.
+
+**Why it matters for agents:** Agent sessions are stateless between invocations. Handoff documents create continuity -- the next session picks up exactly where the last left off, without the user having to re-explain context. Critical for multi-session workflows.
+
+---
+
+## 27. Knowledge Gap Detection
+
+- [ ] **Status: Not started**
+- **Effort:** Large
+- **Impact:** High
+
+Analyze the knowledge graph for structural gaps: topics referenced but never documented, questions asked in chat but never answered in notes, wikilinks pointing to non-existent notes, projects with sparse coverage. Surface as a "gaps" report via MCP and web UI.
+
+**Why it matters for agents:** Agents doing knowledge gardening need to know what's missing, not just what exists. Gap detection guides agents toward the highest-value knowledge creation: filling holes rather than duplicating coverage.
+
+---
+
+## 28. Conversation-to-Note Extraction
+
+- [ ] **Status: Not started**
+- **Effort:** Medium
+- **Impact:** High
+
+After a chat conversation, offer to extract key insights, decisions, and action items into new notes or append to existing ones. AI identifies the valuable parts of the conversation and structures them as proper knowledge artifacts.
+
+**Why it matters for agents:** Chat conversations contain valuable knowledge that currently vanishes when the conversation ends. Extraction ensures that insights from agent interactions become permanent, searchable knowledge.
+
+---
+
+## 29. Multi-Model Routing
+
+- [ ] **Status: Not started**
+- **Effort:** Medium
+- **Impact:** Medium
+
+Route different AI tasks to different Ollama models based on task type: fast/small models for classification and tagging, medium models for search and summarization, large models for synthesis and generation. Configurable per-task routing table.
+
+**Why it matters for agents:** Not every AI operation needs the biggest model. Smart routing reduces latency for simple tasks (inbox triage, tag suggestion) while reserving powerful models for complex work (synthesis, multi-hop reasoning). Better UX, lower resource usage.
+
+---
+
+## 30. Agent Confidence Scoring
+
+- [ ] **Status: Not started**
+- **Effort:** Small
+- **Impact:** Medium
+
+Add confidence metadata to agent outputs: when an agent writes a memory entry, creates a note, or provides a search result, include a confidence score (0-1) based on source quality, embedding similarity, and recency. Low-confidence items get flagged for human review.
+
+**Why it matters for agents:** Not all agent outputs are equally reliable. Confidence scoring lets the system (and users) distinguish between high-certainty facts and speculative connections, enabling trust-calibrated workflows and targeted review.
+
+---
+
 ## Priority Matrix
 
-| # | Feature | Effort | Impact | Agent Value |
-|---|---------|--------|--------|-------------|
-| 1 | Reflexive Knowledge Distillation | Large | High | Critical |
-| 2 | Semantic Deduplication | Medium | High | High |
-| 3 | Temporal RAG Windows | Medium | High | High |
-| 4 | Structured Task Tracking | Medium | High | High |
-| 5 | Knowledge Graph Clustering | Large | Medium | Medium |
-| 6 | CRDT Concurrent Editing | Large | Medium | Medium |
-| 7 | Webhooks & Event Subscriptions | Medium | Medium | High |
-| 8 | Multi-Hop RAG | Large | High | Critical |
-| 9 | Agent Playbooks | Medium | High | Critical |
-| 10 | Smart Inbox Triage | Medium | High | High |
-| 11 | Note Maturity Scoring | Small | Medium | High |
-| 12 | Project Health Dashboard | Medium | Medium | Medium |
-| 13 | Annotation Layer | Medium | Medium | Medium |
-| 14 | Scheduled Agent Tasks | Medium | High | Critical |
-| 15 | Provenance Tracking | Medium | Medium | High |
-| 16 | Diff-Aware Versioning | Medium | Medium | High |
-| 17 | Cross-User Sharing | Large | Medium | Medium |
-| 18 | NL Query Interface | Medium | Medium | Medium |
-| 19 | Reading List & Spaced Repetition | Medium | Medium | Medium |
-| 20 | Plugin/Extension System | Large | High | Critical |
+| # | Feature | Effort | Impact | Agent Value | Status |
+|---|---------|--------|--------|-------------|--------|
+| 1 | Reflexive Knowledge Distillation | Large | High | Critical | Not started |
+| 2 | Semantic Deduplication | Medium | High | High | Not started |
+| 3 | Temporal RAG Windows | Medium | High | High | **Complete** |
+| 4 | Structured Task Tracking | Medium | High | High | **Complete** |
+| 5 | Knowledge Graph Clustering | Large | Medium | Medium | Not started |
+| 6 | CRDT Concurrent Editing | Large | Medium | Medium | Not started |
+| 7 | Webhooks & Event Subscriptions | Medium | Medium | High | **Complete** |
+| 8 | Multi-Hop RAG | Large | High | Critical | Not started |
+| 9 | Agent Playbooks | Medium | High | Critical | Not started |
+| 10 | Smart Inbox Triage | Medium | High | High | Not started |
+| 11 | Note Maturity Scoring | Small | Medium | High | Not started |
+| 12 | Project Health Dashboard | Medium | Medium | Medium | Not started |
+| 13 | Annotation Layer | Medium | Medium | Medium | Not started |
+| 14 | Scheduled Agent Tasks | Medium | High | Critical | Not started |
+| 15 | Provenance Tracking | Medium | Medium | High | Not started |
+| 16 | Diff-Aware Versioning | Medium | Medium | High | Not started |
+| 17 | Cross-User Sharing | Large | Medium | Medium | Not started |
+| 18 | NL Query Interface | Medium | Medium | Medium | Not started |
+| 19 | Reading List & Spaced Repetition | Medium | Medium | Medium | Not started |
+| 20 | Plugin/Extension System | Large | High | Critical | Not started |
+| 21 | Agent Memory Namespaces | Small | High | High | Not started |
+| 22 | Context Budget Optimizer | Medium | High | Critical | Not started |
+| 23 | Inline Code Block Execution | Medium | Medium | Medium | Not started |
+| 24 | Dynamic Note Templates | Small | Medium | Medium | Not started |
+| 25 | Semantic Link Suggestions | Medium | High | High | Not started |
+| 26 | Session Handoff Protocol | Small | High | Critical | Not started |
+| 27 | Knowledge Gap Detection | Large | High | High | Not started |
+| 28 | Conversation-to-Note Extraction | Medium | High | High | Not started |
+| 29 | Multi-Model Routing | Medium | Medium | Medium | Not started |
+| 30 | Agent Confidence Scoring | Small | Medium | Medium | Not started |
 
-### Recommended Build Order (highest agent ROI first)
+### Recommended Next Build Order (highest agent ROI first)
 
-1. **Smart Inbox Triage** (#10) -- quick win, immediate value
-2. **Note Maturity Scoring** (#11) -- small effort, enables gardening
-3. **Diff-Aware Versioning** (#16) -- schema exists, just needs wiring
-4. **Temporal RAG Windows** (#3) -- improves every agent interaction
-5. **Structured Task Tracking** (#4) -- unlocks action-oriented workflows
-6. **Agent Playbooks** (#9) -- codifies repeatable agent patterns
-7. **Scheduled Agent Tasks** (#14) -- makes the system self-maintaining
-8. **Reflexive Knowledge Distillation** (#1) -- the compounding flywheel
+1. **Session Handoff Protocol** (#26) -- small effort, massive continuity improvement
+2. **Agent Memory Namespaces** (#21) -- small effort, organizes growing memory
+3. **Note Maturity Scoring** (#11) -- small effort, enables gardening
+4. **Context Budget Optimizer** (#22) -- every agent interaction gets smarter
+5. **Semantic Link Suggestions** (#25) -- strengthens the knowledge graph passively
+6. **Smart Inbox Triage** (#10) -- automates the most common capture workflow
+7. **Conversation-to-Note Extraction** (#28) -- captures transient knowledge
+8. **Agent Playbooks** (#9) -- codifies repeatable agent patterns
+9. **Scheduled Agent Tasks** (#14) -- makes the system self-maintaining
+10. **Reflexive Knowledge Distillation** (#1) -- the compounding flywheel

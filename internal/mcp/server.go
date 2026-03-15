@@ -37,13 +37,17 @@ type AgentService interface {
 	MemoryList(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	MemoryDelete(ctx context.Context, userID, category, name string) error
 
-	ContextGather(ctx context.Context, userID, query string, maxChars int) ([]agent.KnowledgeHit, error)
+	ContextGather(ctx context.Context, userID, query, scope string, maxChars int) ([]agent.KnowledgeHit, error)
 
 	// User note access tools.
 	NotesSearch(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error)
 	NotesRead(ctx context.Context, userID, noteID string) (*note.Note, error)
 	NotesList(ctx context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error)
 	NotesCreate(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error)
+
+	// V2: Memory search and session metrics.
+	MemorySearch(ctx context.Context, userID, query string, limit int) ([]agent.KnowledgeHit, error)
+	SessionMetrics(ctx context.Context, userID, sessionName string) (*agent.SessionMetrics, error)
 }
 
 // Default rate limit: 60 requests per minute per user with burst of 20.

@@ -37,11 +37,13 @@ type mockAgentService struct {
 	memoryAppendFn          func(ctx context.Context, userID, category, name, content string) error
 	memoryListFn            func(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	memoryDeleteFn          func(ctx context.Context, userID, category, name string) error
-	contextGatherFn         func(ctx context.Context, userID, query string, maxChars int) ([]agent.KnowledgeHit, error)
+	contextGatherFn         func(ctx context.Context, userID, query, scope string, maxChars int) ([]agent.KnowledgeHit, error)
 	notesSearchFn           func(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error)
 	notesReadFn             func(ctx context.Context, userID, noteID string) (*note.Note, error)
 	notesListFn             func(ctx context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error)
 	notesCreateFn           func(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error)
+	memorySearchFn          func(ctx context.Context, userID, query string, limit int) ([]agent.KnowledgeHit, error)
+	sessionMetricsFn        func(ctx context.Context, userID, sessionName string) (*agent.SessionMetrics, error)
 }
 
 func (m *mockAgentService) SessionStart(ctx context.Context, userID, name string, maxContextChars int) (*agent.Briefing, error) {
@@ -121,11 +123,11 @@ func (m *mockAgentService) MemoryDelete(ctx context.Context, userID, category, n
 	return m.memoryDeleteFn(ctx, userID, category, name)
 }
 
-func (m *mockAgentService) ContextGather(ctx context.Context, userID, query string, maxChars int) ([]agent.KnowledgeHit, error) {
+func (m *mockAgentService) ContextGather(ctx context.Context, userID, query, scope string, maxChars int) ([]agent.KnowledgeHit, error) {
 	if m.contextGatherFn == nil {
 		return []agent.KnowledgeHit{}, nil
 	}
-	return m.contextGatherFn(ctx, userID, query, maxChars)
+	return m.contextGatherFn(ctx, userID, query, scope, maxChars)
 }
 
 func (m *mockAgentService) NotesSearch(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error) {
@@ -154,6 +156,20 @@ func (m *mockAgentService) NotesCreate(ctx context.Context, userID, title, body,
 		panic("mockAgentService.NotesCreate not implemented")
 	}
 	return m.notesCreateFn(ctx, userID, title, body, projectSlug, tags)
+}
+
+func (m *mockAgentService) MemorySearch(ctx context.Context, userID, query string, limit int) ([]agent.KnowledgeHit, error) {
+	if m.memorySearchFn == nil {
+		return []agent.KnowledgeHit{}, nil
+	}
+	return m.memorySearchFn(ctx, userID, query, limit)
+}
+
+func (m *mockAgentService) SessionMetrics(ctx context.Context, userID, sessionName string) (*agent.SessionMetrics, error) {
+	if m.sessionMetricsFn == nil {
+		panic("mockAgentService.SessionMetrics not implemented")
+	}
+	return m.sessionMetricsFn(ctx, userID, sessionName)
 }
 
 // newJWTManager creates a JWTManager for testing.
@@ -282,6 +298,8 @@ func TestNew_RegistersAllTools(t *testing.T) {
 		"notes_read",
 		"notes_list",
 		"notes_create",
+		"memory_search",
+		"session_metrics",
 	}
 
 	require.Len(t, tools, len(expectedTools), "expected %d tools registered", len(expectedTools))
@@ -534,6 +552,8 @@ func TestAuthCheckMiddleware_AllTools_Unauthorized(t *testing.T) {
 		{"notes_read", "notes_read", map[string]any{"id": "x"}},
 		{"notes_list", "notes_list", map[string]any{}},
 		{"notes_create", "notes_create", map[string]any{"title": "x", "body": "x"}},
+		{"memory_search", "memory_search", map[string]any{"query": "x"}},
+		{"session_metrics", "session_metrics", map[string]any{"session_name": "x"}},
 	}
 
 	for _, tc := range tests {

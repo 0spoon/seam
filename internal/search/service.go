@@ -56,3 +56,23 @@ func (s *Service) SearchSemantic(ctx context.Context, userID, query string, limi
 	}
 	return sem.Search(ctx, userID, query, limit)
 }
+
+// SearchFTSScoped performs full-text search with project-based scope filtering.
+func (s *Service) SearchFTSScoped(ctx context.Context, userID, query string, limit, offset int, includeProjectID, excludeProjectID string) ([]FTSResult, int, error) {
+	db, err := s.dbManager.Open(ctx, userID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.Service.SearchFTSScoped: %w", err)
+	}
+	return s.ftsStore.SearchScoped(ctx, db, query, limit, offset, includeProjectID, excludeProjectID)
+}
+
+// SearchSemanticScoped performs semantic search with a ChromaDB metadata filter.
+func (s *Service) SearchSemanticScoped(ctx context.Context, userID, query string, limit int, where map[string]interface{}) ([]SemanticResult, error) {
+	s.semanticMu.RLock()
+	sem := s.semantic
+	s.semanticMu.RUnlock()
+	if sem == nil {
+		return nil, fmt.Errorf("search.Service.SearchSemanticScoped: semantic search not configured")
+	}
+	return sem.SearchScoped(ctx, userID, query, limit, where)
+}

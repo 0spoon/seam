@@ -104,6 +104,19 @@ type MemoryItem struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// SessionMetrics holds aggregate statistics for a session.
+type SessionMetrics struct {
+	SessionName   string         `json:"session_name"`
+	Status        string         `json:"status"`
+	DurationSec   int64          `json:"duration_sec"`
+	ToolCallCount int            `json:"tool_call_count"`
+	ToolBreakdown map[string]int `json:"tool_breakdown"`
+	NotesCreated  int            `json:"notes_created"`
+	NotesModified int            `json:"notes_modified"`
+	ErrorCount    int            `json:"error_count"`
+	AvgDurationMs int64          `json:"avg_duration_ms"`
+}
+
 // DBTX is satisfied by both *sql.DB and *sql.Tx.
 type DBTX interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
@@ -122,6 +135,7 @@ type Store interface {
 	ReconcileChildren(ctx context.Context, db DBTX, parentID, parentName string) (int64, error)
 	LogToolCall(ctx context.Context, db DBTX, tc *ToolCallRecord) error
 	ListToolCalls(ctx context.Context, db DBTX, sessionID string, limit int) ([]*ToolCallRecord, error)
+	GetSessionMetrics(ctx context.Context, db DBTX, sessionID string) (int, map[string]int, int, int64, error)
 }
 
 // sessionNameRe allows only alphanumeric, hyphens, underscores, and forward slashes.

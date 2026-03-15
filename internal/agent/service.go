@@ -42,6 +42,13 @@ type ProjectCreator interface {
 type Searcher interface {
 	SearchFTS(ctx context.Context, userID, query string, limit, offset int) ([]search.FTSResult, int, error)
 	SearchSemantic(ctx context.Context, userID, query string, limit int) ([]search.SemanticResult, error)
+	SearchFTSScoped(ctx context.Context, userID, query string, limit, offset int, includeProjectID, excludeProjectID string) ([]search.FTSResult, int, error)
+	SearchSemanticScoped(ctx context.Context, userID, query string, limit int, where map[string]interface{}) ([]search.SemanticResult, error)
+}
+
+// WSNotifier abstracts WebSocket event delivery.
+type WSNotifier interface {
+	SendAgentEvent(userID string, eventType string, payload interface{})
 }
 
 // ServiceConfig holds dependencies for the agent Service.
@@ -50,7 +57,8 @@ type ServiceConfig struct {
 	NoteService    NoteCreator
 	ProjectService ProjectCreator
 	SearchService  Searcher
-	AIQueue        *ai.Queue // may be nil if AI disabled; used to enqueue embed tasks
+	AIQueue        *ai.Queue  // may be nil if AI disabled; used to enqueue embed tasks
+	WSNotifier     WSNotifier // may be nil; used to push agent events via WebSocket
 	UserDBManager  userdb.Manager
 	Logger         *slog.Logger
 }
@@ -188,6 +196,11 @@ func (s *Service) SessionStart(ctx context.Context, userID, name string, maxCont
 			"session", name, "error", err)
 	}
 
+	s.notifyWS(userID, "agent.session_started", map[string]string{
+		"session_name": name,
+		"session_id":   sess.ID,
+	})
+
 	return s.assembleBriefing(ctx, userID, db, sess, maxContextChars)
 }
 
@@ -228,6 +241,12 @@ func (s *Service) SessionEnd(ctx context.Context, userID, sessionName, findings 
 	s.updateSessionNoteStatus(ctx, userID, sessionName, "completed")
 
 	s.cfg.Logger.Info("session ended", "user_id", userID, "session", sessionName)
+
+	s.notifyWS(userID, "agent.session_ended", map[string]string{
+		"session_name": sessionName,
+		"status":       StatusCompleted,
+	})
+
 	return nil
 }
 
@@ -318,6 +337,11 @@ func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, conte
 			return "", fmt.Errorf("agent.Service.MemoryWrite: update: %w", updateErr)
 		}
 		s.enqueueEmbed(ctx, userID, noteID)
+		s.notifyWS(userID, "agent.memory_changed", map[string]string{
+			"action":   "update",
+			"category": category,
+			"name":     name,
+		})
 		return noteID, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
@@ -340,6 +364,13 @@ func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, conte
 		return "", fmt.Errorf("agent.Service.MemoryWrite: create: %w", createErr)
 	}
 	s.enqueueEmbed(ctx, userID, n.ID)
+
+	s.notifyWS(userID, "agent.memory_changed", map[string]string{
+		"action":   "write",
+		"category": category,
+		"name":     name,
+	})
+
 	return n.ID, nil
 }
 
@@ -434,6 +465,13 @@ func (s *Service) MemoryDelete(ctx context.Context, userID, category, name strin
 		return fmt.Errorf("agent.Service.MemoryDelete: %w", err)
 	}
 	s.enqueueDeleteEmbed(ctx, userID, noteID)
+
+	s.notifyWS(userID, "agent.memory_changed", map[string]string{
+		"action":   "delete",
+		"category": category,
+		"name":     name,
+	})
+
 	return nil
 }
 
@@ -509,8 +547,14 @@ func (s *Service) NotesCreate(ctx context.Context, userID, title, body, projectS
 		return nil, fmt.Errorf("agent.Service.NotesCreate: %w", err)
 	}
 
-	// Enqueue embed task (watcher is suppressed by note.Service.Create).
-	s.enqueueEmbed(ctx, userID, n.ID)
+	// Enqueue embed task with "user" scope (this is a user-facing note).
+	s.enqueueEmbedWithScope(ctx, userID, n.ID, "user")
+
+	// Notify via WebSocket.
+	s.notifyWS(userID, "agent.note_created", map[string]string{
+		"note_id": n.ID,
+		"title":   title,
+	})
 
 	return n, nil
 }
@@ -529,18 +573,90 @@ func (s *Service) LogToolCall(ctx context.Context, userID string, tc *ToolCallRe
 // --- Context Gathering ---
 
 // ContextGather searches for relevant context across notes, returning results
-// truncated to the character budget.
-func (s *Service) ContextGather(ctx context.Context, userID, query string, maxChars int) ([]KnowledgeHit, error) {
+// truncated to the character budget. Scope filters: "agent", "user", or "all".
+func (s *Service) ContextGather(ctx context.Context, userID, query, scope string, maxChars int) ([]KnowledgeHit, error) {
 	if maxChars <= 0 {
 		maxChars = 3000
 	}
 
-	hits := s.searchKnowledge(ctx, userID, query, 10)
+	hits := s.searchKnowledgeScoped(ctx, userID, query, scope, 10)
 	if len(hits) == 0 {
 		return []KnowledgeHit{}, nil
 	}
 
 	return truncateKnowledge(hits, maxChars), nil
+}
+
+// --- Memory Search ---
+
+// MemorySearch searches agent knowledge notes using FTS and semantic search.
+// Returns results scoped to the agent-memory project.
+func (s *Service) MemorySearch(ctx context.Context, userID, query string, limit int) ([]KnowledgeHit, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	hits := s.searchKnowledgeScoped(ctx, userID, query, "agent", limit)
+	return hits, nil
+}
+
+// --- Session Metrics ---
+
+// SessionMetrics returns aggregate tool call statistics for a session.
+func (s *Service) SessionMetrics(ctx context.Context, userID, sessionName string) (*SessionMetrics, error) {
+	db, err := s.cfg.UserDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.SessionMetrics: open db: %w", err)
+	}
+
+	sess, err := s.cfg.Store.GetSessionByName(ctx, db, sessionName)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.SessionMetrics: %w", err)
+	}
+
+	totalCalls, breakdown, errorCount, avgDuration, err := s.cfg.Store.GetSessionMetrics(ctx, db, sess.ID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.SessionMetrics: %w", err)
+	}
+
+	// Count notes created/modified by looking at session-tagged notes.
+	notesCreated := 0
+	notesModified := 0
+	projectID, projErr := s.ensureAgentMemoryProject(ctx, userID)
+	if projErr == nil {
+		notes, _, listErr := s.cfg.NoteService.List(ctx, userID, note.NoteFilter{
+			ProjectID: projectID,
+			Tag:       "session:" + sessionName,
+			Limit:     100,
+		})
+		if listErr == nil {
+			for _, n := range notes {
+				if n.CreatedAt.Equal(n.UpdatedAt) || n.UpdatedAt.Sub(n.CreatedAt) < time.Second {
+					notesCreated++
+				} else {
+					notesModified++
+				}
+			}
+		}
+	}
+
+	durationSec := int64(0)
+	if sess.Status == StatusCompleted {
+		durationSec = int64(sess.UpdatedAt.Sub(sess.CreatedAt).Seconds())
+	} else {
+		durationSec = int64(time.Since(sess.CreatedAt).Seconds())
+	}
+
+	return &SessionMetrics{
+		SessionName:   sessionName,
+		Status:        sess.Status,
+		DurationSec:   durationSec,
+		ToolCallCount: totalCalls,
+		ToolBreakdown: breakdown,
+		NotesCreated:  notesCreated,
+		NotesModified: notesModified,
+		ErrorCount:    errorCount,
+		AvgDurationMs: avgDuration,
+	}, nil
 }
 
 // --- Internal Helpers ---
@@ -740,14 +856,41 @@ func (s *Service) assembleBriefing(ctx context.Context, userID string, db DBTX, 
 	return briefing, nil
 }
 
-// searchKnowledge performs FTS search, falling back gracefully.
+// searchKnowledge performs FTS search, falling back gracefully. Searches all notes.
 func (s *Service) searchKnowledge(ctx context.Context, userID, query string, limit int) []KnowledgeHit {
+	return s.searchKnowledgeScoped(ctx, userID, query, "all", limit)
+}
+
+// searchKnowledgeScoped performs scoped search (semantic then FTS fallback).
+// Scope: "agent" (agent-memory only), "user" (exclude agent-memory), "all" (everything).
+func (s *Service) searchKnowledgeScoped(ctx context.Context, userID, query, scope string, limit int) []KnowledgeHit {
 	if s.cfg.SearchService == nil {
 		return nil
 	}
 
+	// Build scope filters.
+	var chromaWhere map[string]interface{}
+	var includeProjectID, excludeProjectID string
+
+	switch scope {
+	case "agent":
+		chromaWhere = map[string]interface{}{"scope": "agent"}
+		// For FTS, scope to agent-memory project.
+		if pid, err := s.ensureAgentMemoryProject(ctx, userID); err == nil {
+			includeProjectID = pid
+		}
+	case "user":
+		chromaWhere = map[string]interface{}{"scope": "user"}
+		// For FTS, exclude agent-memory project.
+		if pid, err := s.ensureAgentMemoryProject(ctx, userID); err == nil {
+			excludeProjectID = pid
+		}
+	default:
+		// "all" - no filters.
+	}
+
 	// Try semantic search first.
-	semResults, err := s.cfg.SearchService.SearchSemantic(ctx, userID, query, limit)
+	semResults, err := s.cfg.SearchService.SearchSemanticScoped(ctx, userID, query, limit, chromaWhere)
 	if err == nil && len(semResults) > 0 {
 		hits := make([]KnowledgeHit, 0, len(semResults))
 		for _, r := range semResults {
@@ -762,7 +905,7 @@ func (s *Service) searchKnowledge(ctx context.Context, userID, query string, lim
 	}
 
 	// Fall back to FTS.
-	ftsResults, _, ftsErr := s.cfg.SearchService.SearchFTS(ctx, userID, query, limit, 0)
+	ftsResults, _, ftsErr := s.cfg.SearchService.SearchFTSScoped(ctx, userID, query, limit, 0, includeProjectID, excludeProjectID)
 	if ftsErr != nil || len(ftsResults) == 0 {
 		return nil
 	}
@@ -875,11 +1018,17 @@ func truncateKnowledge(hits []KnowledgeHit, maxChars int) []KnowledgeHit {
 // enqueueEmbed enqueues an embed task for a note. Silently skips if AIQueue is nil.
 // This is necessary because note.Service.Create suppresses watcher events,
 // so agent notes will not be auto-embedded by the watcher.
+// The scope parameter controls ChromaDB metadata ("agent" for agent-memory notes).
 func (s *Service) enqueueEmbed(ctx context.Context, userID, noteID string) {
+	s.enqueueEmbedWithScope(ctx, userID, noteID, "agent")
+}
+
+// enqueueEmbedWithScope enqueues an embed task with explicit scope.
+func (s *Service) enqueueEmbedWithScope(ctx context.Context, userID, noteID, scope string) {
 	if s.cfg.AIQueue == nil {
 		return
 	}
-	payload, _ := json.Marshal(ai.EmbedPayload{NoteID: noteID})
+	payload, _ := json.Marshal(ai.EmbedPayload{NoteID: noteID, Scope: scope})
 	if err := s.cfg.AIQueue.Enqueue(ctx, &ai.Task{
 		UserID:   userID,
 		Type:     ai.TaskTypeEmbed,
@@ -906,6 +1055,14 @@ func (s *Service) enqueueDeleteEmbed(ctx context.Context, userID, noteID string)
 		s.cfg.Logger.Warn("agent: failed to enqueue delete embed task",
 			"note_id", noteID, "error", err)
 	}
+}
+
+// notifyWS sends an agent event via WebSocket. Silently skips if WSNotifier is nil.
+func (s *Service) notifyWS(userID, eventType string, payload interface{}) {
+	if s.cfg.WSNotifier == nil {
+		return
+	}
+	s.cfg.WSNotifier.SendAgentEvent(userID, eventType, payload)
 }
 
 // parseKnowledgeTitle extracts category and name from a knowledge note title.

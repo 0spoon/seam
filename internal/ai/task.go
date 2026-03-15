@@ -62,6 +62,7 @@ type TaskEvent struct {
 // EmbedPayload is the JSON payload for embed tasks.
 type EmbedPayload struct {
 	NoteID string `json:"note_id"`
+	Scope  string `json:"scope,omitempty"` // "agent" or "user"; empty defaults to "user"
 }
 
 // DeleteEmbedPayload is the JSON payload for delete_embed tasks.

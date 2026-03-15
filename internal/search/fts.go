@@ -86,6 +86,79 @@ func (s *FTSStore) Search(ctx context.Context, db *sql.DB, query string, limit, 
 	return results, total, nil
 }
 
+// SearchScoped queries the FTS5 index with project-based scope filtering.
+// includeProjectID: only notes in this project (empty = no include filter).
+// excludeProjectID: exclude notes from this project (empty = no exclude filter).
+func (s *FTSStore) SearchScoped(ctx context.Context, db *sql.DB, query string, limit, offset int, includeProjectID, excludeProjectID string) ([]FTSResult, int, error) {
+	sanitized := sanitizeFTSQuery(query)
+	if sanitized == "" {
+		return nil, 0, nil
+	}
+
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Build the WHERE clause with optional project filter.
+	args := []interface{}{sanitized}
+	projectFilter := ""
+	if includeProjectID != "" {
+		projectFilter = " AND n.project_id = ?"
+		args = append(args, includeProjectID)
+	} else if excludeProjectID != "" {
+		projectFilter = " AND (n.project_id IS NULL OR n.project_id != ?)"
+		args = append(args, excludeProjectID)
+	}
+
+	// Count total matches.
+	var total int
+	countQuery := `SELECT COUNT(*) FROM notes_fts
+		JOIN notes n ON notes_fts.rowid = n.rowid
+		WHERE notes_fts MATCH ?` + projectFilter
+	err := db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchScoped: count: %w", err)
+	}
+
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	// Query with ranking and snippets.
+	searchArgs := append(args, limit, offset)
+	searchQuery := `SELECT n.id, n.title,
+		snippet(notes_fts, 1, '<mark>', '</mark>', '...', 32) as snippet,
+		bm25(notes_fts) as rank
+		FROM notes_fts
+		JOIN notes n ON notes_fts.rowid = n.rowid
+		WHERE notes_fts MATCH ?` + projectFilter + `
+		ORDER BY rank
+		LIMIT ? OFFSET ?`
+
+	rows, err := db.QueryContext(ctx, searchQuery, searchArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchScoped: query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FTSResult
+	for rows.Next() {
+		var r FTSResult
+		if err := rows.Scan(&r.NoteID, &r.Title, &r.Snippet, &r.Rank); err != nil {
+			return nil, 0, fmt.Errorf("search.FTSStore.SearchScoped: scan: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchScoped: rows: %w", err)
+	}
+
+	return results, total, nil
+}
+
 // ftsOperatorRe matches FTS5 operators that should be escaped in user input.
 // Note: * is handled separately (allowed at end of words for prefix search).
 var ftsOperatorRe = regexp.MustCompile(`[()":^]`)

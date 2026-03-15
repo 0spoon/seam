@@ -3,11 +3,19 @@
 Audit of features #3 (Temporal RAG), #4 (Task Tracking), #7 (Webhooks) implemented on 2026-03-15.
 All issues are verified against the actual code. Fix in priority order (Critical > High > Medium > Low).
 
+## Code Review Audit (2026-03-15)
+
+Each issue was verified against the source code. Results: 24/27 fully confirmed,
+2 partially confirmed (M3, L5 contain inaccurate claims), 1 uncertain (M13).
+Corrections are annotated inline with **[Audit]** tags.
+
 ---
 
 ## CRITICAL
 
 ### C1. Task: `toggleCheckboxInFile` frontmatter offset is off-by-one
+
+**Audit:** CONFIRMED. Bug is real. Example arithmetic below is slightly off (`endIdx` is 10, not 11) but the conclusion and impact are correct.
 
 **File:** `internal/task/service.go`, lines 247-255
 **Impact:** Toggles the WRONG checkbox line in every note with frontmatter.
@@ -32,9 +40,9 @@ body here\n
 ```
 
 - `fileStr[3:]` = `\ntitle: x\n---\nbody here\n`
-- `endIdx` = 11 (position of second `---` in substring)
-- `bodyStart` = 11 + 3 + 3 = 17
-- `strings.Count(fileStr[:17], "\n")` = 2
+- `endIdx` = 10 (position of second `---` in substring; **[Audit]** originally stated 11, corrected)
+- `bodyStart` = 10 + 3 + 3 = 16
+- `strings.Count(fileStr[:16], "\n")` = 2
 
 But the frontmatter occupies 3 lines (`---`, `title: x`, `---`). The body starts on line 4, so we need `fmLines = 3`, not 2. The line number will consistently be off by one.
 
@@ -73,6 +81,8 @@ Alternatively, count lines by splitting on `\n` and finding the closing `---` li
 
 ### C2. Webhook: Secret never returned to the user
 
+**Audit:** CONFIRMED. `json:"-"` tag on Secret field at store.go:22; writeJSON at handler.go:77 omits it.
+
 **File:** `internal/webhook/store.go`, line 22; `internal/webhook/handler.go`, line 77
 **Impact:** The HMAC signing feature is completely unusable. Users cannot verify webhook signatures.
 
@@ -108,6 +118,8 @@ The secret should ONLY be returned in the create response, never in list/get res
 
 ### C3. Search: Recency re-ranking applied AFTER SQL pagination
 
+**Audit:** CONFIRMED. SQL LIMIT/OFFSET at fts.go:206 uses caller's values; recency re-sort at fts.go:233 only operates on the already-paginated set. Both `SearchWithRecency` and `SearchScopedWithRecency` have the same flaw.
+
 **File:** `internal/search/fts.go`, lines 196-237 (`SearchWithRecency`) and lines 243-323 (`SearchScopedWithRecency`)
 **Impact:** Recency-adjusted results are drawn only from the BM25-top-N, not the full result set. A note ranked #101 by BM25 but updated 5 minutes ago could be the true #1 after recency adjustment, but it's never fetched.
 
@@ -139,6 +151,8 @@ The `total` count should still come from the COUNT query (unchanged), but note t
 ## HIGH
 
 ### H1. Webhook: No panic recovery in Dispatch goroutines
+
+**Audit:** CONFIRMED. No `recover()` in either goroutine. `ulid.MustNew` at line 389 is a plausible panic source.
 
 **File:** `internal/webhook/service.go`, lines 286-336
 **Impact:** A panic in `deliver`, `matchesFilter`, `json.Marshal` (cyclic payload), or `ulid.MustNew` crashes the entire server process.
@@ -176,6 +190,8 @@ Also replace `ulid.MustNew` with `ulid.New` + error handling in `recordDelivery`
 ---
 
 ### H2. Webhook: Concurrent SQLite writes from Dispatch goroutines
+
+**Audit:** CONFIRMED. Multiple goroutines call deliver() -> recordDelivery() -> store.CreateDelivery() concurrently on the same `*sql.DB`.
 
 **File:** `internal/webhook/service.go`, lines 329-333
 **Impact:** Multiple goroutines call `recordDelivery` concurrently, each doing `INSERT INTO webhook_deliveries`. Can cause `SQLITE_BUSY` errors under load.
@@ -224,6 +240,8 @@ for dr := range results {
 ---
 
 ### H3. Task: `SyncNote` regenerates all task IDs on every note save
+
+**Audit:** CONFIRMED. DeleteByNote at line 121 + insert with fresh ULIDs at line 130. Every save creates new IDs and resets CreatedAt.
 
 **File:** `internal/task/service.go`, lines 120-141
 **Impact:** Task IDs change on every sync. External references (bookmarks, API consumers tracking tasks by ID) break. `created_at` also resets every time.
@@ -287,6 +305,8 @@ This preserves task IDs and `created_at` for unchanged tasks.
 
 ### H4. Task: No transaction around `ToggleDone` Get+UpdateDone+file write
 
+**Audit:** CONFIRMED. Get (line 201) and UpdateDone (line 207) both use bare `db`, not a transaction. File write error at lines 213-216 is logged with Warn but the function returns nil.
+
 **File:** `internal/task/service.go`, lines 194-220
 **Impact:** Race condition between `ToggleDone` and `SyncNote` (from file watcher). DB and file can diverge. File write error is only logged, not returned.
 
@@ -343,6 +363,8 @@ Note: The file watcher will fire after the file write and call `SyncNote`, which
 
 ### M1. Webhook: `Dispatch` doesn't validate eventType
 
+**Audit:** CONFIRMED. No validation at service.go:285. Low exploitability since callers are internal, but defense-in-depth violation.
+
 **File:** `internal/webhook/service.go`, line 285
 **Impact:** If caller passes `%` as eventType, the LIKE query in `ListByEvent` matches ALL webhooks.
 
@@ -362,6 +384,8 @@ func (s *Service) Dispatch(ctx context.Context, userID, eventType string, eventP
 ---
 
 ### M2. Webhook: SSRF - initial request URL not checked at dispatch time
+
+**Audit:** CONFIRMED. `s.client.Do(req)` at service.go:357 sends the initial POST without SSRF check. `CheckRedirect` at line 90 only fires on redirects. Mitigated by this being a local-first app.
 
 **File:** `internal/webhook/service.go`, line 347
 **Impact:** `CheckRedirect` only fires on HTTP 3xx redirects. The initial POST to a private/metadata IP goes through unchecked.
@@ -386,8 +410,10 @@ func (s *Service) deliver(ctx context.Context, db DBTX, wh *Webhook, eventType s
 
 ### M3. Webhook: `isPrivateIP` doesn't check all dangerous addresses
 
+**Audit:** PARTIALLY CONFIRMED. Missing `IsUnspecified()` (`0.0.0.0` bypass) and `IsMulticast()` are real. Only first DNS result checked (line 485) is real. **[Audit correction]** The claim about `::ffff:127.0.0.1` bypassing the check is **incorrect** -- Go's `net.IP.IsLoopback()` correctly handles IPv4-mapped IPv6 addresses by checking the embedded IPv4 portion.
+
 **File:** `internal/webhook/service.go`, lines 478-491
-**Impact:** `0.0.0.0` (unspecified) and IPv6-mapped IPv4 like `::ffff:127.0.0.1` bypass the check. Only first DNS result checked.
+**Impact:** `0.0.0.0` (unspecified) bypasses the check. Only first DNS result checked. (**[Audit]** IPv6-mapped IPv4 claim removed -- Go handles this correctly.)
 
 **Fix:**
 ```go
@@ -419,6 +445,8 @@ func isDangerous(ip net.IP) bool {
 ---
 
 ### M4. MCP: `handleWebhookRegister` leaks raw error details
+
+**Audit:** CONFIRMED. tools.go:827 passes `err.Error()` directly. All other MCP handlers use `sanitizeError()`.
 
 **File:** `internal/mcp/tools.go`, line 827
 **Impact:** `err.Error()` exposed directly to the client, potentially leaking file paths, DB errors, etc.
@@ -452,6 +480,8 @@ return mcp.NewToolResultError(sanitizeError("webhook_register", err)), nil
 ---
 
 ### M5. MCP: `tasks_list` passes project slug as ProjectID
+
+**Audit:** CONFIRMED. tools.go:902 sets `filter.ProjectID` from a slug parameter. store.go:210-212 joins on `n.project_id = ?` expecting a ULID. Filter silently returns zero results.
 
 **File:** `internal/mcp/tools.go`, line 902
 **Impact:** Project filtering in `tasks_list` and `tasks_summary` is completely broken.
@@ -493,6 +523,8 @@ Option B is simpler and doesn't require adding a new dependency to MCP.
 
 ### M6. Search: FTS zero-value time on parse failure gets silent recency penalty
 
+**Audit:** CONFIRMED. Recency adjustment at fts.go:225 is applied unconditionally, even when `time.Parse` fails at line 220. The semantic path (semantic.go:402) correctly guards with `if updatedAt, ok := tsMap[...]; ok`. Inconsistent behavior.
+
 **File:** `internal/search/fts.go`, lines 220-225
 **Impact:** Notes with unparseable `updated_at` are silently penalized as "infinitely old" instead of neutral treatment.
 
@@ -510,6 +542,8 @@ if t, parseErr := time.Parse(time.RFC3339, updatedAtStr); parseErr == nil {
 ---
 
 ### M7. Search: Score compression destroys ranking for recent notes
+
+**Audit:** CONFIRMED. Max amplification is 2x original score. Clamping to 1.0 at semantic.go:404-406 compresses all recent notes with score > 0.5 (at max bias) to the same value.
 
 **File:** `internal/search/semantic.go`, lines 401-406
 **Impact:** Any recent note with score > 0.5 at max bias becomes indistinguishable (all clamped to 1.0).
@@ -530,6 +564,8 @@ adjustedScore := score*(1-recencyBias*0.3) + recencyWeight(updatedAt)*recencyBia
 ---
 
 ### M8. Search: No upper bound on semantic search limit in handler
+
+**Audit:** CONFIRMED. handler.go:109-114 has no cap. FTS handler caps at 500 (line 55). Unbounded limit flows to `nResults = limit * 3` in semantic.go:68, then to `WHERE id IN (...)` queries in batchGetNoteBodies/batchGetNoteTimestamps.
 
 **File:** `internal/search/handler.go`, lines 109-114
 **Impact:** Client can pass `limit=100000`, causing `nResults=300000` in semantic searcher, hitting SQLite's 999 bound parameter limit in `batchGetNoteTimestamps`.
@@ -553,6 +589,8 @@ if limit > 500 {
 
 ### M9. Task: `toggleCheckboxInFile` no path traversal guard
 
+**Audit:** CONFIRMED. service.go:232 uses `filepath.Join(notesDir, n.FilePath)` with no containment check. CLAUDE.md explicitly requires path traversal guards.
+
 **File:** `internal/task/service.go`, line 232
 **Impact:** If a corrupted note record has `FilePath` containing `..`, `filepath.Join` resolves it to an arbitrary path.
 
@@ -573,6 +611,8 @@ if !strings.HasPrefix(absPath, notesDir) {
 
 ### M10. Task: `ulid.MustNew` can panic in server context
 
+**Audit:** CONFIRMED. All three locations verified: task/service.go:130, webhook/service.go:148, webhook/service.go:389.
+
 **File:** `internal/task/service.go`, line 130; `internal/webhook/service.go`, lines 148 and 389
 **Impact:** If `crypto/rand.Reader` fails (extremely rare), `MustNew` panics, crashing the server.
 
@@ -590,6 +630,8 @@ Apply in all three locations.
 ---
 
 ### M11. Task: `parseTasks` doesn't handle `\r\n` line endings
+
+**Audit:** CONFIRMED. service.go:38 splits on `"\n"` only. Regex at line 21 uses `$` which matches before `\n` but leaves `\r` in captured content. Also affects `toggleCheckboxInFile` at line 239.
 
 **File:** `internal/task/service.go`, line 21
 **Impact:** On Windows-style files, `(.+)$` captures trailing `\r` in content. `strings.Split(body, "\n")` leaves `\r` on lines.
@@ -614,6 +656,8 @@ fileStr := strings.ReplaceAll(string(content), "\r\n", "\n")
 ---
 
 ### M12. Search: Invalid `recency_bias` silently ignored
+
+**Audit:** CONFIRMED. Both FTS (handler.go:68-72) and semantic (handler.go:118-122) handlers silently fall back. Whether this warrants a 400 is a design choice -- silent fallback is common for query params, but strict validation is better for API correctness.
 
 **File:** `internal/search/handler.go`, lines 68-72
 **Impact:** `recency_bias=2.0` or `recency_bias=abc` silently falls back to 0 instead of returning 400.
@@ -646,12 +690,14 @@ if rb := r.URL.Query().Get("recency_bias"); rb != "" {
 
 ### M13. Webhook: `webhookSvc` nil during startup reconciliation
 
+**Audit:** UNCERTAIN. The logical bug is plausible -- `webhookSvc` is assigned at line 621 via `:=` while reconciliation runs at line 451 -- but in Go, a short variable declaration (`:=`) creates scope from the declaration point forward. The closure at line 308 referencing a variable declared later at line 621 should be a compile error unless there is a `var webhookSvc *webhook.Service` declaration before the closure that is not visible in the current source. If the code compiles as-is, there must be such a forward declaration. Either way, the nil-during-reconciliation behavior is real. **Needs manual verification of compilation.**
+
 **File:** `cmd/seamd/main.go`, lines 308, 413, 621
 **Impact:** Webhooks don't fire during startup reconciliation. Not a crash (nil guard protects), but silent behavior gap.
 
 The closure `fileHandler` (line 308) references `webhookSvc` declared at line 621. During reconciliation (line 451), `webhookSvc` is still nil.
 
-**Fix:** Move webhook component creation (lines 619-622) before the `fileHandler` closure definition (line 308). Alternatively, use a `var webhookSvc *webhook.Service` declaration before the closure, then assign later:
+**Fix:** Move webhook component creation (lines 619-622) before the `fileHandler` closure definition (line 308). Alternatively, ensure `var webhookSvc *webhook.Service` is declared before the closure, then assign later:
 
 ```go
 // Before the closure (around line 307):
@@ -668,6 +714,8 @@ webhookSvc = webhook.NewService(webhookStore, userDBMgr, logger)
 ## LOW
 
 ### L1. Task: `?done=banana` silently treated as `done=false`
+
+**Audit:** CONFIRMED. handler.go:53 uses `d := doneParam == "true"` -- any non-"true" string becomes false.
 
 **File:** `internal/task/handler.go`, lines 52-55
 **Impact:** Confusing behavior; should return 400 for invalid boolean values.
@@ -693,6 +741,8 @@ if doneParam != "" {
 
 ### L2. Task: Missing composite index `(done, updated_at)`
 
+**Audit:** CONFIRMED. 003_tasks.sql has separate indexes on `done` and `updated_at`. Query at store.go:120 uses `ORDER BY t.done ASC, t.updated_at DESC`.
+
 **File:** `migrations/user/003_tasks.sql`
 **Impact:** The query `ORDER BY t.done ASC, t.updated_at DESC` can't use separate indexes efficiently.
 
@@ -704,6 +754,8 @@ CREATE INDEX IF NOT EXISTS idx_tasks_done_updated ON tasks(done, updated_at DESC
 ---
 
 ### L3. Webhook: No delivery retention/cleanup policy
+
+**Audit:** CONFIRMED. No cleanup mechanism anywhere in the codebase.
 
 **File:** `migrations/user/004_webhooks.sql`
 **Impact:** `webhook_deliveries` table grows without bound.
@@ -722,6 +774,8 @@ func (s *Service) CleanupDeliveries(ctx context.Context, userID string, retentio
 
 ### L4. Webhook: Store.Update doesn't allow secret rotation
 
+**Audit:** CONFIRMED. UPDATE at store.go:147 does not include the `secret` column. No rotation API exists.
+
 **File:** `internal/webhook/store.go`, lines 146-151
 **Impact:** Once created, a webhook secret can never be rotated.
 
@@ -736,14 +790,18 @@ func (s *Service) RotateSecret(ctx context.Context, userID, id string) (string, 
 
 ### L5. Search: `batchGetNoteTimestamps` silently swallows all DB errors
 
-**File:** `internal/search/semantic.go`, lines 283-333
-**Impact:** If the DB is unavailable, all notes silently get no recency adjustment. No signal in logs beyond a debug/warn message.
+**Audit:** PARTIALLY CONFIRMED. **[Audit correction]** The code already logs at Warn level (semantic.go:291,310,319,328), NOT Debug as originally claimed. The fix recommendation to "log at Warn level (not Debug)" is already implemented. The valid concern is that errors are swallowed (return empty map) rather than propagated, preventing the caller from knowing timestamps are unavailable.
 
-**Fix:** At minimum, log at Warn level (not Debug). Consider returning an error to the caller so it can decide whether to proceed without timestamps.
+**File:** `internal/search/semantic.go`, lines 283-333
+**Impact:** If the DB is unavailable, all notes silently get no recency adjustment. Errors are logged at Warn level but not propagated.
+
+**Fix:** Consider returning an error to the caller so it can decide whether to proceed without timestamps. The log level is already appropriate.
 
 ---
 
 ### L6. Task/Webhook: `time.Parse` errors silently discarded in stores
+
+**Audit:** CONFIRMED. All locations use `_, _ = time.Parse(...)` pattern with no logging.
 
 **Files:**
 - `internal/task/store.go`, lines 143-144, 241-242
@@ -763,6 +821,8 @@ if t, err := time.Parse(time.RFC3339, createdAt); err != nil {
 ---
 
 ### L7. Webhook: `listEvents` endpoint has no auth check
+
+**Audit:** CONFIRMED but LOW RISK. Auth middleware protects the route at the router level. This is defense-in-depth/consistency only.
 
 **File:** `internal/webhook/handler.go`, lines 104-106
 **Impact:** Inconsistent with all other webhook endpoints which check `userID`.
@@ -788,6 +848,8 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 
 ### L8. MCP: `mcpSrv.Close()` never called in shutdown sequence
 
+**Audit:** CONFIRMED. Shutdown sequence at main.go:688-709 does not include `mcpSrv.Close()`.
+
 **File:** `cmd/seamd/main.go`
 **Impact:** The limiter eviction goroutine leaks until process exit. Not harmful in production but incorrect for clean shutdown and could matter in tests.
 
@@ -796,6 +858,8 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 ---
 
 ### L9. Webhook: `matchesFilter` silently passes untyped payloads
+
+**Audit:** CONFIRMED. Type assertion at service.go:413 fails for struct payloads, returning `true` (pass-through). Note: current callers in main.go:414 do use `map[string]interface{}`, so this is latent rather than active.
 
 **File:** `internal/webhook/service.go`, lines 413-414
 **Impact:** If `eventPayload` is a struct (not `map[string]interface{}`), filter is bypassed -- webhook fires regardless of configured filters.
@@ -826,34 +890,34 @@ if !ok {
 
 ## Summary
 
-| Severity | ID | Package | One-line Summary |
-|----------|-----|---------|-----------------|
-| Critical | C1 | task | `toggleCheckboxInFile` frontmatter offset off-by-one |
-| Critical | C2 | webhook | Secret never returned to user (HMAC unusable) |
-| Critical | C3 | search | Recency re-ranking after SQL pagination (wrong results) |
-| High | H1 | webhook | No panic recovery in Dispatch goroutines |
-| High | H2 | webhook | Concurrent SQLite writes from goroutines |
-| High | H3 | task | Task IDs regenerated on every sync |
-| High | H4 | task | ToggleDone race condition (no transaction, file divergence) |
-| Medium | M1 | webhook | Dispatch doesn't validate eventType |
-| Medium | M2 | webhook | SSRF: initial request bypasses private IP check |
-| Medium | M3 | webhook | `isPrivateIP` misses unspecified/IPv6-mapped addresses |
-| Medium | M4 | mcp | `handleWebhookRegister` leaks raw error details |
-| Medium | M5 | mcp | tasks_list passes slug as ProjectID (filtering broken) |
-| Medium | M6 | search | Zero-value time penalty on parse failure |
-| Medium | M7 | search | Score compression destroys ranking discrimination |
-| Medium | M8 | search | No upper bound on semantic search limit |
-| Medium | M9 | task | No path traversal guard in `toggleCheckboxInFile` |
-| Medium | M10 | task/webhook | `ulid.MustNew` can panic in server context |
-| Medium | M11 | task | `parseTasks` doesn't handle `\r\n` line endings |
-| Medium | M12 | search | Invalid `recency_bias` silently ignored |
-| Medium | M13 | main | `webhookSvc` nil during startup reconciliation |
-| Low | L1 | task | `?done=banana` silently treated as false |
-| Low | L2 | task | Missing composite index `(done, updated_at)` |
-| Low | L3 | webhook | No delivery retention/cleanup policy |
-| Low | L4 | webhook | No secret rotation mechanism |
-| Low | L5 | search | `batchGetNoteTimestamps` swallows DB errors |
-| Low | L6 | task/webhook | `time.Parse` errors silently discarded |
-| Low | L7 | webhook | `listEvents` endpoint inconsistent auth check |
-| Low | L8 | main | `mcpSrv.Close()` never called on shutdown |
-| Low | L9 | webhook | `matchesFilter` bypassed for struct payloads |
+| Severity | ID | Package | One-line Summary | Audit |
+|----------|-----|---------|-----------------|-------|
+| Critical | C1 | task | `toggleCheckboxInFile` frontmatter offset off-by-one | CONFIRMED (example arithmetic corrected) |
+| Critical | C2 | webhook | Secret never returned to user (HMAC unusable) | CONFIRMED |
+| Critical | C3 | search | Recency re-ranking after SQL pagination (wrong results) | CONFIRMED |
+| High | H1 | webhook | No panic recovery in Dispatch goroutines | CONFIRMED |
+| High | H2 | webhook | Concurrent SQLite writes from goroutines | CONFIRMED |
+| High | H3 | task | Task IDs regenerated on every sync | CONFIRMED |
+| High | H4 | task | ToggleDone race condition (no transaction, file divergence) | CONFIRMED |
+| Medium | M1 | webhook | Dispatch doesn't validate eventType | CONFIRMED |
+| Medium | M2 | webhook | SSRF: initial request bypasses private IP check | CONFIRMED |
+| Medium | M3 | webhook | `isPrivateIP` misses unspecified addr, single DNS | PARTIAL (IPv6-mapped claim incorrect) |
+| Medium | M4 | mcp | `handleWebhookRegister` leaks raw error details | CONFIRMED |
+| Medium | M5 | mcp | tasks_list passes slug as ProjectID (filtering broken) | CONFIRMED |
+| Medium | M6 | search | Zero-value time penalty on parse failure | CONFIRMED |
+| Medium | M7 | search | Score compression destroys ranking discrimination | CONFIRMED |
+| Medium | M8 | search | No upper bound on semantic search limit | CONFIRMED |
+| Medium | M9 | task | No path traversal guard in `toggleCheckboxInFile` | CONFIRMED |
+| Medium | M10 | task/webhook | `ulid.MustNew` can panic in server context | CONFIRMED |
+| Medium | M11 | task | `parseTasks` doesn't handle `\r\n` line endings | CONFIRMED |
+| Medium | M12 | search | Invalid `recency_bias` silently ignored | CONFIRMED |
+| Medium | M13 | main | `webhookSvc` nil during startup reconciliation | UNCERTAIN (Go scoping question) |
+| Low | L1 | task | `?done=banana` silently treated as false | CONFIRMED |
+| Low | L2 | task | Missing composite index `(done, updated_at)` | CONFIRMED |
+| Low | L3 | webhook | No delivery retention/cleanup policy | CONFIRMED |
+| Low | L4 | webhook | No secret rotation mechanism | CONFIRMED |
+| Low | L5 | search | `batchGetNoteTimestamps` swallows DB errors | PARTIAL (already logs at Warn, not Debug) |
+| Low | L6 | task/webhook | `time.Parse` errors silently discarded | CONFIRMED |
+| Low | L7 | webhook | `listEvents` endpoint inconsistent auth check | CONFIRMED (low risk, middleware protects) |
+| Low | L8 | main | `mcpSrv.Close()` never called on shutdown | CONFIRMED |
+| Low | L9 | webhook | `matchesFilter` bypassed for struct payloads | CONFIRMED (latent, not active) |

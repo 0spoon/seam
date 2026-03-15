@@ -50,10 +50,16 @@ function getWsUrl(): string {
   return `${protocol}//${window.location.host}/api/ws`;
 }
 
-export function connect() {
+export async function connect() {
   if (socket?.readyState === WebSocket.OPEN) return;
 
-  const token = getAccessToken();
+  let token = getAccessToken();
+  // If no access token but we have a refresh token, try refreshing first.
+  if (!token && getRefreshToken()) {
+    const ok = await tryRefresh();
+    if (!ok) return;
+    token = getAccessToken();
+  }
   if (!token) return;
 
   try {
@@ -63,7 +69,8 @@ export function connect() {
       // Fetch a fresh token at open time in case a refresh occurred
       // between connect() and the WebSocket handshake completing.
       const freshToken = getAccessToken() || token;
-      socket?.send(JSON.stringify({ type: 'auth', payload: { token: freshToken } }));
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({ type: 'auth', payload: { token: freshToken } }));
 
       setConnectionState('connected');
 

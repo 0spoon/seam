@@ -200,7 +200,13 @@ async function doRefresh(): Promise<boolean> {
 
     const data: TokenPair = await res.json();
     accessToken = data.access_token;
-    // Keep existing refresh token (server does not rotate it)
+    // The server rotates the refresh token on every refresh, so we must
+    // persist the new one. Otherwise the old token in localStorage becomes
+    // invalid and the next refresh attempt (e.g. after page reload) fails.
+    if (data.refresh_token) {
+      refreshToken = data.refresh_token;
+      localStorage.setItem('seam_refresh_token', data.refresh_token);
+    }
     return true;
   } catch {
     return false;

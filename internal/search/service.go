@@ -76,3 +76,46 @@ func (s *Service) SearchSemanticScoped(ctx context.Context, userID, query string
 	}
 	return sem.SearchScoped(ctx, userID, query, limit, where)
 }
+
+// SearchFTSWithRecency performs full-text search with recency-adjusted ranking.
+// The recencyBias parameter (0.0-1.0) controls how much recency affects ranking.
+func (s *Service) SearchFTSWithRecency(ctx context.Context, userID, query string, limit, offset int, recencyBias float64) ([]FTSResult, int, error) {
+	db, err := s.dbManager.Open(ctx, userID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.Service.SearchFTSWithRecency: %w", err)
+	}
+	return s.ftsStore.SearchWithRecency(ctx, db, query, limit, offset, recencyBias)
+}
+
+// SearchFTSScopedWithRecency performs scoped FTS with recency-adjusted ranking.
+func (s *Service) SearchFTSScopedWithRecency(ctx context.Context, userID, query string, limit, offset int, includeProjectID, excludeProjectID string, recencyBias float64) ([]FTSResult, int, error) {
+	db, err := s.dbManager.Open(ctx, userID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.Service.SearchFTSScopedWithRecency: %w", err)
+	}
+	return s.ftsStore.SearchScopedWithRecency(ctx, db, query, limit, offset, includeProjectID, excludeProjectID, recencyBias)
+}
+
+// SearchSemanticWithRecency performs semantic search with recency-weighted scoring.
+// The recencyBias parameter (0.0-1.0) controls how much recency boosts scores.
+func (s *Service) SearchSemanticWithRecency(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]SemanticResult, error) {
+	s.semanticMu.RLock()
+	sem := s.semantic
+	s.semanticMu.RUnlock()
+	if sem == nil {
+		return nil, fmt.Errorf("search.Service.SearchSemanticWithRecency: semantic search not configured")
+	}
+	return sem.SearchWithRecency(ctx, userID, query, limit, recencyBias)
+}
+
+// SearchSemanticScopedWithRecency performs scoped semantic search with recency-weighted scoring.
+// The recencyBias parameter (0.0-1.0) controls how much recency boosts scores.
+func (s *Service) SearchSemanticScopedWithRecency(ctx context.Context, userID, query string, limit int, where map[string]interface{}, recencyBias float64) ([]SemanticResult, error) {
+	s.semanticMu.RLock()
+	sem := s.semantic
+	s.semanticMu.RUnlock()
+	if sem == nil {
+		return nil, fmt.Errorf("search.Service.SearchSemanticScopedWithRecency: semantic search not configured")
+	}
+	return sem.SearchScopedWithRecency(ctx, userID, query, limit, where, recencyBias)
+}

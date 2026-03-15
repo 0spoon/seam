@@ -6,15 +6,18 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 )
 
 // FTSResult represents a single full-text search result.
 type FTSResult struct {
-	NoteID  string  `json:"note_id"`
-	Title   string  `json:"title"`
-	Snippet string  `json:"snippet"`
-	Rank    float64 `json:"rank"`
+	NoteID    string    `json:"note_id"`
+	Title     string    `json:"title"`
+	Snippet   string    `json:"snippet"`
+	Rank      float64   `json:"rank"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // FTSStore implements full-text search queries against a user's SQLite DB.
@@ -155,6 +158,167 @@ func (s *FTSStore) SearchScoped(ctx context.Context, db *sql.DB, query string, l
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("search.FTSStore.SearchScoped: rows: %w", err)
 	}
+
+	return results, total, nil
+}
+
+// SearchWithRecency queries the FTS5 index and returns results with recency-adjusted
+// ranking. It also populates UpdatedAt on each result. The recencyBias parameter
+// (0.0-1.0) controls how much recency affects ranking.
+func (s *FTSStore) SearchWithRecency(ctx context.Context, db *sql.DB, query string, limit, offset int, recencyBias float64) ([]FTSResult, int, error) {
+	sanitized := sanitizeFTSQuery(query)
+	if sanitized == "" {
+		return nil, 0, nil
+	}
+
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Count total matches.
+	var total int
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM notes_fts WHERE notes_fts MATCH ?`,
+		sanitized,
+	).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchWithRecency: count: %w", err)
+	}
+
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	// Query with ranking, snippets, and updated_at.
+	rows, err := db.QueryContext(ctx,
+		`SELECT n.id, n.title,
+		        snippet(notes_fts, 1, '<mark>', '</mark>', '...', 32) as snippet,
+		        bm25(notes_fts) as rank,
+		        n.updated_at
+		 FROM notes_fts
+		 JOIN notes n ON notes_fts.rowid = n.rowid
+		 WHERE notes_fts MATCH ?
+		 ORDER BY rank
+		 LIMIT ? OFFSET ?`,
+		sanitized, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchWithRecency: query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FTSResult
+	for rows.Next() {
+		var r FTSResult
+		var updatedAtStr string
+		if err := rows.Scan(&r.NoteID, &r.Title, &r.Snippet, &r.Rank, &updatedAtStr); err != nil {
+			return nil, 0, fmt.Errorf("search.FTSStore.SearchWithRecency: scan: %w", err)
+		}
+		if t, parseErr := time.Parse(time.RFC3339, updatedAtStr); parseErr == nil {
+			r.UpdatedAt = t
+		}
+		// Apply recency adjustment: BM25 rank is negative (lower = better),
+		// so divide by (1 + bias*weight) to make recent items more negative.
+		r.Rank = r.Rank / (1 + recencyBias*recencyWeight(r.UpdatedAt))
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchWithRecency: rows: %w", err)
+	}
+
+	// Re-sort by adjusted rank (lower = better).
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Rank < results[j].Rank
+	})
+
+	return results, total, nil
+}
+
+// SearchScopedWithRecency queries the FTS5 index with project-based scope filtering
+// and recency-adjusted ranking. The recencyBias parameter (0.0-1.0) controls how
+// much recency affects ranking.
+func (s *FTSStore) SearchScopedWithRecency(ctx context.Context, db *sql.DB, query string, limit, offset int, includeProjectID, excludeProjectID string, recencyBias float64) ([]FTSResult, int, error) {
+	sanitized := sanitizeFTSQuery(query)
+	if sanitized == "" {
+		return nil, 0, nil
+	}
+
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Build the WHERE clause with optional project filter.
+	args := []interface{}{sanitized}
+	projectFilter := ""
+	if includeProjectID != "" {
+		projectFilter = " AND n.project_id = ?"
+		args = append(args, includeProjectID)
+	} else if excludeProjectID != "" {
+		projectFilter = " AND (n.project_id IS NULL OR n.project_id != ?)"
+		args = append(args, excludeProjectID)
+	}
+
+	// Count total matches.
+	var total int
+	countQuery := `SELECT COUNT(*) FROM notes_fts
+		JOIN notes n ON notes_fts.rowid = n.rowid
+		WHERE notes_fts MATCH ?` + projectFilter
+	err := db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchScopedWithRecency: count: %w", err)
+	}
+
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	// Query with ranking, snippets, and updated_at.
+	searchArgs := append(args, limit, offset)
+	searchQuery := `SELECT n.id, n.title,
+		snippet(notes_fts, 1, '<mark>', '</mark>', '...', 32) as snippet,
+		bm25(notes_fts) as rank,
+		n.updated_at
+		FROM notes_fts
+		JOIN notes n ON notes_fts.rowid = n.rowid
+		WHERE notes_fts MATCH ?` + projectFilter + `
+		ORDER BY rank
+		LIMIT ? OFFSET ?`
+
+	rows, err := db.QueryContext(ctx, searchQuery, searchArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchScopedWithRecency: query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []FTSResult
+	for rows.Next() {
+		var r FTSResult
+		var updatedAtStr string
+		if err := rows.Scan(&r.NoteID, &r.Title, &r.Snippet, &r.Rank, &updatedAtStr); err != nil {
+			return nil, 0, fmt.Errorf("search.FTSStore.SearchScopedWithRecency: scan: %w", err)
+		}
+		if t, parseErr := time.Parse(time.RFC3339, updatedAtStr); parseErr == nil {
+			r.UpdatedAt = t
+		}
+		// Apply recency adjustment: BM25 rank is negative (lower = better),
+		// so divide by (1 + bias*weight) to make recent items more negative.
+		r.Rank = r.Rank / (1 + recencyBias*recencyWeight(r.UpdatedAt))
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("search.FTSStore.SearchScopedWithRecency: rows: %w", err)
+	}
+
+	// Re-sort by adjusted rank (lower = better).
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Rank < results[j].Rank
+	})
 
 	return results, total, nil
 }

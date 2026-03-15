@@ -29,9 +29,11 @@ import (
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/server"
 	"github.com/katata/seam/internal/settings"
+	"github.com/katata/seam/internal/task"
 	"github.com/katata/seam/internal/template"
 	"github.com/katata/seam/internal/userdb"
 	"github.com/katata/seam/internal/watcher"
+	"github.com/katata/seam/internal/webhook"
 	"github.com/katata/seam/internal/ws"
 )
 
@@ -161,6 +163,12 @@ func run() error {
 	noteSvc := note.NewService(noteStore, versionStore, projectStore, userDBMgr, nil, logger) // suppressor set below
 	noteHandler := note.NewHandler(noteSvc, logger)
 
+	// Create task tracking components.
+	taskStore := task.NewStore()
+	taskSvc := task.NewService(taskStore, userDBMgr, logger)
+	taskSvc.SetNoteService(noteSvc)
+	taskHandler := task.NewHandler(taskSvc, logger)
+
 	// C-19: Wire frontmatter updater so project cascade-to-inbox clears
 	// the project field from YAML frontmatter on disk.
 	projectSvc.SetFrontmatterUpdater(func(notesDir, filePath string) error {
@@ -235,8 +243,8 @@ func run() error {
 	hub := ws.NewHub(logger)
 
 	// Wire up AI components (only if ChromaDB is configured).
-	taskStore := ai.NewTaskStore()
-	aiQueue = ai.NewQueue(taskStore, userDBMgr, hub, cfg.AI.QueueWorkers, logger)
+	aiTaskStore := ai.NewTaskStore()
+	aiQueue = ai.NewQueue(aiTaskStore, userDBMgr, hub, cfg.AI.QueueWorkers, logger)
 
 	var embedder *ai.Embedder
 	var chromaClient *ai.ChromaClient
@@ -385,6 +393,29 @@ func run() error {
 					logger.Warn("failed to enqueue delete embed task", "note_id", noteID, "error", err)
 				}
 			}
+		}
+
+		// Sync tasks (checkbox items) for created/modified notes.
+		if changeType == "created" || changeType == "modified" {
+			if noteID != "" && noteID != filePath {
+				if dbErr == nil {
+					n, getErr := noteStore.Get(fctx, userDB, noteID)
+					if getErr == nil {
+						if syncErr := taskSvc.SyncNote(fctx, uid, noteID, n.Body); syncErr != nil {
+							logger.Warn("task sync failed", "note_id", noteID, "error", syncErr)
+						}
+					}
+				}
+			}
+		}
+
+		// Dispatch webhook events.
+		if webhookSvc != nil {
+			eventPayload := map[string]interface{}{
+				"note_id":     noteID,
+				"change_type": changeType,
+			}
+			webhookSvc.Dispatch(context.Background(), uid, "note."+changeType, eventPayload)
 		}
 
 		return nil
@@ -585,6 +616,11 @@ func run() error {
 	reviewSvc := review.NewService(userDBMgr, graphSvc, logger)
 	reviewHandler := review.NewHandler(reviewSvc, logger)
 
+	// Create webhook components.
+	webhookStore := webhook.NewStore()
+	webhookSvc := webhook.NewService(webhookStore, userDBMgr, logger)
+	webhookHandler := webhook.NewHandler(webhookSvc, logger)
+
 	// Create agent memory / MCP components.
 	agentStore := agent.NewSQLStore()
 	agentWSNotifier := agent.NewHubWSNotifier(hub, logger)
@@ -600,6 +636,8 @@ func run() error {
 	})
 	mcpSrv := seamMCP.New(seamMCP.Config{
 		AgentService:   agentSvc,
+		TaskService:    taskSvc,
+		WebhookService: webhookSvc,
 		ToolCallLogger: agentSvc,
 		Logger:         logger,
 	})
@@ -623,7 +661,9 @@ func run() error {
 		GraphHandler:     graphHandler,
 		SettingsHandler:  settingsHandler,
 		ChatHandler:      chatHistoryHandler,
+		TaskHandler:      taskHandler,
 		ReviewHandler:    reviewHandler,
+		WebhookHandler:   webhookHandler,
 		WSMessageHandler: wsHandler,
 		MCPHandler:       mcpHandler,
 	})

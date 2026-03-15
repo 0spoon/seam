@@ -14,6 +14,8 @@ import (
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/task"
+	"github.com/katata/seam/internal/webhook"
 )
 
 // Input validation limits.
@@ -56,6 +58,23 @@ func (s *Server) registerTools() {
 		mcpserver.ServerTool{Tool: memorySearchTool(), Handler: s.handleMemorySearch},
 		mcpserver.ServerTool{Tool: sessionMetricsTool(), Handler: s.handleSessionMetrics},
 	)
+
+	// Task tracking tools (registered only if TaskService is configured).
+	if s.cfg.TaskService != nil {
+		s.mcp.AddTools(
+			mcpserver.ServerTool{Tool: tasksListTool(), Handler: s.handleTasksList},
+			mcpserver.ServerTool{Tool: tasksSummaryTool(), Handler: s.handleTasksSummary},
+		)
+	}
+
+	// Webhook tools (registered only if WebhookService is configured).
+	if s.cfg.WebhookService != nil {
+		s.mcp.AddTools(
+			mcpserver.ServerTool{Tool: webhookRegisterTool(), Handler: s.handleWebhookRegister},
+			mcpserver.ServerTool{Tool: webhookListTool(), Handler: s.handleWebhookList},
+			mcpserver.ServerTool{Tool: webhookDeleteTool(), Handler: s.handleWebhookDelete},
+		)
+	}
 }
 
 // --- Tool Definitions ---
@@ -157,6 +176,7 @@ func contextGatherTool() mcp.Tool {
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 		mcp.WithNumber("max_context_chars", mcp.Description("Maximum characters for results (default: 3000)")),
 		mcp.WithString("scope", mcp.Enum("agent", "user", "all"), mcp.Description("Search scope (default: all)")),
+		mcp.WithNumber("recency_bias", mcp.Description("Recency bias (0.0-1.0). Higher values boost recent notes. Default: 0.0")),
 	)
 }
 
@@ -165,6 +185,7 @@ func notesSearchTool() mcp.Tool {
 		mcp.WithDescription("Full-text search across user notes."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of results (default: 10)")),
+		mcp.WithNumber("recency_bias", mcp.Description("Recency bias (0.0-1.0). Higher values boost recent notes. Default: 0.0")),
 	)
 }
 
@@ -480,8 +501,9 @@ func (s *Server) handleContextGather(ctx context.Context, req mcp.CallToolReques
 	}
 	maxChars := req.GetInt("max_context_chars", 3000)
 	scope := req.GetString("scope", "all")
+	recencyBias := clampRecencyBias(req.GetFloat("recency_bias", 0.0))
 
-	results, err := s.cfg.AgentService.ContextGather(ctx, userID, query, scope, maxChars)
+	results, err := s.cfg.AgentService.ContextGather(ctx, userID, query, scope, maxChars, recencyBias)
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("context_gather", err)), nil
 	}
@@ -506,8 +528,9 @@ func (s *Server) handleNotesSearch(ctx context.Context, req mcp.CallToolRequest)
 	if limit > maxSessionList {
 		limit = maxSessionList
 	}
+	recencyBias := clampRecencyBias(req.GetFloat("recency_bias", 0.0))
 
-	results, err := s.cfg.AgentService.NotesSearch(ctx, userID, query, limit)
+	results, err := s.cfg.AgentService.NotesSearch(ctx, userID, query, limit, recencyBias)
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("notes_search", err)), nil
 	}
@@ -711,6 +734,17 @@ func validateCategoryName(category, name string) string {
 	return ""
 }
 
+// clampRecencyBias clamps a recency bias value to the valid range [0.0, 1.0].
+func clampRecencyBias(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
 // hasControlChars returns true if s contains control characters (bytes 0x00-0x1F
 // except \t, \n, \r).
 func hasControlChars(s string) bool {
@@ -720,4 +754,190 @@ func hasControlChars(s string) bool {
 		}
 	}
 	return false
+}
+
+// --- Webhook Tool Definitions ---
+
+func webhookRegisterTool() mcp.Tool {
+	return mcp.NewTool("webhook_register",
+		mcp.WithDescription("Register a webhook to receive HTTP callbacks when specific events occur."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Webhook name")),
+		mcp.WithString("url", mcp.Required(), mcp.Description("URL to receive webhook POST requests")),
+		mcp.WithString("event_types", mcp.Required(), mcp.Description("Comma-separated event types (e.g. 'note.created,note.modified')")),
+		mcp.WithString("project", mcp.Description("Optional project slug filter")),
+		mcp.WithString("tag", mcp.Description("Optional tag filter")),
+	)
+}
+
+func webhookListTool() mcp.Tool {
+	return mcp.NewTool("webhook_list",
+		mcp.WithDescription("List registered webhooks."),
+		mcp.WithString("active_only", mcp.Enum("true", "false"), mcp.Description("Only list active webhooks (default: true)")),
+	)
+}
+
+func webhookDeleteTool() mcp.Tool {
+	return mcp.NewTool("webhook_delete",
+		mcp.WithDescription("Delete a webhook by ID."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Webhook ID")),
+	)
+}
+
+// --- Webhook Tool Handlers ---
+
+func (s *Server) handleWebhookRegister(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	name, err := req.RequireString("name")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: name"), nil
+	}
+	rawURL, err := req.RequireString("url")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: url"), nil
+	}
+	eventTypesStr, err := req.RequireString("event_types")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: event_types"), nil
+	}
+
+	// Parse comma-separated event types.
+	var eventTypes []string
+	for _, et := range strings.Split(eventTypesStr, ",") {
+		et = strings.TrimSpace(et)
+		if et != "" {
+			eventTypes = append(eventTypes, et)
+		}
+	}
+
+	projectSlug := req.GetString("project", "")
+	tag := req.GetString("tag", "")
+
+	createReq := webhook.CreateReq{
+		Name:       name,
+		URL:        rawURL,
+		EventTypes: eventTypes,
+		Filter: webhook.Filter{
+			ProjectSlug: projectSlug,
+			Tag:         tag,
+		},
+	}
+
+	wh, err := s.cfg.WebhookService.Create(ctx, userID, createReq)
+	if err != nil {
+		return mcp.NewToolResultError("webhook_register: " + err.Error()), nil
+	}
+
+	data, _ := json.Marshal(map[string]string{"id": wh.ID, "name": wh.Name})
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleWebhookList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	activeOnly := req.GetString("active_only", "true") != "false"
+
+	webhooks, err := s.cfg.WebhookService.List(ctx, userID, activeOnly)
+	if err != nil {
+		return mcp.NewToolResultError("webhook_list: internal error"), nil
+	}
+
+	data, jsonErr := json.Marshal(webhooks)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal webhooks"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleWebhookDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: id"), nil
+	}
+
+	if err := s.cfg.WebhookService.Delete(ctx, userID, id); err != nil {
+		if errors.Is(err, webhook.ErrNotFound) {
+			return mcp.NewToolResultError("webhook_delete: not found"), nil
+		}
+		return mcp.NewToolResultError("webhook_delete: internal error"), nil
+	}
+
+	return mcp.NewToolResultText(`{"status":"deleted"}`), nil
+}
+
+// --- Task Tool Definitions ---
+
+func tasksListTool() mcp.Tool {
+	return mcp.NewTool("tasks_list",
+		mcp.WithDescription("List tasks (checkbox items) from notes. Filter by done status, project, or tag."),
+		mcp.WithString("done", mcp.Enum("true", "false"), mcp.Description("Filter by done status (optional)")),
+		mcp.WithString("project", mcp.Description("Project slug to filter by (optional)")),
+		mcp.WithString("tag", mcp.Description("Tag to filter by (optional)")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of results (default: 20)")),
+	)
+}
+
+func tasksSummaryTool() mcp.Tool {
+	return mcp.NewTool("tasks_summary",
+		mcp.WithDescription("Get aggregate task counts (total, done, open). Optionally filter by project or tag."),
+		mcp.WithString("project", mcp.Description("Project slug to filter by (optional)")),
+		mcp.WithString("tag", mcp.Description("Tag to filter by (optional)")),
+	)
+}
+
+// --- Task Tool Handlers ---
+
+func (s *Server) handleTasksList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	filter := task.TaskFilter{}
+	doneStr := req.GetString("done", "")
+	if doneStr == "true" {
+		d := true
+		filter.Done = &d
+	} else if doneStr == "false" {
+		d := false
+		filter.Done = &d
+	}
+
+	filter.ProjectID = req.GetString("project", "")
+	filter.Tag = req.GetString("tag", "")
+
+	limit := req.GetInt("limit", 20)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
+	filter.Limit = limit
+
+	tasks, total, err := s.cfg.TaskService.List(ctx, userID, filter)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("tasks_list", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(map[string]interface{}{
+		"tasks": tasks,
+		"total": total,
+	})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleTasksSummary(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	filter := task.TaskFilter{}
+	filter.ProjectID = req.GetString("project", "")
+	filter.Tag = req.GetString("tag", "")
+
+	summary, err := s.cfg.TaskService.Summary(ctx, userID, filter)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("tasks_summary", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(summary)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
 }

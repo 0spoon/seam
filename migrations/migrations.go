@@ -16,6 +16,12 @@ var UserSQL string
 //go:embed user/002_agent_sessions.sql
 var UserSQL002 string
 
+//go:embed user/003_tasks.sql
+var UserSQL003 string
+
+//go:embed user/004_webhooks.sql
+var UserSQL004 string
+
 // Migration represents a single numbered migration step.
 type Migration struct {
 	Version int
@@ -31,6 +37,8 @@ func UserMigrations() []Migration {
 	return []Migration{
 		{Version: 1, SQL: UserSQL},
 		{Version: 2, SQL: UserSQL002},
+		{Version: 3, SQL: UserSQL003},
+		{Version: 4, SQL: UserSQL004},
 	}
 }
 

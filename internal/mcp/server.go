@@ -19,6 +19,8 @@ import (
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/reqctx"
 	"github.com/katata/seam/internal/search"
+	"github.com/katata/seam/internal/task"
+	"github.com/katata/seam/internal/webhook"
 )
 
 // AgentService defines the interface for the agent service used by MCP tools.
@@ -37,10 +39,10 @@ type AgentService interface {
 	MemoryList(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	MemoryDelete(ctx context.Context, userID, category, name string) error
 
-	ContextGather(ctx context.Context, userID, query, scope string, maxChars int) ([]agent.KnowledgeHit, error)
+	ContextGather(ctx context.Context, userID, query, scope string, maxChars int, recencyBias float64) ([]agent.KnowledgeHit, error)
 
 	// User note access tools.
-	NotesSearch(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error)
+	NotesSearch(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]search.FTSResult, error)
 	NotesRead(ctx context.Context, userID, noteID string) (*note.Note, error)
 	NotesList(ctx context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error)
 	NotesCreate(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error)
@@ -56,9 +58,24 @@ const (
 	defaultMCPRateBurst = 20                      // allow short bursts
 )
 
+// TaskService defines the interface for the task service used by MCP tools.
+type TaskService interface {
+	List(ctx context.Context, userID string, filter task.TaskFilter) ([]*task.Task, int, error)
+	Summary(ctx context.Context, userID string, filter task.TaskFilter) (*task.TaskSummary, error)
+}
+
+// WebhookService defines the interface for the webhook service used by MCP tools.
+type WebhookService interface {
+	Create(ctx context.Context, userID string, req webhook.CreateReq) (*webhook.Webhook, error)
+	List(ctx context.Context, userID string, activeOnly bool) ([]*webhook.Webhook, error)
+	Delete(ctx context.Context, userID, id string) error
+}
+
 // Config holds dependencies for the MCP server.
 type Config struct {
 	AgentService   AgentService
+	TaskService    TaskService    // optional: task tracking tools
+	WebhookService WebhookService // optional: webhook management tools
 	ToolCallLogger ToolCallLogger // optional: persists tool call audits to DB
 	Logger         *slog.Logger
 }

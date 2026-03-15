@@ -23,7 +23,9 @@ import (
 	"github.com/katata/seam/internal/review"
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/settings"
+	"github.com/katata/seam/internal/task"
 	"github.com/katata/seam/internal/template"
+	"github.com/katata/seam/internal/webhook"
 	"github.com/katata/seam/internal/ws"
 )
 
@@ -53,7 +55,9 @@ type Config struct {
 	GraphHandler     *graph.Handler
 	SettingsHandler  *settings.Handler
 	ChatHandler      *chat.Handler
+	TaskHandler      *task.Handler
 	ReviewHandler    *review.Handler
+	WebhookHandler   *webhook.Handler
 	WSMessageHandler ws.MessageHandler
 	MCPHandler       http.Handler // MCP endpoint handler (optional, mounts at /api/mcp)
 }
@@ -169,6 +173,18 @@ func New(cfg Config) *Server {
 		if cfg.ReviewHandler != nil {
 			r.Route("/api/review", func(r chi.Router) {
 				r.Mount("/", cfg.ReviewHandler.Routes())
+			})
+		}
+
+		if cfg.TaskHandler != nil {
+			r.Route("/api/tasks", func(r chi.Router) {
+				r.Mount("/", cfg.TaskHandler.Routes())
+			})
+		}
+
+		if cfg.WebhookHandler != nil {
+			r.Route("/api/webhooks", func(r chi.Router) {
+				r.Mount("/", cfg.WebhookHandler.Routes())
 			})
 		}
 	})

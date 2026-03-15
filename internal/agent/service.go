@@ -44,6 +44,9 @@ type Searcher interface {
 	SearchSemantic(ctx context.Context, userID, query string, limit int) ([]search.SemanticResult, error)
 	SearchFTSScoped(ctx context.Context, userID, query string, limit, offset int, includeProjectID, excludeProjectID string) ([]search.FTSResult, int, error)
 	SearchSemanticScoped(ctx context.Context, userID, query string, limit int, where map[string]interface{}) ([]search.SemanticResult, error)
+	SearchSemanticScopedWithRecency(ctx context.Context, userID, query string, limit int, where map[string]interface{}, recencyBias float64) ([]search.SemanticResult, error)
+	SearchFTSScopedWithRecency(ctx context.Context, userID, query string, limit, offset int, includeProjectID, excludeProjectID string, recencyBias float64) ([]search.FTSResult, int, error)
+	SearchFTSWithRecency(ctx context.Context, userID, query string, limit, offset int, recencyBias float64) ([]search.FTSResult, int, error)
 }
 
 // WSNotifier abstracts WebSocket event delivery.
@@ -478,11 +481,18 @@ func (s *Service) MemoryDelete(ctx context.Context, userID, category, name strin
 // --- User Note Access ---
 
 // NotesSearch performs full-text search across user notes.
-func (s *Service) NotesSearch(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error) {
+// When recencyBias > 0, results are re-ranked with recency weighting.
+func (s *Service) NotesSearch(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]search.FTSResult, error) {
 	if s.cfg.SearchService == nil {
 		return nil, fmt.Errorf("agent.Service.NotesSearch: search not configured")
 	}
-	results, _, err := s.cfg.SearchService.SearchFTS(ctx, userID, query, limit, 0)
+	var results []search.FTSResult
+	var err error
+	if recencyBias > 0 {
+		results, _, err = s.cfg.SearchService.SearchFTSWithRecency(ctx, userID, query, limit, 0, recencyBias)
+	} else {
+		results, _, err = s.cfg.SearchService.SearchFTS(ctx, userID, query, limit, 0)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("agent.Service.NotesSearch: %w", err)
 	}
@@ -574,12 +584,13 @@ func (s *Service) LogToolCall(ctx context.Context, userID string, tc *ToolCallRe
 
 // ContextGather searches for relevant context across notes, returning results
 // truncated to the character budget. Scope filters: "agent", "user", or "all".
-func (s *Service) ContextGather(ctx context.Context, userID, query, scope string, maxChars int) ([]KnowledgeHit, error) {
+// When recencyBias > 0, results are re-ranked with recency weighting.
+func (s *Service) ContextGather(ctx context.Context, userID, query, scope string, maxChars int, recencyBias float64) ([]KnowledgeHit, error) {
 	if maxChars <= 0 {
 		maxChars = 3000
 	}
 
-	hits := s.searchKnowledgeScoped(ctx, userID, query, scope, 10)
+	hits := s.searchKnowledgeScoped(ctx, userID, query, scope, 10, recencyBias)
 	if len(hits) == 0 {
 		return []KnowledgeHit{}, nil
 	}
@@ -595,7 +606,7 @@ func (s *Service) MemorySearch(ctx context.Context, userID, query string, limit 
 	if limit <= 0 {
 		limit = 10
 	}
-	hits := s.searchKnowledgeScoped(ctx, userID, query, "agent", limit)
+	hits := s.searchKnowledgeScoped(ctx, userID, query, "agent", limit, 0.0)
 	return hits, nil
 }
 
@@ -858,12 +869,13 @@ func (s *Service) assembleBriefing(ctx context.Context, userID string, db DBTX, 
 
 // searchKnowledge performs FTS search, falling back gracefully. Searches all notes.
 func (s *Service) searchKnowledge(ctx context.Context, userID, query string, limit int) []KnowledgeHit {
-	return s.searchKnowledgeScoped(ctx, userID, query, "all", limit)
+	return s.searchKnowledgeScoped(ctx, userID, query, "all", limit, 0.0)
 }
 
 // searchKnowledgeScoped performs scoped search (semantic then FTS fallback).
 // Scope: "agent" (agent-memory only), "user" (exclude agent-memory), "all" (everything).
-func (s *Service) searchKnowledgeScoped(ctx context.Context, userID, query, scope string, limit int) []KnowledgeHit {
+// When recencyBias > 0, the WithRecency variants are used for recency-weighted scoring.
+func (s *Service) searchKnowledgeScoped(ctx context.Context, userID, query, scope string, limit int, recencyBias float64) []KnowledgeHit {
 	if s.cfg.SearchService == nil {
 		return nil
 	}
@@ -890,7 +902,13 @@ func (s *Service) searchKnowledgeScoped(ctx context.Context, userID, query, scop
 	}
 
 	// Try semantic search first.
-	semResults, err := s.cfg.SearchService.SearchSemanticScoped(ctx, userID, query, limit, chromaWhere)
+	var semResults []search.SemanticResult
+	var err error
+	if recencyBias > 0 {
+		semResults, err = s.cfg.SearchService.SearchSemanticScopedWithRecency(ctx, userID, query, limit, chromaWhere, recencyBias)
+	} else {
+		semResults, err = s.cfg.SearchService.SearchSemanticScoped(ctx, userID, query, limit, chromaWhere)
+	}
 	if err == nil && len(semResults) > 0 {
 		hits := make([]KnowledgeHit, 0, len(semResults))
 		for _, r := range semResults {
@@ -905,7 +923,13 @@ func (s *Service) searchKnowledgeScoped(ctx context.Context, userID, query, scop
 	}
 
 	// Fall back to FTS.
-	ftsResults, _, ftsErr := s.cfg.SearchService.SearchFTSScoped(ctx, userID, query, limit, 0, includeProjectID, excludeProjectID)
+	var ftsResults []search.FTSResult
+	var ftsErr error
+	if recencyBias > 0 {
+		ftsResults, _, ftsErr = s.cfg.SearchService.SearchFTSScopedWithRecency(ctx, userID, query, limit, 0, includeProjectID, excludeProjectID, recencyBias)
+	} else {
+		ftsResults, _, ftsErr = s.cfg.SearchService.SearchFTSScoped(ctx, userID, query, limit, 0, includeProjectID, excludeProjectID)
+	}
 	if ftsErr != nil || len(ftsResults) == 0 {
 		return nil
 	}

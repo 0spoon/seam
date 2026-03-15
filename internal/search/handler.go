@@ -63,7 +63,22 @@ func (h *Handler) searchFTS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, total, err := h.service.SearchFTS(r.Context(), userID, query, limit, offset)
+	// Parse optional recency_bias parameter.
+	var recencyBias float64
+	if v := r.URL.Query().Get("recency_bias"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			recencyBias = f
+		}
+	}
+
+	var results []FTSResult
+	var total int
+	var err error
+	if recencyBias > 0 {
+		results, total, err = h.service.SearchFTSWithRecency(r.Context(), userID, query, limit, offset, recencyBias)
+	} else {
+		results, total, err = h.service.SearchFTS(r.Context(), userID, query, limit, offset)
+	}
 	if err != nil {
 		h.logger.Error("search failed", "error", err, "query", query)
 		writeError(w, http.StatusInternalServerError, "internal server error")
@@ -98,7 +113,21 @@ func (h *Handler) searchSemantic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, err := h.service.SearchSemantic(r.Context(), userID, query, limit)
+	// Parse optional recency_bias parameter.
+	var recencyBias float64
+	if v := r.URL.Query().Get("recency_bias"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			recencyBias = f
+		}
+	}
+
+	var results []SemanticResult
+	var err error
+	if recencyBias > 0 {
+		results, err = h.service.SearchSemanticWithRecency(r.Context(), userID, query, limit, recencyBias)
+	} else {
+		results, err = h.service.SearchSemantic(r.Context(), userID, query, limit)
+	}
 	if err != nil {
 		h.logger.Error("semantic search failed", "error", err, "query", query)
 		writeError(w, http.StatusInternalServerError, "semantic search not available")

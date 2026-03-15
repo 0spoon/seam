@@ -10,7 +10,8 @@ const (
 	MsgTypeChatAsk         = "chat.ask"
 	MsgTypeChatStream      = "chat.stream"
 	MsgTypeChatDone        = "chat.done"
-	MsgTypeLinkSuggestions = "note.link_suggestions"
+	MsgTypeLinkSuggestions  = "note.link_suggestions"
+	MsgTypeWebhookDelivery = "webhook.delivery"
 )
 
 // AuthPayload is the payload for an auth message.

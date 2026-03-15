@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/userdb"
@@ -274,6 +276,254 @@ func (s *SemanticSearcher) batchGetNoteBodies(ctx context.Context, userID string
 	}
 
 	return result
+}
+
+// batchGetNoteTimestamps loads updated_at timestamps for all given note IDs
+// in a single query, returning a map of note_id -> updated_at.
+func (s *SemanticSearcher) batchGetNoteTimestamps(ctx context.Context, userID string, noteIDs []string) map[string]time.Time {
+	result := make(map[string]time.Time, len(noteIDs))
+	if len(noteIDs) == 0 {
+		return result
+	}
+
+	db, err := s.dbManager.Open(ctx, userID)
+	if err != nil {
+		s.logger.Warn("search.SemanticSearcher.batchGetNoteTimestamps: open db failed",
+			"user_id", userID, "error", err)
+		return result
+	}
+
+	placeholders := make([]string, len(noteIDs))
+	args := make([]interface{}, len(noteIDs))
+	for i, id := range noteIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, updated_at FROM notes WHERE id IN (%s)`,
+		strings.Join(placeholders, ","),
+	)
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		s.logger.Warn("search.SemanticSearcher.batchGetNoteTimestamps: query failed",
+			"error", err)
+		return result
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, updatedAtStr string
+		if err := rows.Scan(&id, &updatedAtStr); err != nil {
+			s.logger.Warn("search.SemanticSearcher.batchGetNoteTimestamps: scan failed",
+				"error", err)
+			continue
+		}
+		if t, parseErr := time.Parse(time.RFC3339, updatedAtStr); parseErr == nil {
+			result[id] = t
+		}
+	}
+	if err := rows.Err(); err != nil {
+		s.logger.Warn("search.SemanticSearcher.batchGetNoteTimestamps: rows error",
+			"error", err)
+	}
+
+	return result
+}
+
+// SearchWithRecency performs semantic search with recency-weighted scoring.
+// The recencyBias parameter (0.0-1.0) controls how much recency boosts scores.
+func (s *SemanticSearcher) SearchWithRecency(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]SemanticResult, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	queryEmbedding, err := s.ollama.GenerateEmbedding(ctx, s.model, query)
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchWithRecency: embed query: %w", err)
+	}
+
+	colName := ai.CollectionName(userID)
+	colID, err := s.chroma.GetOrCreateCollection(ctx, colName)
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchWithRecency: get collection: %w", err)
+	}
+
+	nResults := limit * 3
+	if nResults < 20 {
+		nResults = 20
+	}
+
+	chromaResults, err := s.chroma.Query(ctx, colID, queryEmbedding, nResults)
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchWithRecency: query chroma: %w", err)
+	}
+
+	// Deduplicate by note_id.
+	type bestResult struct {
+		noteID   string
+		title    string
+		distance float64
+	}
+	seen := make(map[string]*bestResult)
+	for _, cr := range chromaResults {
+		noteID := cr.Metadata["note_id"]
+		if noteID == "" {
+			continue
+		}
+		if existing, ok := seen[noteID]; !ok || cr.Distance < existing.distance {
+			seen[noteID] = &bestResult{
+				noteID:   noteID,
+				title:    cr.Metadata["title"],
+				distance: cr.Distance,
+			}
+		}
+	}
+
+	noteIDs := make([]string, 0, len(seen))
+	for noteID := range seen {
+		noteIDs = append(noteIDs, noteID)
+	}
+	bodyMap := s.batchGetNoteBodies(ctx, userID, noteIDs)
+	tsMap := s.batchGetNoteTimestamps(ctx, userID, noteIDs)
+
+	var results []SemanticResult
+	for _, br := range seen {
+		score := 1.0 - br.distance
+		if score < 0 {
+			score = 0
+		}
+		if score > 1 {
+			score = 1
+		}
+
+		// Apply recency adjustment: score * (1 + recencyBias * weight), clamped to [0,1].
+		if updatedAt, ok := tsMap[br.noteID]; ok {
+			score = score * (1 + recencyBias*recencyWeight(updatedAt))
+			if score > 1 {
+				score = 1
+			}
+		}
+
+		snippet := extractSnippet(bodyMap[br.noteID], query, 200)
+		results = append(results, SemanticResult{
+			NoteID:  br.noteID,
+			Title:   br.title,
+			Score:   score,
+			Snippet: snippet,
+		})
+	}
+
+	// Sort by score descending.
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
+// SearchScopedWithRecency performs scoped semantic search with recency-weighted scoring.
+// The recencyBias parameter (0.0-1.0) controls how much recency boosts scores.
+func (s *SemanticSearcher) SearchScopedWithRecency(ctx context.Context, userID, query string, limit int, where map[string]interface{}, recencyBias float64) ([]SemanticResult, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	queryEmbedding, err := s.ollama.GenerateEmbedding(ctx, s.model, query)
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchScopedWithRecency: embed query: %w", err)
+	}
+
+	colName := ai.CollectionName(userID)
+	colID, err := s.chroma.GetOrCreateCollection(ctx, colName)
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchScopedWithRecency: get collection: %w", err)
+	}
+
+	nResults := limit * 3
+	if nResults < 20 {
+		nResults = 20
+	}
+
+	var chromaResults []ai.QueryResult
+	if len(where) > 0 {
+		chromaResults, err = s.chroma.QueryWithFilter(ctx, colID, queryEmbedding, nResults, where)
+	} else {
+		chromaResults, err = s.chroma.Query(ctx, colID, queryEmbedding, nResults)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchScopedWithRecency: query chroma: %w", err)
+	}
+
+	// Deduplicate by note_id.
+	type bestResult struct {
+		noteID   string
+		title    string
+		distance float64
+	}
+	seen := make(map[string]*bestResult)
+	for _, cr := range chromaResults {
+		noteID := cr.Metadata["note_id"]
+		if noteID == "" {
+			continue
+		}
+		if existing, ok := seen[noteID]; !ok || cr.Distance < existing.distance {
+			seen[noteID] = &bestResult{
+				noteID:   noteID,
+				title:    cr.Metadata["title"],
+				distance: cr.Distance,
+			}
+		}
+	}
+
+	noteIDs := make([]string, 0, len(seen))
+	for noteID := range seen {
+		noteIDs = append(noteIDs, noteID)
+	}
+	bodyMap := s.batchGetNoteBodies(ctx, userID, noteIDs)
+	tsMap := s.batchGetNoteTimestamps(ctx, userID, noteIDs)
+
+	var results []SemanticResult
+	for _, br := range seen {
+		score := 1.0 - br.distance
+		if score < 0 {
+			score = 0
+		}
+		if score > 1 {
+			score = 1
+		}
+
+		// Apply recency adjustment: score * (1 + recencyBias * weight), clamped to [0,1].
+		if updatedAt, ok := tsMap[br.noteID]; ok {
+			score = score * (1 + recencyBias*recencyWeight(updatedAt))
+			if score > 1 {
+				score = 1
+			}
+		}
+
+		snippet := extractSnippet(bodyMap[br.noteID], query, 200)
+		results = append(results, SemanticResult{
+			NoteID:  br.noteID,
+			Title:   br.title,
+			Score:   score,
+			Snippet: snippet,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
 }
 
 // extractSnippet returns a snippet of the body around the first occurrence

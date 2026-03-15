@@ -5,9 +5,12 @@ All issues are verified against the actual code. Fix in priority order (Critical
 
 ## Code Review Audit (2026-03-15)
 
-Each issue was verified against the source code. Results: 24/27 fully confirmed,
-2 partially confirmed (M3, L5 contain inaccurate claims), 1 uncertain (M13).
+Each issue was verified against the source code. Results: 25/27 fully confirmed,
+2 partially confirmed (M3, L5 contain inaccurate claims).
 Corrections are annotated inline with **[Audit]** tags.
+
+**[Re-audit 2026-03-15]** Second pass resolved M13 (UNCERTAIN -> CONFIRMED as likely
+compile error) and corrected minor line-number inaccuracies in H3, M4, M5, M6.
 
 ---
 
@@ -241,7 +244,7 @@ for dr := range results {
 
 ### H3. Task: `SyncNote` regenerates all task IDs on every note save
 
-**Audit:** CONFIRMED. DeleteByNote at line 121 + insert with fresh ULIDs at line 130. Every save creates new IDs and resets CreatedAt.
+**Audit:** CONFIRMED. DeleteByNote at line 120 + insert with fresh ULIDs at line 129. Every save creates new IDs and resets CreatedAt. **[Re-audit]** Line references corrected: DeleteByNote is at line 120, ULID generation at line 129.
 
 **File:** `internal/task/service.go`, lines 120-141
 **Impact:** Task IDs change on every sync. External references (bookmarks, API consumers tracking tasks by ID) break. `created_at` also resets every time.
@@ -446,9 +449,9 @@ func isDangerous(ip net.IP) bool {
 
 ### M4. MCP: `handleWebhookRegister` leaks raw error details
 
-**Audit:** CONFIRMED. tools.go:827 passes `err.Error()` directly. All other MCP handlers use `sanitizeError()`.
+**Audit:** CONFIRMED. tools.go:825 passes `err.Error()` directly. All other MCP handlers use `sanitizeError()`. **[Re-audit]** Line corrected: error is at line 825, not 827 (827 is a blank line).
 
-**File:** `internal/mcp/tools.go`, line 827
+**File:** `internal/mcp/tools.go`, line 825
 **Impact:** `err.Error()` exposed directly to the client, potentially leaking file paths, DB errors, etc.
 
 ```go
@@ -481,9 +484,9 @@ return mcp.NewToolResultError(sanitizeError("webhook_register", err)), nil
 
 ### M5. MCP: `tasks_list` passes project slug as ProjectID
 
-**Audit:** CONFIRMED. tools.go:902 sets `filter.ProjectID` from a slug parameter. store.go:210-212 joins on `n.project_id = ?` expecting a ULID. Filter silently returns zero results.
+**Audit:** CONFIRMED. tools.go:905 sets `filter.ProjectID` from a slug parameter. store.go:211-213 joins on `n.project_id = ?` expecting a ULID. Filter silently returns zero results. **[Re-audit]** Line corrected (905 not 902). Schema confirms: `projects` table has separate `id` (ULID PK) and `slug` (UNIQUE) columns; `notes.project_id` references `projects.id`. Bug is definitively real.
 
-**File:** `internal/mcp/tools.go`, line 902
+**File:** `internal/mcp/tools.go`, line 905
 **Impact:** Project filtering in `tasks_list` and `tasks_summary` is completely broken.
 
 The tool definition says the parameter is "Project slug to filter by" but the code sets `filter.ProjectID`. The store joins on `n.project_id = ?` which expects a ULID, not a slug.
@@ -523,7 +526,7 @@ Option B is simpler and doesn't require adding a new dependency to MCP.
 
 ### M6. Search: FTS zero-value time on parse failure gets silent recency penalty
 
-**Audit:** CONFIRMED. Recency adjustment at fts.go:225 is applied unconditionally, even when `time.Parse` fails at line 220. The semantic path (semantic.go:402) correctly guards with `if updatedAt, ok := tsMap[...]; ok`. Inconsistent behavior.
+**Audit:** CONFIRMED. Recency adjustment at fts.go:225 is applied unconditionally, even when `time.Parse` fails at line 222. The semantic path (semantic.go:406) correctly guards with `if updatedAt, ok := tsMap[...]; ok`. Inconsistent behavior. **[Re-audit]** Line references corrected: FTS parse is at line 222, semantic guard is at line 406 (not 402).
 
 **File:** `internal/search/fts.go`, lines 220-225
 **Impact:** Notes with unparseable `updated_at` are silently penalized as "infinitely old" instead of neutral treatment.
@@ -690,7 +693,7 @@ if rb := r.URL.Query().Get("recency_bias"); rb != "" {
 
 ### M13. Webhook: `webhookSvc` nil during startup reconciliation
 
-**Audit:** UNCERTAIN. The logical bug is plausible -- `webhookSvc` is assigned at line 621 via `:=` while reconciliation runs at line 451 -- but in Go, a short variable declaration (`:=`) creates scope from the declaration point forward. The closure at line 308 referencing a variable declared later at line 621 should be a compile error unless there is a `var webhookSvc *webhook.Service` declaration before the closure that is not visible in the current source. If the code compiles as-is, there must be such a forward declaration. Either way, the nil-during-reconciliation behavior is real. **Needs manual verification of compilation.**
+**Audit:** CONFIRMED (LIKELY COMPILE ERROR). **[Re-audit]** Searched exhaustively for `var webhookSvc` in main.go -- no forward declaration exists. Only other `var` service declarations are `chatSvc` and `synthSvc` (lines 239-240), which follow the forward-declare pattern correctly. The `:=` at line 621 is the first and only declaration of `webhookSvc`, but the closure at line 308 references it at line 413. In Go, this is an "undefined: webhookSvc" compile error. The fix must add `var webhookSvc *webhook.Service` before line 308 and change `:=` to `=` at line 621. If this code was ever compiled successfully, the forward declaration was present and was inadvertently removed.
 
 **File:** `cmd/seamd/main.go`, lines 308, 413, 621
 **Impact:** Webhooks don't fire during startup reconciliation. Not a crash (nil guard protects), but silent behavior gap.
@@ -902,16 +905,16 @@ if !ok {
 | Medium | M1 | webhook | Dispatch doesn't validate eventType | CONFIRMED |
 | Medium | M2 | webhook | SSRF: initial request bypasses private IP check | CONFIRMED |
 | Medium | M3 | webhook | `isPrivateIP` misses unspecified addr, single DNS | PARTIAL (IPv6-mapped claim incorrect) |
-| Medium | M4 | mcp | `handleWebhookRegister` leaks raw error details | CONFIRMED |
-| Medium | M5 | mcp | tasks_list passes slug as ProjectID (filtering broken) | CONFIRMED |
-| Medium | M6 | search | Zero-value time penalty on parse failure | CONFIRMED |
+| Medium | M4 | mcp | `handleWebhookRegister` leaks raw error details | CONFIRMED (line corrected: 825) |
+| Medium | M5 | mcp | tasks_list passes slug as ProjectID (filtering broken) | CONFIRMED (line corrected: 905; schema verified) |
+| Medium | M6 | search | Zero-value time penalty on parse failure | CONFIRMED (line refs corrected) |
 | Medium | M7 | search | Score compression destroys ranking discrimination | CONFIRMED |
 | Medium | M8 | search | No upper bound on semantic search limit | CONFIRMED |
 | Medium | M9 | task | No path traversal guard in `toggleCheckboxInFile` | CONFIRMED |
 | Medium | M10 | task/webhook | `ulid.MustNew` can panic in server context | CONFIRMED |
 | Medium | M11 | task | `parseTasks` doesn't handle `\r\n` line endings | CONFIRMED |
 | Medium | M12 | search | Invalid `recency_bias` silently ignored | CONFIRMED |
-| Medium | M13 | main | `webhookSvc` nil during startup reconciliation | UNCERTAIN (Go scoping question) |
+| Medium | M13 | main | `webhookSvc` nil during startup reconciliation | CONFIRMED (likely compile error; no forward declaration found) |
 | Low | L1 | task | `?done=banana` silently treated as false | CONFIRMED |
 | Low | L2 | task | Missing composite index `(done, updated_at)` | CONFIRMED |
 | Low | L3 | webhook | No delivery retention/cleanup policy | CONFIRMED |

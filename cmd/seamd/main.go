@@ -304,6 +304,9 @@ func run() error {
 		logger.Info("AI features: ChromaDB not configured; only writing assist and suggestions available")
 	}
 
+	// Forward-declare webhookSvc so the file watcher closure can capture it.
+	var webhookSvc *webhook.Service
+
 	// Create file watcher with note.Reindex as the event handler.
 	fileHandler := func(fctx context.Context, uid, filePath string) error {
 		// Before reindex, check if the note already exists in the DB to
@@ -432,6 +435,14 @@ func run() error {
 	// Wire the watcher as the note service's write suppressor.
 	noteSvc.SetSuppressor(w)
 
+	// Load pending AI tasks from a previous run BEFORE reconciliation,
+	// so that reconciliation-enqueued tasks are not double-loaded.
+	if aiQueue != nil {
+		if err := aiQueue.LoadPending(ctx); err != nil {
+			logger.Warn("failed to load pending AI tasks", "error", err)
+		}
+	}
+
 	// Run startup reconciliation for all existing users.
 	users, err := userDBMgr.ListUsers(ctx)
 	if err != nil {
@@ -462,14 +473,11 @@ func run() error {
 		}
 	}()
 
-	// Start AI task queue (load pending tasks, then run workers).
+	// Start AI task queue workers.
 	// aiQueueDone is closed when the queue workers finish, so the shutdown
 	// sequence can wait for in-flight tasks before closing databases.
 	aiQueueDone := make(chan struct{})
 	if aiQueue != nil {
-		if err := aiQueue.LoadPending(ctx); err != nil {
-			logger.Warn("failed to load pending AI tasks", "error", err)
-		}
 		go func() {
 			defer close(aiQueueDone)
 			if err := aiQueue.Run(ctx); err != nil {
@@ -618,7 +626,7 @@ func run() error {
 
 	// Create webhook components.
 	webhookStore := webhook.NewStore()
-	webhookSvc := webhook.NewService(webhookStore, userDBMgr, logger)
+	webhookSvc = webhook.NewService(webhookStore, userDBMgr, logger)
 	webhookHandler := webhook.NewHandler(webhookSvc, logger)
 
 	// Create agent memory / MCP components.

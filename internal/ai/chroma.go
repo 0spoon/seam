@@ -174,9 +174,10 @@ func (c *ChromaClient) AddDocuments(ctx context.Context, collectionID string, id
 
 // chromaQueryRequest is the request body for querying.
 type chromaQueryRequest struct {
-	QueryEmbeddings [][]float64 `json:"query_embeddings"`
-	NResults        int         `json:"n_results"`
-	Include         []string    `json:"include"`
+	QueryEmbeddings [][]float64            `json:"query_embeddings"`
+	NResults        int                    `json:"n_results"`
+	Include         []string               `json:"include"`
+	Where           map[string]interface{} `json:"where,omitempty"`
 }
 
 // chromaQueryResponse is the response from a query.
@@ -220,6 +221,64 @@ func (c *ChromaClient) Query(ctx context.Context, collectionID string, embedding
 	var result chromaQueryResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("ai.ChromaClient.Query: decode: %w", err)
+	}
+
+	if len(result.IDs) == 0 || len(result.IDs[0]) == 0 {
+		return []QueryResult{}, nil
+	}
+
+	var queryResults []QueryResult
+	for i, id := range result.IDs[0] {
+		qr := QueryResult{ID: id}
+		if len(result.Distances) > 0 && i < len(result.Distances[0]) {
+			qr.Distance = result.Distances[0][i]
+		}
+		if len(result.Metadatas) > 0 && i < len(result.Metadatas[0]) {
+			qr.Metadata = result.Metadatas[0][i]
+		}
+		queryResults = append(queryResults, qr)
+	}
+
+	return queryResults, nil
+}
+
+// QueryWithFilter finds the nearest neighbors with a metadata where filter.
+// The where map is passed directly to ChromaDB's where clause.
+// Example: map[string]interface{}{"scope": "agent"} filters to agent-scoped docs.
+func (c *ChromaClient) QueryWithFilter(ctx context.Context, collectionID string, embedding []float64, nResults int, where map[string]interface{}) ([]QueryResult, error) {
+	reqBody := chromaQueryRequest{
+		QueryEmbeddings: [][]float64{embedding},
+		NResults:        nResults,
+		Include:         []string{"distances", "metadatas"},
+		Where:           where,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("ai.ChromaClient.QueryWithFilter: marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s%s/%s/query", c.baseURL, c.collectionPath(), collectionID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("ai.ChromaClient.QueryWithFilter: new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ai.ChromaClient.QueryWithFilter: %w: %w", ErrChromaUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("ai.ChromaClient.QueryWithFilter: status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result chromaQueryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("ai.ChromaClient.QueryWithFilter: decode: %w", err)
 	}
 
 	if len(result.IDs) == 0 || len(result.IDs[0]) == 0 {

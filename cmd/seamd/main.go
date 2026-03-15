@@ -587,12 +587,14 @@ func run() error {
 
 	// Create agent memory / MCP components.
 	agentStore := agent.NewSQLStore()
+	agentWSNotifier := agent.NewHubWSNotifier(hub, logger)
 	agentSvc := agent.NewService(agent.ServiceConfig{
 		Store:          agentStore,
 		NoteService:    noteSvc,
 		ProjectService: projectSvc,
 		SearchService:  searchSvc,
 		AIQueue:        aiQueue,
+		WSNotifier:     agentWSNotifier,
 		UserDBManager:  userDBMgr,
 		Logger:         logger,
 	})

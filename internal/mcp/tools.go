@@ -51,6 +51,10 @@ func (s *Server) registerTools() {
 		mcpserver.ServerTool{Tool: notesReadTool(), Handler: s.handleNotesRead},
 		mcpserver.ServerTool{Tool: notesListTool(), Handler: s.handleNotesList},
 		mcpserver.ServerTool{Tool: notesCreateTool(), Handler: s.handleNotesCreate},
+
+		// V2: Memory search and session metrics.
+		mcpserver.ServerTool{Tool: memorySearchTool(), Handler: s.handleMemorySearch},
+		mcpserver.ServerTool{Tool: sessionMetricsTool(), Handler: s.handleSessionMetrics},
 	)
 }
 
@@ -187,6 +191,21 @@ func notesCreateTool() mcp.Tool {
 		mcp.WithString("body", mcp.Required(), mcp.Description("Note body (markdown)")),
 		mcp.WithString("project", mcp.Description("Project slug (optional)")),
 		mcp.WithString("tags", mcp.Description("Comma-separated tags (optional)")),
+	)
+}
+
+func memorySearchTool() mcp.Tool {
+	return mcp.NewTool("memory_search",
+		mcp.WithDescription("Search agent knowledge notes using FTS and semantic search. Returns results scoped to agent memory only."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of results (default: 10)")),
+	)
+}
+
+func sessionMetricsTool() mcp.Tool {
+	return mcp.NewTool("session_metrics",
+		mcp.WithDescription("Get aggregate statistics for a session: tool calls, durations, notes created, errors."),
+		mcp.WithString("session_name", mcp.Required(), mcp.Description("Session name")),
 	)
 }
 
@@ -460,10 +479,9 @@ func (s *Server) handleContextGather(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultError(fmt.Sprintf("query too long: %d bytes exceeds limit of %d", len(query), maxQueryLen)), nil
 	}
 	maxChars := req.GetInt("max_context_chars", 3000)
-	// scope is accepted but not used for filtering in v1 (requires ChromaDB metadata changes)
-	_ = req.GetString("scope", "all")
+	scope := req.GetString("scope", "all")
 
-	results, err := s.cfg.AgentService.ContextGather(ctx, userID, query, maxChars)
+	results, err := s.cfg.AgentService.ContextGather(ctx, userID, query, scope, maxChars)
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("context_gather", err)), nil
 	}
@@ -601,6 +619,51 @@ func (s *Server) handleNotesCreate(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	data, _ := json.Marshal(map[string]string{"note_id": n.ID})
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleMemorySearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	query, err := req.RequireString("query")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: query"), nil
+	}
+	if len(query) > maxQueryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("query too long: %d bytes exceeds limit of %d", len(query), maxQueryLen)), nil
+	}
+	limit := req.GetInt("limit", 10)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
+
+	results, err := s.cfg.AgentService.MemorySearch(ctx, userID, query, limit)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("memory_search", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(map[string]interface{}{"results": results})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleSessionMetrics(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	sessionName, err := req.RequireString("session_name")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: session_name"), nil
+	}
+
+	metrics, err := s.cfg.AgentService.SessionMetrics(ctx, userID, sessionName)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("session_metrics", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(metrics)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal metrics"), nil
+	}
 	return mcp.NewToolResultText(string(data)), nil
 }
 

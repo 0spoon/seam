@@ -196,6 +196,44 @@ func (s *SQLStore) ListToolCalls(ctx context.Context, db DBTX, sessionID string,
 	return calls, nil
 }
 
+// GetSessionMetrics returns aggregate tool call metrics for a session.
+func (s *SQLStore) GetSessionMetrics(ctx context.Context, db DBTX, sessionID string) (int, map[string]int, int, int64, error) {
+	// Total calls, error count, and average duration.
+	var totalCalls int
+	var errorCount int
+	var avgDuration int64
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COUNT(CASE WHEN error IS NOT NULL AND error != '' THEN 1 END),
+		        COALESCE(AVG(duration_ms), 0)
+		 FROM agent_tool_calls WHERE session_id = ?`, sessionID,
+	).Scan(&totalCalls, &errorCount, &avgDuration)
+	if err != nil {
+		return 0, nil, 0, 0, fmt.Errorf("agent.SQLStore.GetSessionMetrics: aggregate: %w", err)
+	}
+
+	// Per-tool breakdown.
+	rows, err := db.QueryContext(ctx,
+		`SELECT tool_name, COUNT(*) FROM agent_tool_calls
+		 WHERE session_id = ? GROUP BY tool_name ORDER BY COUNT(*) DESC`, sessionID,
+	)
+	if err != nil {
+		return 0, nil, 0, 0, fmt.Errorf("agent.SQLStore.GetSessionMetrics: breakdown: %w", err)
+	}
+	defer rows.Close()
+
+	breakdown := make(map[string]int)
+	for rows.Next() {
+		var toolName string
+		var count int
+		if err := rows.Scan(&toolName, &count); err != nil {
+			continue
+		}
+		breakdown[toolName] = count
+	}
+
+	return totalCalls, breakdown, errorCount, avgDuration, rows.Err()
+}
+
 // scanSession scans a single session row from a *sql.Row.
 func (s *SQLStore) scanSession(row *sql.Row) (*Session, error) {
 	sess := &Session{}

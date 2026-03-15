@@ -84,7 +84,8 @@ func (e *Embedder) EnsureCollection(ctx context.Context, userID string) (string,
 // EmbedNote generates embeddings for a note and upserts them into ChromaDB.
 // Long notes are chunked. Each chunk is embedded separately and stored with
 // the note ID plus chunk index as the document ID.
-func (e *Embedder) EmbedNote(ctx context.Context, userID, noteID, title, body string) error {
+// Optional extraMeta is merged into each chunk's metadata (e.g., scope).
+func (e *Embedder) EmbedNote(ctx context.Context, userID, noteID, title, body string, extraMeta ...map[string]string) error {
 	colID, err := e.EnsureCollection(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("ai.Embedder.EmbedNote: %w", err)
@@ -111,14 +112,23 @@ func (e *Embedder) EmbedNote(ctx context.Context, userID, noteID, title, body st
 			return fmt.Errorf("ai.Embedder.EmbedNote: embed chunk %d: %w", i, err)
 		}
 
-		ids = append(ids, docID)
-		embeddings = append(embeddings, embedding)
-		metadatas = append(metadatas, map[string]string{
+		meta := map[string]string{
 			"note_id":     noteID,
 			"title":       title,
 			"chunk_index": fmt.Sprintf("%d", i),
 			"user_id":     userID,
-		})
+			"scope":       "user", // default scope
+		}
+		// Merge extra metadata (e.g., scope override).
+		if len(extraMeta) > 0 && extraMeta[0] != nil {
+			for k, v := range extraMeta[0] {
+				meta[k] = v
+			}
+		}
+
+		ids = append(ids, docID)
+		embeddings = append(embeddings, embedding)
+		metadatas = append(metadatas, meta)
 	}
 
 	if err := e.chroma.UpsertDocuments(ctx, colID, ids, embeddings, metadatas); err != nil {
@@ -172,7 +182,12 @@ func (e *Embedder) HandleEmbedTask(ctx context.Context, task *Task) (json.RawMes
 		return nil, fmt.Errorf("ai.Embedder.HandleEmbedTask: query note: %w", err)
 	}
 
-	if err := e.EmbedNote(ctx, task.UserID, payload.NoteID, title, body); err != nil {
+	var extra map[string]string
+	if payload.Scope != "" {
+		extra = map[string]string{"scope": payload.Scope}
+	}
+
+	if err := e.EmbedNote(ctx, task.UserID, payload.NoteID, title, body, extra); err != nil {
 		return nil, err
 	}
 

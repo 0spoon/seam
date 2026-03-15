@@ -137,6 +137,93 @@ func (s *SemanticSearcher) Search(ctx context.Context, userID, query string, lim
 	return results, nil
 }
 
+// SearchScoped performs semantic search with a ChromaDB metadata where filter.
+// The where map is passed to ChromaDB's query filter (e.g., {"scope": "agent"}).
+// If where is nil, behaves identically to Search.
+func (s *SemanticSearcher) SearchScoped(ctx context.Context, userID, query string, limit int, where map[string]interface{}) ([]SemanticResult, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	queryEmbedding, err := s.ollama.GenerateEmbedding(ctx, s.model, query)
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchScoped: embed query: %w", err)
+	}
+
+	colName := ai.CollectionName(userID)
+	colID, err := s.chroma.GetOrCreateCollection(ctx, colName)
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchScoped: get collection: %w", err)
+	}
+
+	nResults := limit * 3
+	if nResults < 20 {
+		nResults = 20
+	}
+
+	var chromaResults []ai.QueryResult
+	if len(where) > 0 {
+		chromaResults, err = s.chroma.QueryWithFilter(ctx, colID, queryEmbedding, nResults, where)
+	} else {
+		chromaResults, err = s.chroma.Query(ctx, colID, queryEmbedding, nResults)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("search.SemanticSearcher.SearchScoped: query chroma: %w", err)
+	}
+
+	// Deduplicate by note_id.
+	type bestResult struct {
+		noteID   string
+		title    string
+		distance float64
+	}
+	seen := make(map[string]*bestResult)
+	for _, cr := range chromaResults {
+		noteID := cr.Metadata["note_id"]
+		if noteID == "" {
+			continue
+		}
+		if existing, ok := seen[noteID]; !ok || cr.Distance < existing.distance {
+			seen[noteID] = &bestResult{
+				noteID:   noteID,
+				title:    cr.Metadata["title"],
+				distance: cr.Distance,
+			}
+		}
+	}
+
+	noteIDs := make([]string, 0, len(seen))
+	for noteID := range seen {
+		noteIDs = append(noteIDs, noteID)
+	}
+	bodyMap := s.batchGetNoteBodies(ctx, userID, noteIDs)
+
+	var results []SemanticResult
+	for _, br := range seen {
+		score := 1.0 - br.distance
+		if score < 0 {
+			score = 0
+		}
+		if score > 1 {
+			score = 1
+		}
+		snippet := extractSnippet(bodyMap[br.noteID], query, 200)
+		results = append(results, SemanticResult{
+			NoteID:  br.noteID,
+			Title:   br.title,
+			Score:   score,
+			Snippet: snippet,
+		})
+	}
+
+	sortSemanticResults(results)
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
 // batchGetNoteBodies loads note bodies for all given note IDs in a single query,
 // replacing the N+1 per-note getNoteSnippet pattern (C-24, C-25).
 func (s *SemanticSearcher) batchGetNoteBodies(ctx context.Context, userID string, noteIDs []string) map[string]string {

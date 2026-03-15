@@ -105,9 +105,53 @@
 - 9 integration tests (agent e2e with real filesystem and SQLite)
 - All tests passing
 
-## Deferred to v2
-- `AIQueue`/embed task enqueuing in agent service (watcher suppression means agent notes won't auto-embed; explicit enqueue needed for scope filtering)
-- Embedder metadata for scope filtering (`agent:true`, `memory_type`, `session_name`)
-- ChromaDB `where` filter support for `scope: agent|user` vs `scope: all`
-- notes_search, notes_read, notes_list, notes_create MCP tools
-- WebSocket events for agent note changes (real-time UI updates)
+## V1 Deferred Items (resolved in V2)
+- ~~`AIQueue`/embed task enqueuing~~ -- Resolved: agent notes embed with `scope: "agent"` metadata
+- ~~Embedder metadata for scope filtering~~ -- Resolved: `EmbedPayload.Scope` -> ChromaDB metadata
+- ~~ChromaDB `where` filter support~~ -- Resolved: `QueryWithFilter` method added
+- ~~notes_search, notes_read, notes_list, notes_create MCP tools~~ -- Already implemented in V1 (service + handlers complete)
+- ~~WebSocket events for agent note changes~~ -- Resolved: `WSNotifier` interface + `HubWSNotifier` adapter
+
+## Phase 7: MCP V2
+**Status: COMPLETE**
+
+### Scope-Filtered Search
+- `internal/ai/task.go` - `EmbedPayload.Scope` field ("agent" or "user")
+- `internal/ai/embedder.go` - `EmbedNote` accepts optional `extraMeta` for scope metadata; `HandleEmbedTask` passes scope from payload; default scope "user" on all embeddings
+- `internal/ai/chroma.go` - `QueryWithFilter` method: ChromaDB query with `where` metadata filter
+- `internal/search/fts.go` - `SearchScoped`: FTS with include/exclude project filter
+- `internal/search/semantic.go` - `SearchScoped`: semantic search with ChromaDB `where` clause
+- `internal/search/service.go` - `SearchFTSScoped`, `SearchSemanticScoped` methods
+- `internal/agent/service.go` - `searchKnowledgeScoped` with scope-based filter resolution; `ContextGather` now accepts `scope` parameter; `enqueueEmbed` uses "agent" scope, `enqueueEmbedWithScope` for explicit scope
+- `internal/mcp/tools.go` - `context_gather` handler wires `scope` param (was previously ignored)
+
+### memory_search Tool
+- `internal/agent/service.go` - `MemorySearch` method: searches agent knowledge only via scoped FTS/semantic
+- `internal/mcp/tools.go` - `memory_search` tool definition + handler
+- `internal/mcp/server.go` - `AgentService` interface updated
+
+### WebSocket Events for Agent Changes
+- `internal/agent/types.go` - `WSNotifier` interface defined
+- `internal/agent/wsnotifier.go` - `HubWSNotifier` adapter: bridges `ws.Hub` to `WSNotifier`
+- `internal/agent/service.go` - Events emitted on:
+  - `agent.session_started` (SessionStart)
+  - `agent.session_ended` (SessionEnd)
+  - `agent.memory_changed` (MemoryWrite create/update, MemoryDelete)
+  - `agent.note_created` (NotesCreate)
+- `cmd/seamd/main.go` - `HubWSNotifier` wired into agent service config
+
+### Session Metrics Tool
+- `internal/agent/types.go` - `SessionMetrics` struct
+- `internal/agent/store.go` - `GetSessionMetrics`: aggregate queries over agent_tool_calls
+- `internal/agent/service.go` - `SessionMetrics` method: combines tool call stats with session note counts
+- `internal/mcp/tools.go` - `session_metrics` tool definition + handler
+
+### Tests
+- `internal/mcp/v2_tools_test.go` - memory_search, session_metrics, context_gather scope tests
+- `internal/agent/v2_service_test.go` - MemorySearch, SessionMetrics, ContextGather scope, WSNotifier event tests
+- `internal/search/v2_fts_test.go` - SearchScoped include/exclude project filter tests
+- Updated mock in `server_test.go` for V2 interface changes
+
+### MCP Tool Count
+- V1: 16 tools (session x6, memory x5, context_gather, notes x4)
+- V2: 18 tools (+memory_search, +session_metrics)

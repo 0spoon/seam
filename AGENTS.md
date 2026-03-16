@@ -4,7 +4,7 @@ Instructions for AI coding agents operating in this repository.
 
 ## Project overview
 
-Seam is a local-first, AI-powered knowledge system. Go backend (REST + WebSocket), Bubble Tea TUI, React web frontend. Single-user, single machine. Notes are plain `.md` files on disk. AI via Ollama (local). See README.md for architecture and feature overview.
+Seam is a local-first, AI-powered knowledge system. Go backend (REST + WebSocket), Bubble Tea TUI, React web frontend. Single-user, single machine. Notes are plain `.md` files on disk. AI via Ollama (local). See `docs/` for architecture, API reference, and feature details.
 
 ## Build and run
 
@@ -169,6 +169,14 @@ No package imports `internal/server`. The server wires dependencies at startup.
 
 | File | Purpose |
 |---|---|
-| `README.md` | Architecture, features, API reference, getting started |
+| `README.md` | Project overview and quick start |
+| `BRAND.md` | Visual identity, colors, fonts, logo usage |
+| `docs/getting-started.md` | Prerequisites, installation, configuration |
+| `docs/architecture.md` | System diagram, tech stack, data format, project structure |
+| `docs/ai.md` | LLM providers, AI features, task queue |
+| `docs/api.md` | REST endpoints, WebSocket events |
+| `docs/mcp.md` | MCP agent memory tools |
+| `docs/development.md` | Build, test, lint commands |
+| `docs/security.md` | Security model and invariants |
 | `seam-server.yaml.example` | Server configuration template |
 | `migrations/001_initial.sql` | Complete database schema (single flattened migration) |

@@ -172,8 +172,12 @@ func (s *Service) SessionStart(ctx context.Context, userID, name string, maxCont
 
 	// Create new session.
 	now := time.Now().UTC()
+	idVal, idErr := ulid.New(ulid.Now(), rand.Reader)
+	if idErr != nil {
+		return nil, fmt.Errorf("agent.Service.SessionStart: generate id: %w", idErr)
+	}
 	sess := &Session{
-		ID:        ulid.MustNew(ulid.Now(), rand.Reader).String(),
+		ID:        idVal.String(),
 		Name:      name,
 		Status:    StatusActive,
 		CreatedAt: now,
@@ -607,6 +611,9 @@ func (s *Service) MemorySearch(ctx context.Context, userID, query string, limit 
 		limit = 10
 	}
 	hits := s.searchKnowledgeScoped(ctx, userID, query, "agent", limit, 0.0)
+	if hits == nil {
+		hits = []KnowledgeHit{}
+	}
 	return hits, nil
 }
 

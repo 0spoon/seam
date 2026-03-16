@@ -35,7 +35,11 @@ func slugify(name string) string {
 }
 
 func newID() string {
-	return ulid.MustNew(ulid.Now(), rand.Reader).String()
+	id, err := ulid.New(ulid.Now(), rand.Reader)
+	if err != nil {
+		log.Fatalf("failed to generate ULID: %v", err)
+	}
+	return id.String()
 }
 
 func computeHash(content string) string {

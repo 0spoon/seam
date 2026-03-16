@@ -113,6 +113,14 @@ func (sw *statusWriter) Unwrap() http.ResponseWriter {
 	return sw.ResponseWriter
 }
 
+// Flush implements http.Flusher by delegating to the underlying writer.
+// This is required for SSE streaming endpoints to work through middleware.
+func (sw *statusWriter) Flush() {
+	if f, ok := sw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func generateRequestID() string {
 	b := make([]byte, 8)
 	rand.Read(b)

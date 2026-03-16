@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -187,7 +188,12 @@ func (s *SQLStore) ListToolCalls(ctx context.Context, db DBTX, sessionID string,
 		tc.Result = resultVal.String
 		tc.Error = errorVal.String
 		tc.DurationMs = durationMs.Int64
-		tc.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		if parsed, pErr := time.Parse(time.RFC3339, createdAt); pErr != nil {
+			slog.Warn("agent.SQLStore.ListToolCalls: malformed created_at",
+				"raw", createdAt, "error", pErr)
+		} else {
+			tc.CreatedAt = parsed
+		}
 		calls = append(calls, tc)
 	}
 	if err := rows.Err(); err != nil {
@@ -226,6 +232,7 @@ func (s *SQLStore) GetSessionMetrics(ctx context.Context, db DBTX, sessionID str
 		var toolName string
 		var count int
 		if err := rows.Scan(&toolName, &count); err != nil {
+			slog.Warn("agent.SQLStore.GetSessionMetrics: scan breakdown", "error", err)
 			continue
 		}
 		breakdown[toolName] = count
@@ -260,8 +267,18 @@ func (s *SQLStore) scanSession(row *sql.Row) (*Session, error) {
 		}
 	}
 
-	sess.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	sess.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	if parsed, pErr := time.Parse(time.RFC3339, createdAt); pErr != nil {
+		slog.Warn("agent.SQLStore.scanSession: malformed created_at",
+			"raw", createdAt, "error", pErr)
+	} else {
+		sess.CreatedAt = parsed
+	}
+	if parsed, pErr := time.Parse(time.RFC3339, updatedAt); pErr != nil {
+		slog.Warn("agent.SQLStore.scanSession: malformed updated_at",
+			"raw", updatedAt, "error", pErr)
+	} else {
+		sess.UpdatedAt = parsed
+	}
 	return sess, nil
 }
 
@@ -292,8 +309,18 @@ func (s *SQLStore) querySessionRows(ctx context.Context, db DBTX, query string, 
 			_ = json.Unmarshal([]byte(metaJSON), &sess.Metadata)
 		}
 
-		sess.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-		sess.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+		if parsed, pErr := time.Parse(time.RFC3339, createdAt); pErr != nil {
+			slog.Warn("agent.SQLStore.querySessionRows: malformed created_at",
+				"raw", createdAt, "error", pErr)
+		} else {
+			sess.CreatedAt = parsed
+		}
+		if parsed, pErr := time.Parse(time.RFC3339, updatedAt); pErr != nil {
+			slog.Warn("agent.SQLStore.querySessionRows: malformed updated_at",
+				"raw", updatedAt, "error", pErr)
+		} else {
+			sess.UpdatedAt = parsed
+		}
 		sessions = append(sessions, sess)
 	}
 	if err := rows.Err(); err != nil {

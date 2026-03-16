@@ -49,6 +49,10 @@ type Task struct {
 	CreatedAt  time.Time       `json:"created_at"`
 	StartedAt  time.Time       `json:"started_at,omitempty"`
 	FinishedAt time.Time       `json:"finished_at,omitempty"`
+
+	// retries is a transient field (not persisted) that tracks how many
+	// times this task has been re-enqueued due to transient errors.
+	retries int `json:"-"`
 }
 
 // TaskEvent is pushed via WebSocket when a task changes status.

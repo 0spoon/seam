@@ -50,8 +50,17 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	filter.Tag = r.URL.Query().Get("tag")
 
 	if doneParam := r.URL.Query().Get("done"); doneParam != "" {
-		d := doneParam == "true"
-		filter.Done = &d
+		switch doneParam {
+		case "true":
+			d := true
+			filter.Done = &d
+		case "false":
+			d := false
+			filter.Done = &d
+		default:
+			writeError(w, http.StatusBadRequest, "done must be 'true' or 'false'")
+			return
+		}
 	}
 
 	filter.Limit = 50

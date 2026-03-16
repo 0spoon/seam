@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -163,6 +164,25 @@ func (s *Store) Update(ctx context.Context, db DBTX, w *Webhook) error {
 	return nil
 }
 
+// UpdateSecret replaces the HMAC signing secret for a webhook.
+func (s *Store) UpdateSecret(ctx context.Context, db DBTX, id, secret string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := db.ExecContext(ctx,
+		`UPDATE webhooks SET secret = ?, updated_at = ? WHERE id = ?`,
+		secret, now, id)
+	if err != nil {
+		return fmt.Errorf("webhook.Store.UpdateSecret: %w", err)
+	}
+	n, raErr := result.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("webhook.Store.UpdateSecret: rows affected: %w", raErr)
+	}
+	if n == 0 {
+		return fmt.Errorf("webhook.Store.UpdateSecret: %w", ErrNotFound)
+	}
+	return nil
+}
+
 // Delete removes a webhook by ID.
 func (s *Store) Delete(ctx context.Context, db DBTX, id string) error {
 	result, err := db.ExecContext(ctx, `DELETE FROM webhooks WHERE id = ?`, id)
@@ -260,7 +280,11 @@ func (s *Store) ListDeliveries(ctx context.Context, db DBTX, webhookID string, l
 		if errStr.Valid {
 			d.Error = errStr.String
 		}
-		d.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		if parsed, err := time.Parse(time.RFC3339, createdAt); err != nil {
+			slog.Warn("webhook.Store: failed to parse created_at", "value", createdAt, "error", err)
+		} else {
+			d.CreatedAt = parsed
+		}
 		deliveries = append(deliveries, d)
 	}
 	if err := rows.Err(); err != nil {
@@ -282,9 +306,19 @@ func scanWebhook(row *sql.Row) (*Webhook, error) {
 
 	w.EventTypes = splitEventTypes(eventTypes)
 	w.Active = active == 1
-	w.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	w.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-	_ = json.Unmarshal([]byte(filterJSON), &w.Filter)
+	if parsed, err := time.Parse(time.RFC3339, createdAt); err != nil {
+		slog.Warn("webhook.Store: failed to parse created_at", "value", createdAt, "error", err)
+	} else {
+		w.CreatedAt = parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		slog.Warn("webhook.Store: failed to parse updated_at", "value", updatedAt, "error", err)
+	} else {
+		w.UpdatedAt = parsed
+	}
+	if err := json.Unmarshal([]byte(filterJSON), &w.Filter); err != nil {
+		slog.Warn("webhook.Store: failed to parse filter", "value", filterJSON, "error", err)
+	}
 
 	return w, nil
 }
@@ -302,9 +336,19 @@ func scanWebhookRow(rows *sql.Rows) (*Webhook, error) {
 
 	w.EventTypes = splitEventTypes(eventTypes)
 	w.Active = active == 1
-	w.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	w.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-	_ = json.Unmarshal([]byte(filterJSON), &w.Filter)
+	if parsed, err := time.Parse(time.RFC3339, createdAt); err != nil {
+		slog.Warn("webhook.Store: failed to parse created_at", "value", createdAt, "error", err)
+	} else {
+		w.CreatedAt = parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		slog.Warn("webhook.Store: failed to parse updated_at", "value", updatedAt, "error", err)
+	} else {
+		w.UpdatedAt = parsed
+	}
+	if err := json.Unmarshal([]byte(filterJSON), &w.Filter); err != nil {
+		slog.Warn("webhook.Store: failed to parse filter", "value", filterJSON, "error", err)
+	}
 
 	return w, nil
 }

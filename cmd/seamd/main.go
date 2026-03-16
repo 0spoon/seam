@@ -32,6 +32,7 @@ import (
 	"github.com/katata/seam/internal/task"
 	"github.com/katata/seam/internal/template"
 	"github.com/katata/seam/internal/userdb"
+	"github.com/katata/seam/internal/validate"
 	"github.com/katata/seam/internal/watcher"
 	"github.com/katata/seam/internal/webhook"
 	"github.com/katata/seam/internal/ws"
@@ -99,7 +100,7 @@ func run() error {
 	}
 
 	// Open server.db (shared database for users and refresh tokens).
-	serverDBPath := cfg.DataDir + "/server.db"
+	serverDBPath := filepath.Join(cfg.DataDir, "server.db")
 	serverDB, err := auth.OpenServerDB(serverDBPath)
 	if err != nil {
 		return fmt.Errorf("open server db: %w", err)
@@ -172,6 +173,9 @@ func run() error {
 	// C-19: Wire frontmatter updater so project cascade-to-inbox clears
 	// the project field from YAML frontmatter on disk.
 	projectSvc.SetFrontmatterUpdater(func(notesDir, filePath string) error {
+		if err := validate.PathWithinDir(filePath, notesDir); err != nil {
+			return fmt.Errorf("frontmatter updater: %w", err)
+		}
 		absPath := filepath.Join(notesDir, filePath)
 		data, err := os.ReadFile(absPath)
 		if err != nil {
@@ -273,7 +277,11 @@ func run() error {
 
 		// Wire background summarization for voice captures.
 		captureSvc.SetSummarizeFunc(func(ctx context.Context, userID, noteID string) {
-			payload, _ := json.Marshal(ai.SummarizeTranscriptPayload{NoteID: noteID})
+			payload, marshalErr := json.Marshal(ai.SummarizeTranscriptPayload{NoteID: noteID})
+			if marshalErr != nil {
+				logger.Warn("failed to marshal summarize payload", "error", marshalErr)
+				return
+			}
 			if err := aiQueue.Enqueue(ctx, &ai.Task{
 				UserID:   userID,
 				Type:     ai.TaskTypeSummarizeTranscript,
@@ -334,7 +342,7 @@ func run() error {
 
 		// Check if file exists on disk after reindex.
 		notesDir := userDBMgr.UserNotesDir(uid)
-		absPath := notesDir + "/" + filePath
+		absPath := filepath.Join(notesDir, filePath)
 		_, statErr := os.Stat(absPath)
 		fileExists := statErr == nil
 
@@ -365,10 +373,13 @@ func run() error {
 		}
 
 		// Push note.changed event to the user's WebSocket connections.
-		payload, _ := json.Marshal(ws.NoteChangedPayload{
+		payload, marshalErr := json.Marshal(ws.NoteChangedPayload{
 			NoteID:     noteID,
 			ChangeType: changeType,
 		})
+		if marshalErr != nil {
+			logger.Warn("failed to marshal note changed payload", "error", marshalErr)
+		}
 		hub.Send(uid, ws.Message{Type: ws.MsgTypeNoteChanged, Payload: payload})
 
 		// Enqueue embedding tasks if AI is enabled.
@@ -376,7 +387,7 @@ func run() error {
 		if embedder != nil && aiQueue != nil {
 			switch changeType {
 			case "created", "modified":
-				embedPayload, _ := json.Marshal(ai.EmbedPayload{NoteID: noteID})
+				embedPayload, _ := json.Marshal(ai.EmbedPayload{NoteID: noteID}) //nolint:errcheck // simple struct
 				if err := aiQueue.Enqueue(fctx, &ai.Task{
 					UserID:   uid,
 					Type:     ai.TaskTypeEmbed,
@@ -386,7 +397,7 @@ func run() error {
 					logger.Warn("failed to enqueue embed task", "note_id", noteID, "error", err)
 				}
 			case "deleted":
-				deletePayload, _ := json.Marshal(ai.DeleteEmbedPayload{NoteID: noteID})
+				deletePayload, _ := json.Marshal(ai.DeleteEmbedPayload{NoteID: noteID}) //nolint:errcheck // simple struct
 				if err := aiQueue.Enqueue(fctx, &ai.Task{
 					UserID:   uid,
 					Type:     ai.TaskTypeDeleteEmbed,
@@ -703,15 +714,22 @@ func run() error {
 		logger.Error("server shutdown error", "error", err)
 	}
 
-	// 2. Close all WebSocket connections with close frames.
+	// 2. Close MCP server (stop background goroutines).
+	mcpSrv.Close()
+
+	// 2a. Stop handler background goroutines (rate limiter eviction).
+	aiHandler.Close()
+	authHandler.Close()
+
+	// 3. Close all WebSocket connections with close frames.
 	hub.CloseAll()
 
-	// 3. Wait for AI queue workers to finish before closing databases.
+	// 4. Wait for AI queue workers to finish before closing databases.
 	<-aiQueueDone
 
-	// 4. Stop file watcher (deferred w.Close() handles this -- LIFO before DBs).
-	// 5. Close all user databases (deferred userDBMgr.CloseAll() handles this).
-	// 6. Close server database (deferred serverDB.Close() handles this).
+	// 5. Stop file watcher (deferred w.Close() handles this -- LIFO before DBs).
+	// 6. Close all user databases (deferred userDBMgr.CloseAll() handles this).
+	// 7. Close server database (deferred serverDB.Close() handles this).
 
 	logger.Info("shutdown complete")
 	return nil

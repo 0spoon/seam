@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -25,6 +26,7 @@ type Service struct {
 	store              *Store
 	userDBManager      userdb.Manager
 	logger             *slog.Logger
+	fmMu               sync.RWMutex
 	frontmatterUpdater FrontmatterUpdater
 }
 
@@ -44,7 +46,16 @@ func NewService(store *Store, userDBManager userdb.Manager, logger *slog.Logger)
 // from YAML frontmatter when cascading notes to inbox. Called after note
 // service is created to break the circular dependency.
 func (s *Service) SetFrontmatterUpdater(fn FrontmatterUpdater) {
+	s.fmMu.Lock()
 	s.frontmatterUpdater = fn
+	s.fmMu.Unlock()
+}
+
+// getFrontmatterUpdater returns the frontmatter updater under read lock.
+func (s *Service) getFrontmatterUpdater() FrontmatterUpdater {
+	s.fmMu.RLock()
+	defer s.fmMu.RUnlock()
+	return s.frontmatterUpdater
 }
 
 // Create creates a new project with the given name and description.
@@ -66,8 +77,12 @@ func (s *Service) Create(ctx context.Context, userID, name, description string) 
 	}
 
 	now := time.Now().UTC()
+	id, idErr := ulid.New(ulid.Now(), rand.Reader)
+	if idErr != nil {
+		return nil, fmt.Errorf("project.Service.Create: generate id: %w", idErr)
+	}
 	p := &Project{
-		ID:          ulid.MustNew(ulid.Now(), rand.Reader).String(),
+		ID:          id.String(),
 		Name:        name,
 		Slug:        slug,
 		Description: description,
@@ -83,7 +98,7 @@ func (s *Service) Create(ctx context.Context, userID, name, description string) 
 
 	if err := s.store.Create(ctx, db, p); err != nil {
 		// Clean up directory on DB insert failure.
-		os.Remove(projectDir)
+		os.RemoveAll(projectDir)
 		return nil, fmt.Errorf("project.Service.Create: %w", err)
 	}
 
@@ -339,8 +354,8 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 			}
 
 			// Clear the project field from YAML frontmatter on disk.
-			if s.frontmatterUpdater != nil {
-				if fmErr := s.frontmatterUpdater(notesDir, m.newRelPath); fmErr != nil {
+			if fn := s.getFrontmatterUpdater(); fn != nil {
+				if fmErr := fn(notesDir, m.newRelPath); fmErr != nil {
 					s.logger.Warn("project.Service.Delete: failed to clear project in frontmatter",
 						"note_id", m.noteID, "file", m.newRelPath, "error", fmErr)
 				}

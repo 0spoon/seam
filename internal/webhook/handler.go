@@ -74,7 +74,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, wh)
+	// Return the secret only in the create response so the user can
+	// configure HMAC signature verification. Subsequent list/get
+	// responses omit it (json:"-" on the Secret field).
+	type createResponse struct {
+		*Webhook
+		Secret string `json:"secret"`
+	}
+	writeJSON(w, http.StatusCreated, createResponse{Webhook: wh, Secret: wh.Secret})
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +109,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
+	if reqctx.UserIDFromContext(r.Context()) == "" {
+		writeError(w, http.StatusUnauthorized, "missing user identity")
+		return
+	}
 	writeJSON(w, http.StatusOK, AllEventTypes)
 }
 

@@ -285,8 +285,11 @@ func (m searchModel) View() string {
 		if r.Snippet != "" {
 			// Strip HTML tags from snippet for terminal display.
 			snippet := stripHTML(r.Snippet)
-			if len(snippet) > m.width-8 {
-				snippet = snippet[:m.width-11] + "..."
+			if m.width > 14 {
+				runes := []rune(snippet)
+				if len(runes) > m.width-8 {
+					snippet = string(runes[:m.width-11]) + "..."
+				}
 			}
 			b.WriteString(styleMuted.Render("    " + snippet))
 			b.WriteString("\n")

@@ -186,6 +186,10 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "role and content are required")
 		return
 	}
+	if req.Role != "user" && req.Role != "assistant" {
+		writeError(w, http.StatusBadRequest, "role must be 'user' or 'assistant'")
+		return
+	}
 
 	msg := Message{
 		ConversationID: conversationID,

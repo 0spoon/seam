@@ -30,15 +30,16 @@ type Note struct {
 
 // NoteFilter controls listing and pagination of notes.
 type NoteFilter struct {
-	ProjectID string
-	InboxOnly bool
-	Tag       string
-	Since     time.Time
-	Until     time.Time
-	Sort      string // "created" or "modified"
-	SortDir   string // "asc" or "desc"
-	Limit     int
-	Offset    int
+	ProjectID   string
+	InboxOnly   bool
+	Tag         string
+	Since       time.Time
+	Until       time.Time
+	Sort        string // "created" or "modified"
+	SortDir     string // "asc" or "desc"
+	Limit       int
+	Offset      int
+	ExcludeBody bool // if true, omit body from results for performance
 }
 
 // TagCount holds a tag name and the number of notes using it.
@@ -181,11 +182,15 @@ func (s *SQLStore) List(ctx context.Context, db DBTX, filter NoteFilter) ([]*Not
 		sortDir = "ASC"
 	}
 
+	bodyCol := "n.body"
+	if filter.ExcludeBody {
+		bodyCol = "'' AS body"
+	}
 	query := fmt.Sprintf(
-		`SELECT n.id, n.title, n.project_id, n.file_path, n.body, n.content_hash,
+		`SELECT n.id, n.title, n.project_id, n.file_path, %s, n.content_hash,
 		 n.source_url, n.transcript_source, n.created_at, n.updated_at
 		 FROM notes n%s ORDER BY %s %s`,
-		whereClause, sortCol, sortDir,
+		bodyCol, whereClause, sortCol, sortDir,
 	)
 
 	listArgs := make([]interface{}, len(args))

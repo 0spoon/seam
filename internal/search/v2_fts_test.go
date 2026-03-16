@@ -13,8 +13,15 @@ func TestFTSStore_SearchScoped_IncludeProject(t *testing.T) {
 	db := testutil.TestUserDB(t)
 	ctx := context.Background()
 
-	// Insert notes in different projects.
+	// Insert parent projects to satisfy foreign key constraints.
 	_, err := db.ExecContext(ctx,
+		`INSERT INTO projects (id, name, slug, created_at, updated_at)
+		 VALUES ('proj-agent', 'Agent', 'agent', datetime('now'), datetime('now')),
+		        ('proj-user', 'User', 'user', datetime('now'), datetime('now'))`)
+	require.NoError(t, err)
+
+	// Insert notes in different projects.
+	_, err = db.ExecContext(ctx,
 		`INSERT INTO notes (id, title, file_path, body, content_hash, project_id, created_at, updated_at)
 		 VALUES ('n1', 'Agent Note', 'agent-memory/note1.md', 'agent knowledge about patterns', 'h1', 'proj-agent', datetime('now'), datetime('now')),
 		        ('n2', 'User Note', 'inbox/note2.md', 'user note about patterns', 'h2', 'proj-user', datetime('now'), datetime('now'))`)
@@ -34,7 +41,14 @@ func TestFTSStore_SearchScoped_ExcludeProject(t *testing.T) {
 	db := testutil.TestUserDB(t)
 	ctx := context.Background()
 
+	// Insert parent projects to satisfy foreign key constraints.
 	_, err := db.ExecContext(ctx,
+		`INSERT INTO projects (id, name, slug, created_at, updated_at)
+		 VALUES ('proj-agent', 'Agent', 'agent', datetime('now'), datetime('now')),
+		        ('proj-user', 'User', 'user', datetime('now'), datetime('now'))`)
+	require.NoError(t, err)
+
+	_, err = db.ExecContext(ctx,
 		`INSERT INTO notes (id, title, file_path, body, content_hash, project_id, created_at, updated_at)
 		 VALUES ('n1', 'Agent Note', 'agent-memory/note1.md', 'agent knowledge about patterns', 'h1', 'proj-agent', datetime('now'), datetime('now')),
 		        ('n2', 'User Note', 'inbox/note2.md', 'user note about patterns', 'h2', 'proj-user', datetime('now'), datetime('now'))`)
@@ -54,7 +68,14 @@ func TestFTSStore_SearchScoped_NoFilter(t *testing.T) {
 	db := testutil.TestUserDB(t)
 	ctx := context.Background()
 
+	// Insert parent projects to satisfy foreign key constraints.
 	_, err := db.ExecContext(ctx,
+		`INSERT INTO projects (id, name, slug, created_at, updated_at)
+		 VALUES ('proj-a', 'Project A', 'proj-a', datetime('now'), datetime('now')),
+		        ('proj-b', 'Project B', 'proj-b', datetime('now'), datetime('now'))`)
+	require.NoError(t, err)
+
+	_, err = db.ExecContext(ctx,
 		`INSERT INTO notes (id, title, file_path, body, content_hash, project_id, created_at, updated_at)
 		 VALUES ('n1', 'Note A', 'inbox/a.md', 'searchable content alpha', 'h1', 'proj-a', datetime('now'), datetime('now')),
 		        ('n2', 'Note B', 'inbox/b.md', 'searchable content beta', 'h2', 'proj-b', datetime('now'), datetime('now'))`)

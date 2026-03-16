@@ -50,6 +50,7 @@ func (h *Handler) capture(w http.ResponseWriter, r *http.Request) {
 
 	// For multipart/form-data, handle voice capture.
 	if len(contentType) >= 19 && contentType[:19] == "multipart/form-data" {
+		r.Body = http.MaxBytesReader(w, r.Body, 25<<20) // 25 MB max upload
 		h.handleVoiceCapture(w, r, userID)
 		return
 	}

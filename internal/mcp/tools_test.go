@@ -744,7 +744,7 @@ func TestContextGather_MissingQuery_ReturnsError(t *testing.T) {
 
 func TestNotesSearch_Success_ReturnsResults(t *testing.T) {
 	mock := &mockAgentService{
-		notesSearchFn: func(_ context.Context, userID, query string, limit int) ([]search.FTSResult, error) {
+		notesSearchFn: func(_ context.Context, userID, query string, limit int, recencyBias float64) ([]search.FTSResult, error) {
 			require.Equal(t, toolTestUser, userID)
 			require.Equal(t, "middleware", query)
 			require.Equal(t, 5, limit)

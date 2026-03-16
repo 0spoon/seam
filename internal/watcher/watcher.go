@@ -206,7 +206,8 @@ func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event) {
 	// If a new directory was created, start watching it so we pick up
 	// files created inside subdirectories.
 	if event.Has(fsnotify.Create) {
-		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+		// Use Lstat to avoid following symlinks into directories outside notes dir.
+		if info, err := os.Lstat(absPath); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
 			if addErr := w.fsWatcher.Add(absPath); addErr != nil {
 				w.logger.Warn("watcher: failed to add new directory", "path", absPath, "error", addErr)
 			}

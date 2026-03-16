@@ -51,8 +51,12 @@ func (s *Service) CreateConversation(ctx context.Context, userID string) (*Conve
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	idVal, idErr := ulid.New(ulid.Now(), rand.Reader)
+	if idErr != nil {
+		return nil, fmt.Errorf("chat.Service.CreateConversation: generate id: %w", idErr)
+	}
 	conv := Conversation{
-		ID:        ulid.MustNew(ulid.Now(), rand.Reader).String(),
+		ID:        idVal.String(),
 		Title:     "",
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -138,7 +142,11 @@ func (s *Service) AddMessage(ctx context.Context, userID string, msg Message) er
 
 	// Generate ID and timestamp if not set.
 	if msg.ID == "" {
-		msg.ID = ulid.MustNew(ulid.Now(), rand.Reader).String()
+		idVal, idErr := ulid.New(ulid.Now(), rand.Reader)
+		if idErr != nil {
+			return fmt.Errorf("chat.Service.AddMessage: generate id: %w", idErr)
+		}
+		msg.ID = idVal.String()
 	}
 	if msg.CreatedAt == "" {
 		msg.CreatedAt = time.Now().UTC().Format(time.RFC3339)

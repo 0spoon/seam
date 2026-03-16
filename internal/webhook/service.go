@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -43,13 +44,17 @@ const maxResponseBody = 1024
 // deliveryTimeout is the HTTP timeout for webhook delivery.
 const deliveryTimeout = 10 * time.Second
 
+// maxConcurrentDeliveries limits how many webhook deliveries can be in-flight
+// simultaneously, preventing resource exhaustion during bulk operations.
+const maxConcurrentDeliveries = 20
+
 // Sentinel errors for validation failures.
 var (
-	ErrInvalidURL       = fmt.Errorf("invalid webhook URL")
-	ErrInvalidEventType = fmt.Errorf("invalid event type")
-	ErrNameRequired     = fmt.Errorf("name is required")
-	ErrURLRequired      = fmt.Errorf("url is required")
-	ErrEventsRequired   = fmt.Errorf("event_types is required")
+	ErrInvalidURL       = errors.New("invalid webhook URL")
+	ErrInvalidEventType = errors.New("invalid event type")
+	ErrNameRequired     = errors.New("name is required")
+	ErrURLRequired      = errors.New("url is required")
+	ErrEventsRequired   = errors.New("event_types is required")
 )
 
 // CreateReq holds parameters for creating a webhook.
@@ -67,6 +72,17 @@ type UpdateReq struct {
 	EventTypes *[]string `json:"event_types,omitempty"`
 	Filter     *Filter   `json:"filter,omitempty"`
 	Active     *bool     `json:"active,omitempty"`
+}
+
+// deliveryResult captures the outcome of a single webhook delivery attempt.
+type deliveryResult struct {
+	webhookID  string
+	eventType  string
+	payload    string
+	statusCode int
+	response   string
+	errText    string
+	duration   time.Duration
 }
 
 // Service provides business logic for webhook management and delivery.
@@ -139,16 +155,21 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateReq) (*We
 
 	// Generate ULID and random secret.
 	now := time.Now().UTC()
-	secretBytes := make([]byte, 32)
-	if _, err := rand.Read(secretBytes); err != nil {
-		return nil, fmt.Errorf("webhook.Service.Create: generate secret: %w", err)
+	secret, err := generateSecret()
+	if err != nil {
+		return nil, fmt.Errorf("webhook.Service.Create: %w", err)
+	}
+
+	id, err := ulid.New(ulid.Now(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("webhook.Service.Create: generate id: %w", err)
 	}
 
 	w := &Webhook{
-		ID:         ulid.MustNew(ulid.Now(), rand.Reader).String(),
+		ID:         id.String(),
 		Name:       strings.TrimSpace(req.Name),
 		URL:        strings.TrimSpace(req.URL),
-		Secret:     hex.EncodeToString(secretBytes),
+		Secret:     secret,
 		EventTypes: req.EventTypes,
 		Filter:     req.Filter,
 		Active:     true,
@@ -254,6 +275,25 @@ func (s *Service) Update(ctx context.Context, userID, id string, req UpdateReq) 
 	return w, nil
 }
 
+// RotateSecret generates a new HMAC signing secret for a webhook and returns it.
+func (s *Service) RotateSecret(ctx context.Context, userID, id string) (string, error) {
+	db, err := s.dbManager.Open(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("webhook.Service.RotateSecret: open db: %w", err)
+	}
+
+	secret, err := generateSecret()
+	if err != nil {
+		return "", fmt.Errorf("webhook.Service.RotateSecret: %w", err)
+	}
+
+	if err := s.store.UpdateSecret(ctx, db, id, secret); err != nil {
+		return "", fmt.Errorf("webhook.Service.RotateSecret: %w", err)
+	}
+
+	return secret, nil
+}
+
 // Delete removes a webhook.
 func (s *Service) Delete(ctx context.Context, userID, id string) error {
 	db, err := s.dbManager.Open(ctx, userID)
@@ -284,7 +324,19 @@ func (s *Service) Deliveries(ctx context.Context, userID, webhookID string, limi
 // deliveries run in goroutines and results are logged, not returned.
 func (s *Service) Dispatch(ctx context.Context, userID, eventType string, eventPayload interface{}) {
 	go func() {
-		// Use a background context since the caller does not wait.
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("webhook.Service.Dispatch: panic recovered",
+					"panic", r, "user_id", userID, "event_type", eventType)
+			}
+		}()
+
+		if !isValidEventType(eventType) {
+			s.logger.Warn("webhook.Service.Dispatch: invalid event type",
+				"event_type", eventType)
+			return
+		}
+
 		bgCtx := context.Background()
 
 		db, err := s.dbManager.Open(bgCtx, userID)
@@ -318,9 +370,10 @@ func (s *Service) Dispatch(ctx context.Context, userID, eventType string, eventP
 			return
 		}
 
+		results := make(chan deliveryResult, len(webhooks))
+		sem := make(chan struct{}, maxConcurrentDeliveries)
 		var wg sync.WaitGroup
 		for _, wh := range webhooks {
-			// Check filter match.
 			if !s.matchesFilter(wh.Filter, eventPayload) {
 				continue
 			}
@@ -328,26 +381,68 @@ func (s *Service) Dispatch(ctx context.Context, userID, eventType string, eventP
 			wg.Add(1)
 			go func(wh *Webhook) {
 				defer wg.Done()
-				s.deliver(bgCtx, db, wh, eventType, payloadJSON)
+				defer func() {
+					if r := recover(); r != nil {
+						s.logger.Error("webhook.Service.deliver: panic recovered",
+							"panic", r, "webhook_id", wh.ID)
+						results <- deliveryResult{
+							webhookID: wh.ID,
+							eventType: eventType,
+							payload:   string(payloadJSON),
+							errText:   fmt.Sprintf("panic: %v", r),
+						}
+					}
+				}()
+				sem <- struct{}{}        // acquire slot
+				defer func() { <-sem }() // release slot
+				results <- s.deliver(bgCtx, wh, eventType, payloadJSON)
 			}(wh)
 		}
 		wg.Wait()
+		close(results)
+
+		// Record all deliveries sequentially to avoid concurrent SQLite writes.
+		for dr := range results {
+			s.recordDelivery(bgCtx, db, dr.webhookID, dr.eventType, dr.payload,
+				dr.statusCode, dr.response, dr.errText, dr.duration)
+		}
+
+		// Opportunistic cleanup: remove delivery records older than 30 days.
+		if cleanupErr := s.CleanupDeliveries(bgCtx, userID, 30*24*time.Hour); cleanupErr != nil {
+			s.logger.Warn("webhook.Service.Dispatch: cleanup failed", "error", cleanupErr)
+		}
 	}()
 }
 
-// deliver sends the webhook HTTP request and records the delivery.
-func (s *Service) deliver(ctx context.Context, db DBTX, wh *Webhook, eventType string, payloadJSON []byte) {
+// deliver sends the webhook HTTP request and returns the delivery result.
+func (s *Service) deliver(ctx context.Context, wh *Webhook, eventType string, payloadJSON []byte) deliveryResult {
 	start := time.Now()
+	payload := string(payloadJSON)
+
+	// SSRF defense: check target URL for private IPs before delivery.
+	parsed, parseErr := url.Parse(wh.URL)
+	if parseErr != nil {
+		return deliveryResult{
+			webhookID: wh.ID, eventType: eventType, payload: string(payloadJSON),
+			errText: "invalid URL: " + parseErr.Error(), duration: time.Since(start),
+		}
+	}
+	if isPrivateIP(parsed.Hostname()) {
+		s.logger.Debug("webhook delivery to private IP",
+			"webhook_id", wh.ID, "url", wh.URL)
+	}
 
 	// Compute HMAC-SHA256 signature.
 	mac := hmac.New(sha256.New, []byte(wh.Secret))
 	mac.Write(payloadJSON)
 	signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, wh.URL, strings.NewReader(string(payloadJSON)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, wh.URL, strings.NewReader(payload))
 	if err != nil {
-		s.recordDelivery(ctx, db, wh.ID, eventType, string(payloadJSON), 0, "", err.Error(), time.Since(start))
-		return
+		return deliveryResult{
+			webhookID: wh.ID, eventType: eventType, payload: payload,
+			errText: err.Error(), duration: time.Since(start),
+		}
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -356,15 +451,21 @@ func (s *Service) deliver(ctx context.Context, db DBTX, wh *Webhook, eventType s
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		s.recordDelivery(ctx, db, wh.ID, eventType, string(payloadJSON), 0, "", err.Error(), time.Since(start))
 		s.logger.Warn("webhook delivery failed",
 			"webhook_id", wh.ID, "url", wh.URL, "error", err)
-		return
+		return deliveryResult{
+			webhookID: wh.ID, eventType: eventType, payload: payload,
+			errText: err.Error(), duration: time.Since(start),
+		}
 	}
 	defer resp.Body.Close()
 
 	// Read response body (limited).
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	if readErr != nil {
+		s.logger.Debug("webhook response body read error",
+			"webhook_id", wh.ID, "error", readErr)
+	}
 	respText := string(body)
 
 	duration := time.Since(start)
@@ -374,19 +475,33 @@ func (s *Service) deliver(ctx context.Context, db DBTX, wh *Webhook, eventType s
 		errText = fmt.Sprintf("HTTP %d", resp.StatusCode)
 	}
 
-	s.recordDelivery(ctx, db, wh.ID, eventType, string(payloadJSON), resp.StatusCode, respText, errText, duration)
-
 	s.logger.Info("webhook delivered",
 		"webhook_id", wh.ID,
 		"url", wh.URL,
 		"status_code", resp.StatusCode,
 		"duration_ms", duration.Milliseconds())
+
+	return deliveryResult{
+		webhookID:  wh.ID,
+		eventType:  eventType,
+		payload:    payload,
+		statusCode: resp.StatusCode,
+		response:   respText,
+		errText:    errText,
+		duration:   duration,
+	}
 }
 
 // recordDelivery persists a delivery record.
 func (s *Service) recordDelivery(ctx context.Context, db DBTX, webhookID, eventType, payload string, statusCode int, response, errText string, duration time.Duration) {
+	id, err := ulid.New(ulid.Now(), rand.Reader)
+	if err != nil {
+		s.logger.Error("webhook.Service.recordDelivery: generate id", "error", err)
+		return
+	}
+
 	d := &Delivery{
-		ID:         ulid.MustNew(ulid.Now(), rand.Reader).String(),
+		ID:         id.String(),
 		WebhookID:  webhookID,
 		EventType:  eventType,
 		Payload:    payload,
@@ -412,7 +527,14 @@ func (s *Service) matchesFilter(f Filter, eventPayload interface{}) bool {
 	// Try to extract project_slug and tags from the payload.
 	data, ok := eventPayload.(map[string]interface{})
 	if !ok {
-		return true // cannot inspect, let it through
+		// Try JSON round-trip for struct payloads.
+		b, jsonErr := json.Marshal(eventPayload)
+		if jsonErr != nil {
+			return true // cannot inspect, let it through
+		}
+		if jsonErr := json.Unmarshal(b, &data); jsonErr != nil {
+			return true
+		}
 	}
 
 	if f.ProjectSlug != "" {
@@ -449,6 +571,29 @@ func (s *Service) matchesFilter(f Filter, eventPayload interface{}) bool {
 	return true
 }
 
+// CleanupDeliveries removes delivery records older than the given retention period.
+func (s *Service) CleanupDeliveries(ctx context.Context, userID string, retention time.Duration) error {
+	db, err := s.dbManager.Open(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("webhook.Service.CleanupDeliveries: open db: %w", err)
+	}
+	cutoff := time.Now().UTC().Add(-retention).Format(time.RFC3339)
+	_, err = db.ExecContext(ctx, `DELETE FROM webhook_deliveries WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return fmt.Errorf("webhook.Service.CleanupDeliveries: %w", err)
+	}
+	return nil
+}
+
+// generateSecret returns a new random hex-encoded 32-byte HMAC signing secret.
+func generateSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
 // validateWebhookURL checks that a URL is well-formed and uses http or https.
 func validateWebhookURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
@@ -474,7 +619,6 @@ func isValidEventType(et string) bool {
 	return false
 }
 
-// isPrivateIP returns true if the host resolves to a private/loopback IP.
 func isPrivateIP(host string) bool {
 	ip := net.ParseIP(host)
 	if ip == nil {
@@ -482,10 +626,20 @@ func isPrivateIP(host string) bool {
 		if err != nil || len(addrs) == 0 {
 			return true // fail closed
 		}
-		ip = net.ParseIP(addrs[0])
+		// Check ALL resolved addresses, not just the first.
+		for _, addr := range addrs {
+			resolved := net.ParseIP(addr)
+			if resolved != nil && isDangerousIP(resolved) {
+				return true
+			}
+		}
+		return false
 	}
-	if ip == nil {
-		return true
-	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+	return isDangerousIP(ip)
+}
+
+// isDangerousIP checks if an IP address is in a non-routable or dangerous range.
+func isDangerousIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }

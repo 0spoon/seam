@@ -30,6 +30,10 @@ type Hub struct {
 	mu     sync.RWMutex
 	conns  map[string]map[*websocket.Conn]struct{} // userID -> set of connections
 	logger *slog.Logger
+
+	// shutCtx is cancelled during CloseAll to abort in-flight writes.
+	shutCtx    context.Context
+	shutCancel context.CancelFunc
 }
 
 // NewHub creates a new Hub.
@@ -37,9 +41,12 @@ func NewHub(logger *slog.Logger) *Hub {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Hub{
-		conns:  make(map[string]map[*websocket.Conn]struct{}),
-		logger: logger,
+		conns:      make(map[string]map[*websocket.Conn]struct{}),
+		logger:     logger,
+		shutCtx:    ctx,
+		shutCancel: cancel,
 	}
 }
 
@@ -108,7 +115,7 @@ func (h *Hub) Send(userID string, msg Message) error {
 
 	var dead []*websocket.Conn
 	for _, c := range targets {
-		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+		ctx, cancel := context.WithTimeout(h.shutCtx, writeTimeout)
 		wErr := c.Write(ctx, websocket.MessageText, data)
 		cancel()
 		if wErr != nil {
@@ -152,7 +159,7 @@ func (h *Hub) Broadcast(msg Message) error {
 
 	var dead []target
 	for _, t := range targets {
-		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+		ctx, cancel := context.WithTimeout(h.shutCtx, writeTimeout)
 		wErr := t.conn.Write(ctx, websocket.MessageText, data)
 		cancel()
 		if wErr != nil {
@@ -187,6 +194,9 @@ func (h *Hub) ConnectionCount() int {
 // CloseAll sends a close frame to all connected WebSocket clients and
 // unregisters them. This should be called during graceful shutdown.
 func (h *Hub) CloseAll() {
+	// Cancel the shutdown context to abort any in-flight writes.
+	h.shutCancel()
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -15,6 +16,11 @@ type DBTX interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+}
+
+// TxBeginner is satisfied by *sql.DB and allows starting transactions.
+type TxBeginner interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
 }
 
 // Conversation represents a chat conversation.
@@ -106,7 +112,7 @@ func (s *Store) GetConversation(ctx context.Context, db DBTX, id string) (*Conve
 		`SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?`, id,
 	).Scan(&conv.ID, &conv.Title, &conv.CreatedAt, &conv.UpdatedAt)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, nil
 		}
 		return nil, nil, fmt.Errorf("chat.Store.GetConversation: %w", err)
@@ -149,15 +155,24 @@ func (s *Store) GetConversation(ctx context.Context, db DBTX, id string) (*Conve
 }
 
 // DeleteConversation removes a conversation and its messages (via CASCADE).
+// Returns ErrNotFound if no conversation with the given ID exists.
 func (s *Store) DeleteConversation(ctx context.Context, db DBTX, id string) error {
-	_, err := db.ExecContext(ctx, `DELETE FROM conversations WHERE id = ?`, id)
+	result, err := db.ExecContext(ctx, `DELETE FROM conversations WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("chat.Store.DeleteConversation: %w", err)
+	}
+	n, raErr := result.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("chat.Store.DeleteConversation: rows affected: %w", raErr)
+	}
+	if n == 0 {
+		return fmt.Errorf("chat.Store.DeleteConversation: %w", ErrNotFound)
 	}
 	return nil
 }
 
-// AddMessage inserts a message into a conversation.
+// AddMessage inserts a message into a conversation and updates the
+// conversation timestamp atomically within a transaction.
 func (s *Store) AddMessage(ctx context.Context, db DBTX, msg Message) error {
 	var citationsJSON *string
 	if len(msg.Citations) > 0 {
@@ -165,10 +180,33 @@ func (s *Store) AddMessage(ctx context.Context, db DBTX, msg Message) error {
 		if err != nil {
 			return fmt.Errorf("chat.Store.AddMessage: marshal citations: %w", err)
 		}
-		s := string(b)
-		citationsJSON = &s
+		str := string(b)
+		citationsJSON = &str
 	}
 
+	// If the caller passed a *sql.DB, wrap in a transaction for atomicity.
+	// If the caller already passed a *sql.Tx, use it directly.
+	var txDB DBTX = db
+	if sqlDB, ok := db.(TxBeginner); ok {
+		tx, txErr := sqlDB.BeginTx(ctx, nil)
+		if txErr != nil {
+			return fmt.Errorf("chat.Store.AddMessage: begin tx: %w", txErr)
+		}
+		defer tx.Rollback() //nolint:errcheck
+		txDB = tx
+
+		// Run both operations, then commit.
+		if err := s.addMessageInTx(ctx, txDB, msg, citationsJSON); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	// Fallback: caller passed a tx or non-DB, run directly.
+	return s.addMessageInTx(ctx, txDB, msg, citationsJSON)
+}
+
+func (s *Store) addMessageInTx(ctx context.Context, db DBTX, msg Message, citationsJSON *string) error {
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO messages (id, conversation_id, role, content, citations, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -214,7 +252,7 @@ func (s *Store) GetFirstUserMessage(ctx context.Context, db DBTX, conversationID
 		conversationID,
 	).Scan(&content)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
 		return "", fmt.Errorf("chat.Store.GetFirstUserMessage: %w", err)

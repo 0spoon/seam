@@ -37,8 +37,8 @@ type mockAgentService struct {
 	memoryAppendFn          func(ctx context.Context, userID, category, name, content string) error
 	memoryListFn            func(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	memoryDeleteFn          func(ctx context.Context, userID, category, name string) error
-	contextGatherFn         func(ctx context.Context, userID, query, scope string, maxChars int) ([]agent.KnowledgeHit, error)
-	notesSearchFn           func(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error)
+	contextGatherFn         func(ctx context.Context, userID, query, scope string, maxChars int, recencyBias float64) ([]agent.KnowledgeHit, error)
+	notesSearchFn           func(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]search.FTSResult, error)
 	notesReadFn             func(ctx context.Context, userID, noteID string) (*note.Note, error)
 	notesListFn             func(ctx context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error)
 	notesCreateFn           func(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error)
@@ -123,18 +123,18 @@ func (m *mockAgentService) MemoryDelete(ctx context.Context, userID, category, n
 	return m.memoryDeleteFn(ctx, userID, category, name)
 }
 
-func (m *mockAgentService) ContextGather(ctx context.Context, userID, query, scope string, maxChars int) ([]agent.KnowledgeHit, error) {
+func (m *mockAgentService) ContextGather(ctx context.Context, userID, query, scope string, maxChars int, recencyBias float64) ([]agent.KnowledgeHit, error) {
 	if m.contextGatherFn == nil {
 		return []agent.KnowledgeHit{}, nil
 	}
-	return m.contextGatherFn(ctx, userID, query, scope, maxChars)
+	return m.contextGatherFn(ctx, userID, query, scope, maxChars, recencyBias)
 }
 
-func (m *mockAgentService) NotesSearch(ctx context.Context, userID, query string, limit int) ([]search.FTSResult, error) {
+func (m *mockAgentService) NotesSearch(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]search.FTSResult, error) {
 	if m.notesSearchFn == nil {
 		return []search.FTSResult{}, nil
 	}
-	return m.notesSearchFn(ctx, userID, query, limit)
+	return m.notesSearchFn(ctx, userID, query, limit, recencyBias)
 }
 
 func (m *mockAgentService) NotesRead(ctx context.Context, userID, noteID string) (*note.Note, error) {

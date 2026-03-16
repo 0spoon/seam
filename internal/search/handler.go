@@ -65,10 +65,17 @@ func (h *Handler) searchFTS(w http.ResponseWriter, r *http.Request) {
 
 	// Parse optional recency_bias parameter.
 	var recencyBias float64
-	if v := r.URL.Query().Get("recency_bias"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
-			recencyBias = f
+	if rb := r.URL.Query().Get("recency_bias"); rb != "" {
+		parsed, err := strconv.ParseFloat(rb, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid recency_bias: must be a number")
+			return
 		}
+		if parsed < 0 || parsed > 1 {
+			writeError(w, http.StatusBadRequest, "invalid recency_bias: must be between 0.0 and 1.0")
+			return
+		}
+		recencyBias = parsed
 	}
 
 	var results []FTSResult
@@ -112,13 +119,23 @@ func (h *Handler) searchSemantic(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	if limit > 500 {
+		limit = 500
+	}
 
 	// Parse optional recency_bias parameter.
 	var recencyBias float64
-	if v := r.URL.Query().Get("recency_bias"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
-			recencyBias = f
+	if rb := r.URL.Query().Get("recency_bias"); rb != "" {
+		parsed, err := strconv.ParseFloat(rb, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid recency_bias: must be a number")
+			return
 		}
+		if parsed < 0 || parsed > 1 {
+			writeError(w, http.StatusBadRequest, "invalid recency_bias: must be between 0.0 and 1.0")
+			return
+		}
+		recencyBias = parsed
 	}
 
 	var results []SemanticResult

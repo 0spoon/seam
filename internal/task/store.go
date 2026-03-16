@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -27,12 +28,13 @@ type Task struct {
 
 // TaskFilter controls listing.
 type TaskFilter struct {
-	NoteID    string
-	ProjectID string
-	Tag       string
-	Done      *bool // nil = all, true = done only, false = open only
-	Limit     int
-	Offset    int
+	NoteID      string
+	ProjectID   string
+	ProjectSlug string // filter by project slug (joins projects table)
+	Tag         string
+	Done        *bool // nil = all, true = done only, false = open only
+	Limit       int
+	Offset      int
 }
 
 // TaskSummary provides aggregate counts.
@@ -78,6 +80,22 @@ func (s *Store) DeleteByNote(ctx context.Context, db DBTX, noteID string) error 
 	_, err := db.ExecContext(ctx, `DELETE FROM tasks WHERE note_id = ?`, noteID)
 	if err != nil {
 		return fmt.Errorf("task.Store.DeleteByNote: %w", err)
+	}
+	return nil
+}
+
+// Delete removes a single task by ID.
+func (s *Store) Delete(ctx context.Context, db DBTX, id string) error {
+	result, err := db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("task.Store.Delete: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("task.Store.Delete: rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -140,8 +158,16 @@ func (s *Store) List(ctx context.Context, db DBTX, filter TaskFilter) ([]*Task, 
 			return nil, 0, fmt.Errorf("task.Store.List: scan: %w", err)
 		}
 		t.Done = done != 0
-		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+		if parsed, err := time.Parse(time.RFC3339, createdAt); err != nil {
+			slog.Warn("task.Store: failed to parse created_at", "value", createdAt, "error", err)
+		} else {
+			t.CreatedAt = parsed
+		}
+		if parsed, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+			slog.Warn("task.Store: failed to parse updated_at", "value", updatedAt, "error", err)
+		} else {
+			t.UpdatedAt = parsed
+		}
 		tasks = append(tasks, &t)
 	}
 	if err := rows.Err(); err != nil {
@@ -211,6 +237,14 @@ func buildFilterClauses(filter TaskFilter) (string, []string, []interface{}) {
 		where = append(where, "n.project_id = ?")
 		args = append(args, filter.ProjectID)
 	}
+	if filter.ProjectSlug != "" {
+		if !strings.Contains(baseFrom, "JOIN notes") {
+			baseFrom += " JOIN notes n ON n.id = t.note_id"
+		}
+		baseFrom += " JOIN projects p ON p.id = n.project_id"
+		where = append(where, "p.slug = ?")
+		args = append(args, filter.ProjectSlug)
+	}
 	if filter.Tag != "" {
 		if !strings.Contains(baseFrom, "JOIN notes") {
 			baseFrom += " JOIN notes n ON n.id = t.note_id"
@@ -238,7 +272,15 @@ func scanTask(row *sql.Row) (*Task, error) {
 		return nil, err
 	}
 	t.Done = done != 0
-	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	if parsed, err := time.Parse(time.RFC3339, createdAt); err != nil {
+		slog.Warn("task.Store: failed to parse created_at", "value", createdAt, "error", err)
+	} else {
+		t.CreatedAt = parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		slog.Warn("task.Store: failed to parse updated_at", "value", updatedAt, "error", err)
+	} else {
+		t.UpdatedAt = parsed
+	}
 	return &t, nil
 }

@@ -514,8 +514,8 @@ func (m mainScreenModel) renderNoteList(width, height int) string {
 		if maxTitleLen < 10 {
 			maxTitleLen = 10
 		}
-		if len(noteTitle) > maxTitleLen {
-			noteTitle = noteTitle[:maxTitleLen-3] + "..."
+		if runes := []rune(noteTitle); len(runes) > maxTitleLen {
+			noteTitle = string(runes[:maxTitleLen-3]) + "..."
 		}
 
 		line := noteTitle

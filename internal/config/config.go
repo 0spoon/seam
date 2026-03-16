@@ -188,6 +188,13 @@ func applyDefaults(cfg *Config) {
 	if cfg.WebDistDir == "" && cfg.DataDir != "" {
 		cfg.WebDistDir = filepath.Join(filepath.Dir(cfg.DataDir), "web", "dist")
 	}
+	// Warn if the computed WebDistDir does not exist.
+	if cfg.WebDistDir != "" {
+		if _, err := os.Stat(cfg.WebDistDir); os.IsNotExist(err) {
+			slog.Warn("web dist directory does not exist, SPA will not be served",
+				"path", cfg.WebDistDir)
+		}
+	}
 }
 
 // normalizePaths strips trailing slashes from paths and URLs, and resolves

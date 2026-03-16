@@ -75,8 +75,8 @@ func (l *AutoLinker) SuggestLinks(ctx context.Context, userID, noteID string) ([
 
 	// Embed the source note.
 	text := sourceTitle + "\n\n" + sourceBody
-	if len(text) > 3000 {
-		text = text[:3000]
+	if runes := []rune(text); len(runes) > 3000 {
+		text = string(runes[:3000])
 	}
 	embedding, err := l.ollama.GenerateEmbedding(ctx, l.embedModel, text)
 	if err != nil {
@@ -99,26 +99,50 @@ func (l *AutoLinker) SuggestLinks(ctx context.Context, userID, noteID string) ([
 	seen := map[string]bool{noteID: true}
 	var related []relatedNoteInfo
 
+	// Collect unique note IDs from ChromaDB results.
+	var noteIDs []string
 	for _, cr := range chromaResults {
 		rid := cr.Metadata["note_id"]
 		if rid == "" || seen[rid] {
 			continue
 		}
 		seen[rid] = true
-
-		var title, body string
-		qErr := db.QueryRowContext(ctx,
-			`SELECT title, body FROM notes WHERE id = ?`, rid,
-		).Scan(&title, &body)
-		if qErr != nil {
-			continue
-		}
-		if len(body) > 500 {
-			body = body[:500] + "..."
-		}
-		related = append(related, relatedNoteInfo{ID: rid, Title: title, Body: body})
-		if len(related) >= 10 {
+		noteIDs = append(noteIDs, rid)
+		if len(noteIDs) >= 10 {
 			break
+		}
+	}
+
+	// Batch-load note data to avoid N+1 queries.
+	if len(noteIDs) > 0 {
+		placeholders := strings.Repeat("?,", len(noteIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]interface{}, len(noteIDs))
+		for i, id := range noteIDs {
+			args[i] = id
+		}
+		rows, qErr := db.QueryContext(ctx,
+			`SELECT id, title, body FROM notes WHERE id IN (`+placeholders+`)`, args...)
+		if qErr == nil {
+			defer rows.Close()
+			noteMap := make(map[string]relatedNoteInfo)
+			for rows.Next() {
+				var id, title, body string
+				if err := rows.Scan(&id, &title, &body); err != nil {
+					continue
+				}
+				runes := []rune(body)
+				if len(runes) > 500 {
+					body = string(runes[:500]) + "..."
+				}
+				noteMap[id] = relatedNoteInfo{ID: id, Title: title, Body: body}
+			}
+			// Preserve the ChromaDB relevance order.
+			for _, id := range noteIDs {
+				if info, ok := noteMap[id]; ok {
+					related = append(related, info)
+				}
+			}
 		}
 	}
 
@@ -136,8 +160,8 @@ func (l *AutoLinker) SuggestLinks(ctx context.Context, userID, noteID string) ([
 }
 
 func (l *AutoLinker) askForSuggestions(ctx context.Context, sourceTitle, sourceBody string, related []relatedNoteInfo) ([]LinkSuggestion, error) {
-	if len(sourceBody) > 1000 {
-		sourceBody = sourceBody[:1000] + "..."
+	if runes := []rune(sourceBody); len(runes) > 1000 {
+		sourceBody = string(runes[:1000]) + "..."
 	}
 
 	var relatedParts []string

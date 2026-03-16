@@ -131,7 +131,10 @@ func (s *FTSStore) SearchScoped(ctx context.Context, db *sql.DB, query string, l
 	}
 
 	// Query with ranking and snippets.
-	searchArgs := append(args, limit, offset)
+	// Copy args to avoid aliasing the shared backing array.
+	searchArgs := make([]interface{}, 0, len(args)+2)
+	searchArgs = append(searchArgs, args...)
+	searchArgs = append(searchArgs, limit, offset)
 	searchQuery := `SELECT n.id, n.title,
 		snippet(notes_fts, 1, '<mark>', '</mark>', '...', 32) as snippet,
 		bm25(notes_fts) as rank
@@ -192,6 +195,19 @@ func (s *FTSStore) SearchWithRecency(ctx context.Context, db *sql.DB, query stri
 		return nil, 0, nil
 	}
 
+	// When recency re-ranking is active, fetch a larger window so
+	// the re-sort draws from more than just the BM25-top-N.
+	fetchLimit := limit
+	fetchOffset := offset
+	reranking := recencyBias > 0
+	if reranking {
+		fetchLimit = limit * 3
+		if fetchLimit > 500 {
+			fetchLimit = 500
+		}
+		fetchOffset = 0
+	}
+
 	// Query with ranking, snippets, and updated_at.
 	rows, err := db.QueryContext(ctx,
 		`SELECT n.id, n.title,
@@ -203,7 +219,7 @@ func (s *FTSStore) SearchWithRecency(ctx context.Context, db *sql.DB, query stri
 		 WHERE notes_fts MATCH ?
 		 ORDER BY rank
 		 LIMIT ? OFFSET ?`,
-		sanitized, limit, offset,
+		sanitized, fetchLimit, fetchOffset,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search.FTSStore.SearchWithRecency: query: %w", err)
@@ -219,10 +235,11 @@ func (s *FTSStore) SearchWithRecency(ctx context.Context, db *sql.DB, query stri
 		}
 		if t, parseErr := time.Parse(time.RFC3339, updatedAtStr); parseErr == nil {
 			r.UpdatedAt = t
+			// Apply recency adjustment: BM25 rank is negative (lower = better),
+			// so divide by (1 + bias*weight) to make recent items more negative.
+			r.Rank = r.Rank / (1 + recencyBias*recencyWeight(r.UpdatedAt))
 		}
-		// Apply recency adjustment: BM25 rank is negative (lower = better),
-		// so divide by (1 + bias*weight) to make recent items more negative.
-		r.Rank = r.Rank / (1 + recencyBias*recencyWeight(r.UpdatedAt))
+		// else: leave r.Rank unchanged (neutral treatment)
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -233,6 +250,19 @@ func (s *FTSStore) SearchWithRecency(ctx context.Context, db *sql.DB, query stri
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Rank < results[j].Rank
 	})
+
+	if reranking {
+		// Apply pagination after re-ranking.
+		if offset >= len(results) {
+			results = nil
+		} else {
+			end := offset + limit
+			if end > len(results) {
+				end = len(results)
+			}
+			results = results[offset:end]
+		}
+	}
 
 	return results, total, nil
 }
@@ -278,8 +308,24 @@ func (s *FTSStore) SearchScopedWithRecency(ctx context.Context, db *sql.DB, quer
 		return nil, 0, nil
 	}
 
+	// When recency re-ranking is active, fetch a larger window so
+	// the re-sort draws from more than just the BM25-top-N.
+	fetchLimit := limit
+	fetchOffset := offset
+	reranking := recencyBias > 0
+	if reranking {
+		fetchLimit = limit * 3
+		if fetchLimit > 500 {
+			fetchLimit = 500
+		}
+		fetchOffset = 0
+	}
+
 	// Query with ranking, snippets, and updated_at.
-	searchArgs := append(args, limit, offset)
+	// Copy args to avoid aliasing the shared backing array.
+	searchArgs := make([]interface{}, 0, len(args)+2)
+	searchArgs = append(searchArgs, args...)
+	searchArgs = append(searchArgs, fetchLimit, fetchOffset)
 	searchQuery := `SELECT n.id, n.title,
 		snippet(notes_fts, 1, '<mark>', '</mark>', '...', 32) as snippet,
 		bm25(notes_fts) as rank,
@@ -305,10 +351,11 @@ func (s *FTSStore) SearchScopedWithRecency(ctx context.Context, db *sql.DB, quer
 		}
 		if t, parseErr := time.Parse(time.RFC3339, updatedAtStr); parseErr == nil {
 			r.UpdatedAt = t
+			// Apply recency adjustment: BM25 rank is negative (lower = better),
+			// so divide by (1 + bias*weight) to make recent items more negative.
+			r.Rank = r.Rank / (1 + recencyBias*recencyWeight(r.UpdatedAt))
 		}
-		// Apply recency adjustment: BM25 rank is negative (lower = better),
-		// so divide by (1 + bias*weight) to make recent items more negative.
-		r.Rank = r.Rank / (1 + recencyBias*recencyWeight(r.UpdatedAt))
+		// else: leave r.Rank unchanged (neutral treatment)
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -319,6 +366,19 @@ func (s *FTSStore) SearchScopedWithRecency(ctx context.Context, db *sql.DB, quer
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Rank < results[j].Rank
 	})
+
+	if reranking {
+		// Apply pagination after re-ranking.
+		if offset >= len(results) {
+			results = nil
+		} else {
+			end := offset + limit
+			if end > len(results) {
+				end = len(results)
+			}
+			results = results[offset:end]
+		}
+	}
 
 	return results, total, nil
 }

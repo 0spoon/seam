@@ -1,13 +1,13 @@
 package ai
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +43,8 @@ type Handler struct {
 	// Per-user rate limiters for AI endpoints.
 	limiterMu sync.Mutex
 	limiters  map[string]*userLimiter
+	done      chan struct{} // closed on Close() to stop background goroutines
+	closeOnce sync.Once
 }
 
 // userLimiter wraps a rate.Limiter with a last-seen timestamp for eviction.
@@ -77,9 +79,15 @@ func NewHandler(
 		dbManager:   dbManager,
 		logger:      logger,
 		limiters:    make(map[string]*userLimiter),
+		done:        make(chan struct{}),
 	}
 	go h.evictStaleLimiters()
 	return h
+}
+
+// Close stops background goroutines (limiter eviction).
+func (h *Handler) Close() {
+	h.closeOnce.Do(func() { close(h.done) })
 }
 
 // getLimiter returns the per-user rate limiter, creating one if necessary.
@@ -99,15 +107,20 @@ func (h *Handler) getLimiter(userID string) *rate.Limiter {
 func (h *Handler) evictStaleLimiters() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		h.limiterMu.Lock()
-		cutoff := time.Now().Add(-10 * time.Minute)
-		for uid, entry := range h.limiters {
-			if entry.lastSeen.Before(cutoff) {
-				delete(h.limiters, uid)
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-ticker.C:
+			h.limiterMu.Lock()
+			cutoff := time.Now().Add(-10 * time.Minute)
+			for uid, entry := range h.limiters {
+				if entry.lastSeen.Before(cutoff) {
+					delete(h.limiters, uid)
+				}
 			}
+			h.limiterMu.Unlock()
 		}
-		h.limiterMu.Unlock()
 	}
 }
 
@@ -219,6 +232,10 @@ func (h *Handler) synthesize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "scope and prompt are required")
 		return
 	}
+	if payload.Scope != "project" && payload.Scope != "tag" {
+		writeError(w, http.StatusBadRequest, "scope must be 'project' or 'tag'")
+		return
+	}
 
 	result, err := h.synthesizer.Synthesize(r.Context(), userID, payload)
 	if err != nil {
@@ -258,6 +275,10 @@ func (h *Handler) synthesizeStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "scope and prompt are required")
 		return
 	}
+	if payload.Scope != "project" && payload.Scope != "tag" {
+		writeError(w, http.StatusBadRequest, "scope must be 'project' or 'tag'")
+		return
+	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -291,7 +312,7 @@ func (h *Handler) synthesizeStream(w http.ResponseWriter, r *http.Request) {
 	for err := range errCh {
 		if err != nil {
 			h.logger.Error("ai.Handler.synthesizeStream: stream error", "error", err)
-			errData, _ := json.Marshal(map[string]string{"error": err.Error()})
+			errData, _ := json.Marshal(map[string]string{"error": "synthesis stream failed"})
 			fmt.Fprintf(w, "event: error\ndata: %s\n\n", errData)
 			flusher.Flush()
 			return
@@ -333,7 +354,7 @@ func (h *Handler) relatedNotes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("ai.Handler.relatedNotes: find related failed", "error", err)
 		// Check if the error is from a note not found (query note step).
-		if strings.Contains(err.Error(), "query note") {
+		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "note not found")
 			return
 		}
@@ -444,7 +465,7 @@ func (h *Handler) assist(w http.ResponseWriter, r *http.Request) {
 	result, err := h.writer.Assist(r.Context(), userID, noteID, req.Action, req.Selection)
 	if err != nil {
 		if errors.Is(err, ErrInvalidAction) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusBadRequest, "invalid action")
 			return
 		}
 		if errors.Is(err, ErrEmptyInput) {
@@ -498,7 +519,7 @@ func (h *Handler) suggestTags(w http.ResponseWriter, r *http.Request) {
 		`SELECT title, body FROM notes WHERE id = ?`, req.NoteID,
 	).Scan(&noteTitle, &noteBody)
 	if err != nil {
-		if strings.Contains(err.Error(), "no rows") {
+		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "note not found")
 			return
 		}
@@ -582,7 +603,7 @@ func (h *Handler) suggestProject(w http.ResponseWriter, r *http.Request) {
 		`SELECT title, body FROM notes WHERE id = ?`, req.NoteID,
 	).Scan(&noteTitle, &noteBody)
 	if err != nil {
-		if strings.Contains(err.Error(), "no rows") {
+		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "note not found")
 			return
 		}

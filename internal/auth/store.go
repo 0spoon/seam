@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -45,6 +46,7 @@ type Store interface {
 
 	CreateRefreshToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error
 	GetRefreshToken(ctx context.Context, tokenHash string) (userID string, expiresAt time.Time, err error)
+	ConsumeRefreshToken(ctx context.Context, tokenHash string) (userID string, expiresAt time.Time, err error)
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
 	DeleteRefreshTokensByUser(ctx context.Context, userID string) error
 	DeleteOldestTokensForUser(ctx context.Context, userID string, maxTokens int) error
@@ -181,7 +183,11 @@ func (s *SQLStore) UpdateUserEmail(ctx context.Context, id, email string) error 
 
 // CreateRefreshToken stores a hashed refresh token.
 func (s *SQLStore) CreateRefreshToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error {
-	id := ulid.MustNew(ulid.Now(), rand.Reader).String()
+	idVal, idErr := ulid.New(ulid.Now(), rand.Reader)
+	if idErr != nil {
+		return fmt.Errorf("auth.Store.CreateRefreshToken: generate id: %w", idErr)
+	}
+	id := idVal.String()
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at)
@@ -212,6 +218,31 @@ func (s *SQLStore) GetRefreshToken(ctx context.Context, tokenHash string) (strin
 	expiresAt, parseErr := time.Parse(time.RFC3339, expiresAtStr)
 	if parseErr != nil {
 		slog.Warn("auth.Store.GetRefreshToken: malformed expires_at, using zero time",
+			"raw", expiresAtStr, "error", parseErr)
+	}
+	return userID, expiresAt, nil
+}
+
+// ConsumeRefreshToken atomically deletes a refresh token and returns its
+// metadata. This prevents TOCTOU races in token rotation by combining the
+// read and delete into a single operation. Returns ErrNotFound if the token
+// does not exist (already consumed by a concurrent request).
+func (s *SQLStore) ConsumeRefreshToken(ctx context.Context, tokenHash string) (string, time.Time, error) {
+	// SQLite supports DELETE...RETURNING since 3.35.0 (2021-03-12).
+	var userID, expiresAtStr string
+	err := s.db.QueryRowContext(ctx,
+		`DELETE FROM refresh_tokens WHERE token_hash = ? RETURNING user_id, expires_at`,
+		tokenHash,
+	).Scan(&userID, &expiresAtStr)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", time.Time{}, fmt.Errorf("auth.Store.ConsumeRefreshToken: %w", ErrNotFound)
+		}
+		return "", time.Time{}, fmt.Errorf("auth.Store.ConsumeRefreshToken: %w", err)
+	}
+	expiresAt, parseErr := time.Parse(time.RFC3339, expiresAtStr)
+	if parseErr != nil {
+		slog.Warn("auth.Store.ConsumeRefreshToken: malformed expires_at, using zero time",
 			"raw", expiresAtStr, "error", parseErr)
 	}
 	return userID, expiresAt, nil
@@ -301,15 +332,8 @@ func OpenServerDB(path string) (*sql.DB, error) {
 
 // isUniqueConstraintError checks if a SQLite error is a UNIQUE constraint violation.
 func isUniqueConstraintError(err error) bool {
-	// modernc.org/sqlite returns errors containing "UNIQUE constraint failed"
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	for i := 0; i <= len(msg)-len("UNIQUE constraint failed"); i++ {
-		if msg[i:i+len("UNIQUE constraint failed")] == "UNIQUE constraint failed" {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

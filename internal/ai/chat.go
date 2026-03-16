@@ -203,28 +203,56 @@ func (c *ChatService) retrieveContext(ctx context.Context, userID, query string)
 	var contexts []noteSnippet
 	var citations []Citation
 
+	// Collect unique note IDs from ChromaDB results.
+	var noteIDs []string
 	for _, cr := range chromaResults {
 		noteID := cr.Metadata["note_id"]
 		if noteID == "" || seen[noteID] {
 			continue
 		}
 		seen[noteID] = true
+		noteIDs = append(noteIDs, noteID)
+	}
 
-		var title, body string
-		qErr := db.QueryRowContext(ctx,
-			`SELECT title, body FROM notes WHERE id = ?`, noteID,
-		).Scan(&title, &body)
-		if qErr != nil {
-			continue
+	// Batch-load note data to avoid N+1 queries.
+	if len(noteIDs) > 0 {
+		placeholders := strings.Repeat("?,", len(noteIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]interface{}, len(noteIDs))
+		for i, id := range noteIDs {
+			args[i] = id
 		}
-
-		// Truncate long bodies to avoid blowing up context window.
-		if len(body) > c.bodyTruncateLen {
-			body = body[:c.bodyTruncateLen] + "..."
+		rows, qErr := db.QueryContext(ctx,
+			`SELECT id, title, body FROM notes WHERE id IN (`+placeholders+`)`, args...)
+		if qErr == nil {
+			defer rows.Close()
+			type noteData struct {
+				title string
+				body  string
+			}
+			noteMap := make(map[string]noteData)
+			for rows.Next() {
+				var id, title, body string
+				if err := rows.Scan(&id, &title, &body); err != nil {
+					continue
+				}
+				noteMap[id] = noteData{title: title, body: body}
+			}
+			// Preserve ChromaDB relevance order.
+			for _, id := range noteIDs {
+				nd, ok := noteMap[id]
+				if !ok {
+					continue
+				}
+				body := nd.body
+				runes := []rune(body)
+				if len(runes) > c.bodyTruncateLen {
+					body = string(runes[:c.bodyTruncateLen]) + "..."
+				}
+				contexts = append(contexts, noteSnippet{Title: nd.title, Body: body})
+				citations = append(citations, Citation{ID: id, Title: nd.title})
+			}
 		}
-
-		contexts = append(contexts, noteSnippet{Title: title, Body: body})
-		citations = append(citations, Citation{ID: noteID, Title: title})
 	}
 
 	return contexts, citations, nil

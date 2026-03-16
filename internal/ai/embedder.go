@@ -226,6 +226,7 @@ func (e *Embedder) ReindexAll(ctx context.Context, userID string, queue *Queue) 
 	for rows.Next() {
 		var noteID string
 		if err := rows.Scan(&noteID); err != nil {
+			e.logger.Warn("ai.Embedder.ReindexAll: scan note id", "error", err)
 			continue
 		}
 		payload, _ := json.Marshal(EmbedPayload{NoteID: noteID})
@@ -271,8 +272,8 @@ func (e *Embedder) FindRelated(ctx context.Context, noteID, userID string, nResu
 	}
 
 	text := title + "\n\n" + body
-	if len(text) > 3000 {
-		text = text[:3000]
+	if runes := []rune(text); len(runes) > 3000 {
+		text = string(runes[:3000])
 	}
 
 	queryEmbedding, err := e.ollama.GenerateEmbedding(ctx, e.model, text)

@@ -8,9 +8,15 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"golang.org/x/time/rate"
 
 	"github.com/katata/seam/internal/auth"
 )
+
+// wsMessageRate is the maximum inbound message rate per WebSocket connection.
+// 20 messages/second with a burst of 30 accommodates rapid typing and UI
+// interactions without allowing flood attacks.
+var wsMessageRate = rate.NewLimiter(20, 30)
 
 // MessageHandler handles incoming WebSocket messages from clients.
 // userID is the authenticated user, msg is the parsed message.
@@ -139,6 +145,9 @@ func pingLoop(ctx context.Context, conn *websocket.Conn, logger *slog.Logger) {
 // readLoop reads messages from the WebSocket connection until the client
 // disconnects or the context is cancelled.
 func readLoop(ctx context.Context, hub *Hub, conn *websocket.Conn, userID string, logger *slog.Logger, handler MessageHandler) {
+	// Per-connection rate limiter to prevent message flooding.
+	limiter := rate.NewLimiter(20, 30)
+
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -154,6 +163,13 @@ func readLoop(ctx context.Context, hub *Hub, conn *websocket.Conn, userID string
 			}
 			logger.Warn("ws.readLoop: read error", "error", err)
 			return
+		}
+
+		// Rate-limit incoming messages per connection.
+		if !limiter.Allow() {
+			logger.Warn("ws.readLoop: message rate exceeded, dropping message",
+				"user_id", userID)
+			continue
 		}
 
 		var msg Message

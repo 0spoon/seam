@@ -29,6 +29,8 @@ type Handler struct {
 
 	limiterMu sync.Mutex
 	limiters  map[string]*ipLimiter
+	done      chan struct{} // closed on Close() to stop background goroutines
+	closeOnce sync.Once
 }
 
 // ipLimiter wraps a rate.Limiter with a last-seen timestamp for eviction.
@@ -46,9 +48,15 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 		service:  service,
 		logger:   logger,
 		limiters: make(map[string]*ipLimiter),
+		done:     make(chan struct{}),
 	}
 	go h.evictStaleLimiters()
 	return h
+}
+
+// Close stops background goroutines (limiter eviction). Safe to call multiple times.
+func (h *Handler) Close() {
+	h.closeOnce.Do(func() { close(h.done) })
 }
 
 // getIPLimiter returns the per-IP rate limiter, creating one if necessary.
@@ -68,15 +76,20 @@ func (h *Handler) getIPLimiter(ip string) *rate.Limiter {
 func (h *Handler) evictStaleLimiters() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		h.limiterMu.Lock()
-		cutoff := time.Now().Add(-10 * time.Minute)
-		for ip, entry := range h.limiters {
-			if entry.lastSeen.Before(cutoff) {
-				delete(h.limiters, ip)
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-ticker.C:
+			h.limiterMu.Lock()
+			cutoff := time.Now().Add(-10 * time.Minute)
+			for ip, entry := range h.limiters {
+				if entry.lastSeen.Before(cutoff) {
+					delete(h.limiters, ip)
+				}
 			}
+			h.limiterMu.Unlock()
 		}
-		h.limiterMu.Unlock()
 	}
 }
 
@@ -346,19 +359,19 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // safeRegistrationMessage maps internal validation errors to user-safe messages,
 // avoiding leaking implementation details.
 func safeRegistrationMessage(err error) string {
+	// All auth.Service.Register validation errors wrap ErrValidation and contain
+	// a descriptive prefix. Match on the prefix using the error message since
+	// the sentinel (ErrValidation) is shared across all validation paths.
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "username is required"):
 		return "username is required"
 	case strings.Contains(msg, "username must be"):
 		return "username must be 3-64 characters, alphanumeric/underscore/hyphen only"
-	case strings.Contains(msg, "email is required"):
+	case strings.Contains(msg, "email is required"),
+		strings.Contains(msg, "invalid email"):
 		return "valid email is required"
-	case strings.Contains(msg, "invalid email"):
-		return "valid email is required"
-	case strings.Contains(msg, "password is required"),
-		strings.Contains(msg, "password must be at least"),
-		strings.Contains(msg, "password must not exceed"):
+	case strings.Contains(msg, "password"):
 		return "password must be 8-1024 characters"
 	default:
 		return "invalid input"

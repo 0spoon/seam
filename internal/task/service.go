@@ -29,6 +29,8 @@ type parsedTask struct {
 
 // parseTasks extracts checkbox items from a note body.
 func parseTasks(body string) []parsedTask {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	body = strings.ReplaceAll(body, "\r", "\n")
 	matches := checkboxRe.FindAllStringSubmatchIndex(body, -1)
 	if len(matches) == 0 {
 		return nil
@@ -78,10 +80,10 @@ type NoteService interface {
 
 // Service implements task business logic.
 type Service struct {
-	store       *Store
-	dbManager   userdb.Manager
-	noteSvc     NoteService
-	logger      *slog.Logger
+	store     *Store
+	dbManager userdb.Manager
+	noteSvc   NoteService
+	logger    *slog.Logger
 }
 
 // NewService creates a new task Service.
@@ -102,9 +104,8 @@ func (s *Service) SetNoteService(noteSvc NoteService) {
 	s.noteSvc = noteSvc
 }
 
-// SyncNote parses the note body for checkboxes and syncs them to the task index.
-// Deletes all existing tasks for the note and re-inserts (simpler than diffing,
-// ensures line numbers are always accurate).
+// SyncNote parses the note body for checkboxes and reconciles them with existing
+// tasks, preserving stable IDs and created_at for unchanged tasks.
 func (s *Service) SyncNote(ctx context.Context, userID, noteID, body string) error {
 	db, err := s.dbManager.Open(ctx, userID)
 	if err != nil {
@@ -117,26 +118,77 @@ func (s *Service) SyncNote(ctx context.Context, userID, noteID, body string) err
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Delete all existing tasks for this note.
-	if err := s.store.DeleteByNote(ctx, tx, noteID); err != nil {
-		return fmt.Errorf("task.Service.SyncNote: %w", err)
+	// Fetch existing tasks for reconciliation.
+	existing, _, err := s.store.List(ctx, tx, TaskFilter{NoteID: noteID, Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("task.Service.SyncNote: list existing: %w", err)
 	}
 
-	// Parse and insert new tasks.
+	// Build lookup: content -> []*existingEntry (multiple tasks can have same content).
+	type existingEntry struct {
+		task    *Task
+		matched bool
+	}
+	existingByContent := make(map[string][]*existingEntry)
+	for _, t := range existing {
+		existingByContent[t.Content] = append(existingByContent[t.Content], &existingEntry{task: t})
+	}
+
 	parsed := parseTasks(body)
 	now := time.Now().UTC()
+	matched := make(map[string]bool) // track matched existing task IDs
+
 	for _, p := range parsed {
-		t := &Task{
-			ID:         ulid.MustNew(ulid.Now(), rand.Reader).String(),
-			NoteID:     noteID,
-			LineNumber: p.LineNumber,
-			Content:    p.Content,
-			Done:       p.Done,
-			CreatedAt:  now,
-			UpdatedAt:  now,
+		// Try to match an existing unmatched task with the same content.
+		var found *existingEntry
+		if entries, ok := existingByContent[p.Content]; ok {
+			for _, e := range entries {
+				if !e.matched {
+					found = e
+					e.matched = true
+					break
+				}
+			}
 		}
-		if err := s.store.Upsert(ctx, tx, t); err != nil {
-			return fmt.Errorf("task.Service.SyncNote: %w", err)
+
+		if found != nil {
+			matched[found.task.ID] = true
+			// Update line number and done status if changed.
+			if found.task.LineNumber != p.LineNumber || found.task.Done != p.Done {
+				found.task.LineNumber = p.LineNumber
+				found.task.Done = p.Done
+				found.task.UpdatedAt = now
+				if err := s.store.Upsert(ctx, tx, found.task); err != nil {
+					return fmt.Errorf("task.Service.SyncNote: update: %w", err)
+				}
+			}
+		} else {
+			// Insert new task.
+			id, idErr := ulid.New(ulid.Now(), rand.Reader)
+			if idErr != nil {
+				return fmt.Errorf("task.Service.SyncNote: generate id: %w", idErr)
+			}
+			t := &Task{
+				ID:         id.String(),
+				NoteID:     noteID,
+				LineNumber: p.LineNumber,
+				Content:    p.Content,
+				Done:       p.Done,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			}
+			if err := s.store.Upsert(ctx, tx, t); err != nil {
+				return fmt.Errorf("task.Service.SyncNote: insert: %w", err)
+			}
+		}
+	}
+
+	// Delete tasks that no longer exist in the note.
+	for _, t := range existing {
+		if !matched[t.ID] {
+			if err := s.store.Delete(ctx, tx, t.ID); err != nil {
+				return fmt.Errorf("task.Service.SyncNote: delete: %w", err)
+			}
 		}
 	}
 
@@ -190,32 +242,39 @@ func (s *Service) Get(ctx context.Context, userID, taskID string) (*Task, error)
 }
 
 // ToggleDone updates a task's done status and also toggles the checkbox in
-// the note file on disk.
+// the note file on disk. DB operations are wrapped in a transaction, and
+// the file write is performed before commit so failures are not silently lost.
 func (s *Service) ToggleDone(ctx context.Context, userID, taskID string, done bool) error {
 	db, err := s.dbManager.Open(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("task.Service.ToggleDone: open db: %w", err)
 	}
 
-	// Get the task to find the note and line number.
-	t, err := s.store.Get(ctx, db, taskID)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("task.Service.ToggleDone: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	t, err := s.store.Get(ctx, tx, taskID)
 	if err != nil {
 		return fmt.Errorf("task.Service.ToggleDone: %w", err)
 	}
 
-	// Update DB status.
-	if err := s.store.UpdateDone(ctx, db, taskID, done); err != nil {
+	if err := s.store.UpdateDone(ctx, tx, taskID, done); err != nil {
 		return fmt.Errorf("task.Service.ToggleDone: %w", err)
 	}
 
-	// Update the note file on disk.
+	// Update the file BEFORE committing DB transaction.
 	if s.noteSvc != nil {
 		if err := s.toggleCheckboxInFile(ctx, userID, t.NoteID, t.LineNumber, done); err != nil {
-			s.logger.Warn("task.Service.ToggleDone: failed to update file",
-				"task_id", taskID, "note_id", t.NoteID, "error", err)
+			return fmt.Errorf("task.Service.ToggleDone: file update: %w", err)
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("task.Service.ToggleDone: commit: %w", err)
+	}
 	return nil
 }
 
@@ -231,28 +290,50 @@ func (s *Service) toggleCheckboxInFile(ctx context.Context, userID, noteID strin
 	notesDir := s.dbManager.UserNotesDir(userID)
 	absPath := filepath.Join(notesDir, n.FilePath)
 
+	// Defense-in-depth: reject paths that escape the notes directory.
+	if !strings.HasPrefix(absPath, filepath.Clean(notesDir)+string(filepath.Separator)) && absPath != filepath.Clean(notesDir) {
+		return fmt.Errorf("task.Service.toggleCheckboxInFile: path traversal detected")
+	}
+
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
 	}
 
-	lines := strings.Split(string(content), "\n")
+	// Detect original line ending style before normalization.
+	rawStr := string(content)
+	useCRLF := strings.Contains(rawStr, "\r\n")
+
+	fileStr := strings.ReplaceAll(rawStr, "\r\n", "\n")
+	fileStr = strings.ReplaceAll(fileStr, "\r", "\n")
+
+	lines := strings.Split(fileStr, "\n")
 
 	// Find the target line (1-indexed). The line number refers to the body,
 	// but the file includes frontmatter. We need to find the checkbox line
 	// in the full file content.
 	// Parse frontmatter to find where body starts.
-	fileStr := string(content)
 	bodyStart := 0
-	if strings.HasPrefix(fileStr, "---") {
-		endIdx := strings.Index(fileStr[3:], "---")
-		if endIdx >= 0 {
-			// Body starts after the closing "---\n"
-			bodyStart = endIdx + 3 + 3 // skip opening "---" + offset + closing "---"
-			// Count lines in frontmatter.
-			fmLines := strings.Count(fileStr[:bodyStart], "\n")
-			// Adjust line number to be relative to the full file.
-			lineNumber = lineNumber + fmLines
+	if strings.HasPrefix(fileStr, "---\n") {
+		// Find closing "---" that starts on its own line.
+		rest := fileStr[3:] // skip opening "---"
+		nlIdx := strings.Index(rest, "\n")
+		if nlIdx >= 0 {
+			rest = rest[nlIdx+1:]
+			endIdx := strings.Index(rest, "\n---\n")
+			if endIdx < 0 && strings.HasSuffix(rest, "\n---") {
+				endIdx = len(rest) - 4
+			}
+			if endIdx >= 0 {
+				// bodyStart = opening "---" (3) + newline after opening (nlIdx+1) +
+				//             content before closing (endIdx) + closing "\n---\n" (4)
+				bodyStart = 3 + nlIdx + 1 + endIdx + 4
+				if bodyStart > len(fileStr) {
+					bodyStart = len(fileStr)
+				}
+				fmLines := strings.Count(fileStr[:bodyStart], "\n")
+				lineNumber = lineNumber + fmLines
+			}
 		}
 	}
 
@@ -274,9 +355,19 @@ func (s *Service) toggleCheckboxInFile(ctx context.Context, userID, noteID strin
 	}
 
 	lines[lineNumber-1] = newLine
-	newContent := strings.Join(lines, "\n")
+	sep := "\n"
+	if useCRLF {
+		sep = "\r\n"
+	}
+	newContent := strings.Join(lines, sep)
 
-	if err := os.WriteFile(absPath, []byte(newContent), 0o644); err != nil {
+	// Preserve original file permissions.
+	info, statErr := os.Stat(absPath)
+	perm := os.FileMode(0o644)
+	if statErr == nil {
+		perm = info.Mode().Perm()
+	}
+	if err := os.WriteFile(absPath, []byte(newContent), perm); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
 

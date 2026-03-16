@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/katata/seam/internal/note"
@@ -20,6 +21,7 @@ type Service struct {
 	noteSvc     *note.Service
 	urlFetcher  *URLFetcher
 	transcriber *VoiceTranscriber // nil if transcription model not configured
+	summarizeMu sync.RWMutex      // protects onSummarize
 	onSummarize SummarizeFunc     // nil if AI not configured
 	logger      *slog.Logger
 }
@@ -45,7 +47,16 @@ func NewService(
 // SetSummarizeFunc sets the callback for background summarization of voice captures.
 // Called during server startup after the AI queue is initialized.
 func (s *Service) SetSummarizeFunc(fn SummarizeFunc) {
+	s.summarizeMu.Lock()
+	defer s.summarizeMu.Unlock()
 	s.onSummarize = fn
+}
+
+// getSummarizeFunc returns the current summarize callback, or nil.
+func (s *Service) getSummarizeFunc() SummarizeFunc {
+	s.summarizeMu.RLock()
+	defer s.summarizeMu.RUnlock()
+	return s.onSummarize
 }
 
 // CaptureURL fetches the given URL, extracts content, and creates a note
@@ -117,8 +128,10 @@ func (s *Service) CaptureVoice(ctx context.Context, userID string, audio io.Read
 	}
 
 	// Enqueue background summarization task if AI is configured.
-	if s.onSummarize != nil {
-		s.onSummarize(ctx, userID, n.ID)
+	// Use context.WithoutCancel so the task is not cancelled when the HTTP
+	// request completes (the summarization outlives the request).
+	if fn := s.getSummarizeFunc(); fn != nil {
+		fn(context.WithoutCancel(ctx), userID, n.ID)
 	}
 
 	s.logger.Info("voice captured",

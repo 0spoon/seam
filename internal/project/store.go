@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -72,8 +73,16 @@ func (s *Store) Get(ctx context.Context, db DBTX, id string) (*Project, error) {
 		}
 		return nil, fmt.Errorf("project.Store.Get: %w", err)
 	}
-	p.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	if parsed, err := time.Parse(time.RFC3339, createdAt); err != nil {
+		slog.Warn("project.Store.Get: failed to parse created_at", "value", createdAt, "error", err)
+	} else {
+		p.CreatedAt = parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		slog.Warn("project.Store.Get: failed to parse updated_at", "value", updatedAt, "error", err)
+	} else {
+		p.UpdatedAt = parsed
+	}
 	return p, nil
 }
 
@@ -91,8 +100,16 @@ func (s *Store) GetBySlug(ctx context.Context, db DBTX, slug string) (*Project, 
 		}
 		return nil, fmt.Errorf("project.Store.GetBySlug: %w", err)
 	}
-	p.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	if parsed, err := time.Parse(time.RFC3339, createdAt); err != nil {
+		slog.Warn("project.Store.GetBySlug: failed to parse created_at", "value", createdAt, "error", err)
+	} else {
+		p.CreatedAt = parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		slog.Warn("project.Store.GetBySlug: failed to parse updated_at", "value", updatedAt, "error", err)
+	} else {
+		p.UpdatedAt = parsed
+	}
 	return p, nil
 }
 
@@ -114,8 +131,16 @@ func (s *Store) List(ctx context.Context, db DBTX) ([]*Project, error) {
 		if err := rows.Scan(&p.ID, &p.Name, &p.Slug, &p.Description, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("project.Store.List: scan: %w", err)
 		}
-		p.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-		p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+		if parsed, err := time.Parse(time.RFC3339, createdAt); err != nil {
+			slog.Warn("project.Store.List: failed to parse created_at", "value", createdAt, "error", err)
+		} else {
+			p.CreatedAt = parsed
+		}
+		if parsed, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+			slog.Warn("project.Store.List: failed to parse updated_at", "value", updatedAt, "error", err)
+		} else {
+			p.UpdatedAt = parsed
+		}
 		projects = append(projects, p)
 	}
 	if err := rows.Err(); err != nil {

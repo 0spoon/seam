@@ -66,7 +66,7 @@ func (s *Service) EnsureDefaults() error {
 		if _, err := os.Stat(path); err == nil {
 			continue // already exists, do not overwrite
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := atomicWriteFile(path, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("template.Service.EnsureDefaults: write %s: %w", name, err)
 		}
 	}
@@ -323,4 +323,35 @@ var defaultTemplates = map[string]string{
 ## Tomorrow
 - [ ] 
 `,
+}
+
+// atomicWriteFile writes data to a file atomically by writing to a temp file
+// in the same directory and then renaming.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".seam-tmp-*")
+	if err != nil {
+		return fmt.Errorf("atomicWriteFile: create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: write: %w", err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: chmod: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: close: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: rename: %w", err)
+	}
+	return nil
 }

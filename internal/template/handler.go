@@ -87,6 +87,7 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 
 	name := chi.URLParam(r, "name")
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req applyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		// If no body, use empty vars.

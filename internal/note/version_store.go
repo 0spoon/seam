@@ -36,7 +36,11 @@ func NewVersionStore() *VersionStore {
 // Create inserts a new note version into the database.
 func (s *VersionStore) Create(ctx context.Context, db DBTX, v *NoteVersion) error {
 	if v.ID == "" {
-		v.ID = ulid.MustNew(ulid.Now(), rand.Reader).String()
+		id, idErr := ulid.New(ulid.Now(), rand.Reader)
+		if idErr != nil {
+			return fmt.Errorf("note.VersionStore.Create: generate id: %w", idErr)
+		}
+		v.ID = id.String()
 	}
 	if v.CreatedAt.IsZero() {
 		v.CreatedAt = time.Now().UTC()

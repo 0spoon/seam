@@ -106,7 +106,11 @@ func (q *Queue) RegisterHandler(taskType string, handler TaskHandler) {
 // and adds it to the in-memory priority queue.
 func (q *Queue) Enqueue(ctx context.Context, task *Task) error {
 	if task.ID == "" {
-		task.ID = ulid.MustNew(ulid.Now(), rand.Reader).String()
+		idVal, idErr := ulid.New(ulid.Now(), rand.Reader)
+		if idErr != nil {
+			return fmt.Errorf("ai.Queue.Enqueue: generate id: %w", idErr)
+		}
+		task.ID = idVal.String()
 	}
 	if task.Status == "" {
 		task.Status = TaskStatusPending
@@ -336,8 +340,14 @@ func (q *Queue) processTask(ctx context.Context, task *Task) {
 	// Mark as running.
 	db, err := q.dbManager.Open(ctx, task.UserID)
 	if err != nil {
-		q.logger.Error("ai.Queue: failed to open db for task, re-enqueuing",
-			"task_id", task.ID, "error", err)
+		q.logger.Error("ai.Queue: failed to open db for task",
+			"task_id", task.ID, "error", err, "retries", task.retries)
+		if task.retries >= maxRetries {
+			q.logger.Error("ai.Queue: task exceeded max retries, dropping",
+				"task_id", task.ID, "type", task.Type, "retries", task.retries)
+			return
+		}
+		task.retries++
 		q.mu.Lock()
 		heap.Push(&q.pq, &pqItem{
 			task:     task,
@@ -445,6 +455,10 @@ type pqItem struct {
 	priority int
 	index    int
 }
+
+// maxRetries is the maximum number of times a task can be re-enqueued
+// due to transient failures (e.g. DB unavailable) before being dropped.
+const maxRetries = 3
 
 type priorityQueue []*pqItem
 

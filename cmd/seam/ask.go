@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -241,16 +242,22 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 		wsURL := fmt.Sprintf("%s://%s/api/ws", scheme, u.Host)
 
 		ctx := context.Background()
-		conn, _, err := websocket.Dial(ctx, wsURL, nil)
+		dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer dialCancel()
+		conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
 		if err != nil {
 			return askFallbackHTTP(client, query, history)
 		}
 
 		// Authenticate.
-		authPayload, _ := json.Marshal(map[string]interface{}{
+		authPayload, marshalErr := json.Marshal(map[string]interface{}{
 			"type":    "auth",
 			"payload": map[string]string{"token": client.AccessToken},
 		})
+		if marshalErr != nil {
+			conn.CloseNow()
+			return askStreamErrMsg{err: fmt.Errorf("marshal auth: %w", marshalErr)}
+		}
 		if err := conn.Write(ctx, websocket.MessageText, authPayload); err != nil {
 			conn.CloseNow()
 			return askFallbackHTTP(client, query, history)
@@ -263,10 +270,14 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 		if len(history) > 0 {
 			askPayload["history"] = history
 		}
-		chatPayload, _ := json.Marshal(map[string]interface{}{
+		chatPayload, marshalErr2 := json.Marshal(map[string]interface{}{
 			"type":    "chat.ask",
 			"payload": askPayload,
 		})
+		if marshalErr2 != nil {
+			conn.CloseNow()
+			return askStreamErrMsg{err: fmt.Errorf("marshal chat: %w", marshalErr2)}
+		}
 		if err := conn.Write(ctx, websocket.MessageText, chatPayload); err != nil {
 			conn.CloseNow()
 			return askFallbackHTTP(client, query, history)
@@ -493,24 +504,26 @@ func (m askModel) View() string {
 	)
 }
 
-// wrapText wraps a string at the given width, breaking on spaces.
+// wrapText wraps a string at the given width (in runes), breaking on spaces.
 func wrapText(s string, width int) string {
-	if width <= 0 || len(s) <= width {
+	runes := []rune(s)
+	if width <= 0 || len(runes) <= width {
 		return s
 	}
 
 	var lines []string
-	for len(s) > width {
+	for len(runes) > width {
 		// Find last space before width.
-		breakAt := strings.LastIndex(s[:width], " ")
+		segment := string(runes[:width])
+		breakAt := strings.LastIndex(segment, " ")
 		if breakAt <= 0 {
 			breakAt = width
 		}
-		lines = append(lines, s[:breakAt])
-		s = strings.TrimLeft(s[breakAt:], " ")
+		lines = append(lines, string(runes[:breakAt]))
+		runes = []rune(strings.TrimLeft(string(runes[breakAt:]), " "))
 	}
-	if s != "" {
-		lines = append(lines, s)
+	if len(runes) > 0 {
+		lines = append(lines, string(runes))
 	}
 	return strings.Join(lines, "\n")
 }

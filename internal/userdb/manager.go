@@ -116,13 +116,15 @@ func (m *SQLManager) CloseAll() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Signal eviction loop to stop.
+	// Signal eviction loop to stop (safe under m.mu which is held).
 	select {
 	case <-m.closeCh:
 		// Already closed.
 	default:
 		close(m.closeCh)
 	}
+	// Note: the select-default pattern is safe here because m.mu is held,
+	// preventing concurrent CloseAll() calls from reaching the close().
 
 	var firstErr error
 	for userID, entry := range m.dbs {

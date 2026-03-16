@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/validate"
 )
 
 // listVersions handles GET /api/notes/{id}/versions?limit=20&offset=0
@@ -120,6 +121,12 @@ func (h *Handler) restoreVersion(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Error("restore version: get version failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	// Validate the historical title before using it.
+	if err := validate.Name(v.Title); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("version title is not safe to restore: %v", err))
 		return
 	}
 

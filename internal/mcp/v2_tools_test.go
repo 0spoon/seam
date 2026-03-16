@@ -135,7 +135,7 @@ func TestContextGather_WithScope(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := &mockAgentService{
-				contextGatherFn: func(_ context.Context, _, _, scope string, _ int) ([]agent.KnowledgeHit, error) {
+				contextGatherFn: func(_ context.Context, _, _, scope string, _ int, _ float64) ([]agent.KnowledgeHit, error) {
 					require.Equal(t, tc.wantScope, scope)
 					return []agent.KnowledgeHit{}, nil
 				},

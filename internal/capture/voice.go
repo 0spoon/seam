@@ -64,9 +64,9 @@ func (t *VoiceTranscriber) Transcribe(ctx context.Context, audio io.Reader, file
 		filename = "audio.wav"
 	}
 
-	// Determine file extension from filename.
-	ext := strings.ToLower(filepath.Ext(filename))
-	if ext == "" {
+	// Determine file extension from filename, sanitizing to prevent path injection.
+	ext := strings.ToLower(filepath.Ext(filepath.Base(filename)))
+	if ext == "" || strings.ContainsAny(ext, `/\`) || strings.Contains(ext, "..") {
 		ext = ".wav"
 	}
 

@@ -91,7 +91,8 @@ type Server struct {
 	limiters  map[string]*mcpUserLimiter
 
 	// done is closed to signal the eviction goroutine to stop.
-	done chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // mcpUserLimiter wraps a rate.Limiter with a last-seen timestamp for eviction.
@@ -161,12 +162,7 @@ func (s *Server) MCPServer() *mcpserver.MCPServer {
 
 // Close stops background goroutines. Safe to call multiple times.
 func (s *Server) Close() {
-	select {
-	case <-s.done:
-		// Already closed.
-	default:
-		close(s.done)
-	}
+	s.closeOnce.Do(func() { close(s.done) })
 }
 
 // authCheckMiddleware rejects tool calls when no user ID is present in context.

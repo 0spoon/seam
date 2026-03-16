@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -100,6 +101,9 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 	if req.Title == "" {
 		return nil, fmt.Errorf("note.Service.Create: title is required")
 	}
+	if err := validate.Name(req.Title); err != nil {
+		return nil, fmt.Errorf("note.Service.Create: %w", err)
+	}
 
 	db, err := s.userDBManager.Open(ctx, userID)
 	if err != nil {
@@ -108,7 +112,11 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 
 	notesDir := s.userDBManager.UserNotesDir(userID)
 	now := time.Now().UTC()
-	id := ulid.MustNew(ulid.Now(), rand.Reader).String()
+	idVal, idErr := ulid.New(ulid.Now(), rand.Reader)
+	if idErr != nil {
+		return nil, fmt.Errorf("note.Service.Create: generate id: %w", idErr)
+	}
+	id := idVal.String()
 
 	// Determine the directory: project slug or root (inbox).
 	subDir := ""
@@ -164,7 +172,7 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 		sup.IgnoreNext(absPath)
 	}
 
-	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+	if err := atomicWriteFile(absPath, []byte(content), 0o644); err != nil {
 		return nil, fmt.Errorf("note.Service.Create: write file: %w", err)
 	}
 
@@ -240,6 +248,9 @@ func (s *Service) Get(ctx context.Context, userID, noteID string) (*Note, error)
 
 	// Read body from disk (source of truth).
 	notesDir := s.userDBManager.UserNotesDir(userID)
+	if err := validate.PathWithinDir(n.FilePath, notesDir); err != nil {
+		return nil, fmt.Errorf("note.Service.Get: %w", err)
+	}
 	absPath := filepath.Join(notesDir, n.FilePath)
 	content, err := os.ReadFile(absPath)
 	if err != nil {
@@ -326,6 +337,12 @@ func (s *Service) ListTags(ctx context.Context, userID string) ([]TagCount, erro
 //  5. Commit the transaction.
 //  6. If commit fails, restore old file content (best effort).
 func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateNoteReq) (*Note, error) {
+	if req.Title != nil {
+		if err := validate.Name(*req.Title); err != nil {
+			return nil, fmt.Errorf("note.Service.Update: %w", err)
+		}
+	}
+
 	db, err := s.userDBManager.Open(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("note.Service.Update: open db: %w", err)
@@ -490,7 +507,7 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 	if sup := s.getSuppressor(); sup != nil {
 		sup.IgnoreNext(absPath)
 	}
-	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+	if err := atomicWriteFile(absPath, []byte(content), 0o644); err != nil {
 		// File write failed -- undo the move if we did one.
 		if pendingMove.needed {
 			if undoErr := os.Rename(pendingMove.newAbs, pendingMove.oldAbs); undoErr != nil {
@@ -505,7 +522,7 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 	if err := tx.Commit(); err != nil {
 		// Commit failed: restore old file content (best effort).
 		if oldContent != nil {
-			if restoreErr := os.WriteFile(oldFileAbs, oldContent, 0o644); restoreErr != nil {
+			if restoreErr := atomicWriteFile(oldFileAbs, oldContent, 0o644); restoreErr != nil {
 				s.logger.Error("note.Service.Update: failed to restore file after commit error",
 					"path", oldFileAbs, "error", restoreErr)
 			}
@@ -563,18 +580,25 @@ func (s *Service) Delete(ctx context.Context, userID, noteID string) error {
 		return fmt.Errorf("note.Service.Delete: %w", err)
 	}
 
-	// Delete file from disk.
+	// Validate file path before any operations.
 	notesDir := s.userDBManager.UserNotesDir(userID)
+	if err := validate.PathWithinDir(existing.FilePath, notesDir); err != nil {
+		return fmt.Errorf("note.Service.Delete: %w", err)
+	}
 	absPath := filepath.Join(notesDir, existing.FilePath)
+
+	// Delete DB row first, then remove file on success (matching BulkAction pattern).
+	if err := s.store.Delete(ctx, db, noteID); err != nil {
+		return fmt.Errorf("note.Service.Delete: %w", err)
+	}
+
+	// After successful DB delete, remove file from disk.
 	if sup := s.getSuppressor(); sup != nil {
 		sup.IgnoreNext(absPath)
 	}
 	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("note.Service.Delete: remove file: %w", err)
-	}
-
-	if err := s.store.Delete(ctx, db, noteID); err != nil {
-		return fmt.Errorf("note.Service.Delete: %w", err)
+		s.logger.Error("note.Service.Delete: remove file after db delete",
+			"path", absPath, "error", err)
 	}
 
 	s.logger.Info("note deleted", "user_id", userID, "note_id", noteID)
@@ -622,7 +646,14 @@ func (s *Service) BulkAction(ctx context.Context, userID string, req BulkActionR
 	for _, noteID := range req.NoteIDs {
 		if err := s.executeBulkAction(ctx, tx, db, userID, noteID, req, notesDir, &filesToDelete); err != nil {
 			result.Failed++
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", noteID, err.Error()))
+			// Sanitize error: map known domain errors to safe messages.
+			errMsg := "internal error"
+			if errors.Is(err, ErrNotFound) {
+				errMsg = "not found"
+			} else if errors.Is(err, validate.ErrUnsafeName) {
+				errMsg = "validation error"
+			}
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", noteID, errMsg))
 			continue
 		}
 		result.Success++
@@ -716,6 +747,11 @@ func (s *Service) executeBulkAction(
 			newRelPath = filename
 		}
 
+		// Validate the destination path stays within the notes directory.
+		if vErr := validate.PathWithinDir(newRelPath, notesDir); vErr != nil {
+			return fmt.Errorf("move: %w", vErr)
+		}
+
 		oldAbs := filepath.Join(notesDir, existing.FilePath)
 		newAbs := filepath.Join(notesDir, newRelPath)
 
@@ -753,6 +789,10 @@ func (s *Service) executeBulkAction(
 
 // ListVersions returns version history for a note.
 func (s *Service) ListVersions(ctx context.Context, userID, noteID string, limit, offset int) ([]*NoteVersion, int, error) {
+	if s.versionStore == nil {
+		return nil, 0, fmt.Errorf("note.Service.ListVersions: version history not configured")
+	}
+
 	db, err := s.userDBManager.Open(ctx, userID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("note.Service.ListVersions: open db: %w", err)
@@ -772,6 +812,10 @@ func (s *Service) ListVersions(ctx context.Context, userID, noteID string, limit
 
 // GetVersion returns a specific version of a note.
 func (s *Service) GetVersion(ctx context.Context, userID, noteID string, version int) (*NoteVersion, error) {
+	if s.versionStore == nil {
+		return nil, fmt.Errorf("note.Service.GetVersion: version history not configured")
+	}
+
 	db, err := s.userDBManager.Open(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("note.Service.GetVersion: open db: %w", err)
@@ -903,7 +947,11 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 	now := time.Now().UTC()
 	id := fm.ID
 	if id == "" {
-		id = ulid.MustNew(ulid.Now(), rand.Reader).String()
+		idVal, idErr := ulid.New(ulid.Now(), rand.Reader)
+		if idErr != nil {
+			return fmt.Errorf("note.Service.Reindex: generate id: %w", idErr)
+		}
+		id = idVal.String()
 	}
 	title := fm.Title
 	if title == "" {
@@ -987,7 +1035,7 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 			if sup := s.getSuppressor(); sup != nil {
 				sup.IgnoreNext(absPath)
 			}
-			if writeErr := os.WriteFile(absPath, []byte(newContent), 0o644); writeErr != nil {
+			if writeErr := atomicWriteFile(absPath, []byte(newContent), 0o644); writeErr != nil {
 				s.logger.Warn("note.Service.Reindex: failed to write ID back to file",
 					"file_path", filePath, "error", writeErr)
 			}
@@ -1032,6 +1080,9 @@ func (s *Service) GetOrCreateDaily(ctx context.Context, userID string, date time
 	if err == nil {
 		// Read body from disk (source of truth).
 		notesDir := s.userDBManager.UserNotesDir(userID)
+		if vErr := validate.PathWithinDir(existing.FilePath, notesDir); vErr != nil {
+			return nil, fmt.Errorf("note.Service.GetOrCreateDaily: %w", vErr)
+		}
 		absPath := filepath.Join(notesDir, existing.FilePath)
 		content, readErr := os.ReadFile(absPath)
 		if readErr == nil {
@@ -1081,8 +1132,8 @@ func (s *Service) uniqueFilename(notesDir, subDir, slug string) string {
 		return candidate
 	} else if err != nil && !os.IsNotExist(err) {
 		// Unexpected error (e.g. permission denied); fall back to ULID name.
-		fallback := ulid.MustNew(ulid.Now(), rand.Reader).String() + ".md"
-		s.logger.Warn("note.Service.uniqueFilename: stat error, using ULID fallback",
+		fallback := s.generateFallbackFilename()
+		s.logger.Warn("note.Service.uniqueFilename: stat error, using fallback",
 			"path", path, "error", err)
 		return fallback
 	}
@@ -1094,22 +1145,66 @@ func (s *Service) uniqueFilename(notesDir, subDir, slug string) string {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			return candidate
 		} else if err != nil && !os.IsNotExist(err) {
-			fallback := ulid.MustNew(ulid.Now(), rand.Reader).String() + ".md"
-			s.logger.Warn("note.Service.uniqueFilename: stat error, using ULID fallback",
+			fallback := s.generateFallbackFilename()
+			s.logger.Warn("note.Service.uniqueFilename: stat error, using fallback",
 				"path", path, "error", err)
 			return fallback
 		}
 	}
 
-	// Exhausted all attempts; use a ULID-based name.
-	fallback := ulid.MustNew(ulid.Now(), rand.Reader).String() + ".md"
-	s.logger.Warn("note.Service.uniqueFilename: exhausted attempts, using ULID fallback",
+	// Exhausted all attempts; use a fallback name.
+	fallback := s.generateFallbackFilename()
+	s.logger.Warn("note.Service.uniqueFilename: exhausted attempts, using fallback",
 		"slug", slug, "max_attempts", maxAttempts)
 	return fallback
+}
+
+// generateFallbackFilename creates a unique filename using ULID with graceful
+// fallback to a timestamp-based name if entropy source fails.
+func (s *Service) generateFallbackFilename() string {
+	id, err := ulid.New(ulid.Now(), rand.Reader)
+	if err != nil {
+		s.logger.Warn("note.Service.generateFallbackFilename: ulid generation failed, using timestamp",
+			"error", err)
+		return fmt.Sprintf("note-%d.md", time.Now().UnixNano())
+	}
+	return id.String() + ".md"
 }
 
 // computeHash returns the hex-encoded SHA-256 hash of content.
 func computeHash(content string) string {
 	h := sha256.Sum256([]byte(content))
 	return fmt.Sprintf("%x", h)
+}
+
+// atomicWriteFile writes data to a file atomically by writing to a temp file
+// in the same directory and then renaming. This prevents partial writes from
+// corrupting the source-of-truth .md files on crash.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".seam-tmp-*")
+	if err != nil {
+		return fmt.Errorf("atomicWriteFile: create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: write: %w", err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: chmod: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: close: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: rename: %w", err)
+	}
+	return nil
 }

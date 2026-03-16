@@ -109,7 +109,7 @@ func TestService_ContextGather_ScopeAll(t *testing.T) {
 	require.NoError(t, err)
 
 	// Gather with "all" scope should find agent knowledge.
-	hits, err := svc.ContextGather(ctx, testUserID, "testing", "all", 3000)
+	hits, err := svc.ContextGather(ctx, testUserID, "testing", "all", 3000, 0.0)
 	require.NoError(t, err)
 	// FTS should find it.
 	require.NotEmpty(t, hits)
@@ -124,7 +124,7 @@ func TestService_ContextGather_ScopeAgent(t *testing.T) {
 	require.NoError(t, err)
 
 	// Gather with "agent" scope.
-	hits, err := svc.ContextGather(ctx, testUserID, "searchable", "agent", 3000)
+	hits, err := svc.ContextGather(ctx, testUserID, "searchable", "agent", 3000, 0.0)
 	require.NoError(t, err)
 	require.NotEmpty(t, hits)
 }
@@ -133,7 +133,7 @@ func TestService_ContextGather_EmptyQuery(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	hits, err := svc.ContextGather(ctx, testUserID, "nonexistent-xyz-abc", "all", 3000)
+	hits, err := svc.ContextGather(ctx, testUserID, "nonexistent-xyz-abc", "all", 3000, 0.0)
 	require.NoError(t, err)
 	require.Empty(t, hits)
 }

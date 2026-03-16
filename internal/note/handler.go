@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,7 @@ type TemplateApplier interface {
 // Handler handles HTTP requests for note endpoints.
 type Handler struct {
 	service         *Service
+	templateMu      sync.RWMutex    // protects templateApplier
 	templateApplier TemplateApplier // nil if templates not configured
 	logger          *slog.Logger
 }
@@ -43,7 +45,16 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 // template-based note creation. Called during server startup after both
 // note and template services are initialized.
 func (h *Handler) SetTemplateApplier(applier TemplateApplier) {
+	h.templateMu.Lock()
+	defer h.templateMu.Unlock()
 	h.templateApplier = applier
+}
+
+// getTemplateApplier returns the current template applier, or nil.
+func (h *Handler) getTemplateApplier() TemplateApplier {
+	h.templateMu.RLock()
+	defer h.templateMu.RUnlock()
+	return h.templateApplier
 }
 
 // BulkActionReq is the request payload for bulk note operations.
@@ -191,7 +202,7 @@ func (h *Handler) bulkAction(w http.ResponseWriter, r *http.Request) {
 	case "delete":
 		// no params needed
 	default:
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown action %q", req.Action))
+		writeError(w, http.StatusBadRequest, "unsupported action")
 		return
 	}
 
@@ -231,12 +242,17 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If a template is specified, apply it to pre-fill the body.
-	if req.Template != "" && h.templateApplier != nil {
+	if req.Template != "" {
+		applier := h.getTemplateApplier()
+		if applier == nil {
+			writeError(w, http.StatusBadRequest, "templates not configured")
+			return
+		}
 		vars := map[string]string{}
 		if req.Title != "" {
 			vars["title"] = req.Title
 		}
-		body, tmplErr := h.templateApplier.Apply(r.Context(), userID, req.Template, vars)
+		body, tmplErr := applier.Apply(r.Context(), userID, req.Template, vars)
 		if tmplErr != nil {
 			h.logger.Warn("template apply failed, continuing without template",
 				"template", req.Template, "error", tmplErr)
@@ -299,6 +315,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Until = t
 	}
+
+	// Exclude body from list responses for performance -- callers that
+	// need the body should use the single-note GET endpoint.
+	filter.ExcludeBody = true
 
 	// Default limit is 100, max is 500.
 	filter.Limit = 100
@@ -484,10 +504,11 @@ func (h *Handler) resolveWikilink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a snippet (first ~200 chars of body).
+	// Create a snippet (first ~200 runes of body, rune-safe truncation).
 	snippet := note.Body
-	if len(snippet) > 200 {
-		snippet = snippet[:200] + "..."
+	runes := []rune(snippet)
+	if len(runes) > 200 {
+		snippet = string(runes[:200]) + "..."
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

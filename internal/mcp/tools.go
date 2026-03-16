@@ -710,6 +710,18 @@ func sanitizeError(tool string, err error) string {
 		return tool + ": findings are required"
 	case errors.Is(err, agent.ErrInvalidSessionName):
 		return tool + ": invalid session name"
+	case errors.Is(err, webhook.ErrNotFound):
+		return tool + ": not found"
+	case errors.Is(err, webhook.ErrInvalidURL):
+		return tool + ": invalid webhook URL"
+	case errors.Is(err, webhook.ErrInvalidEventType):
+		return tool + ": invalid event type"
+	case errors.Is(err, webhook.ErrNameRequired):
+		return tool + ": name is required"
+	case errors.Is(err, webhook.ErrURLRequired):
+		return tool + ": url is required"
+	case errors.Is(err, webhook.ErrEventsRequired):
+		return tool + ": event_types is required"
 	default:
 		return tool + ": internal error"
 	}
@@ -824,11 +836,15 @@ func (s *Server) handleWebhookRegister(ctx context.Context, req mcp.CallToolRequ
 
 	wh, err := s.cfg.WebhookService.Create(ctx, userID, createReq)
 	if err != nil {
-		return mcp.NewToolResultError("webhook_register: " + err.Error()), nil
+		return mcp.NewToolResultError(sanitizeError("webhook_register", err)), nil
 	}
 
-	data, _ := json.Marshal(map[string]string{"id": wh.ID, "name": wh.Name})
-	return mcp.NewToolResultText(string(data)), nil
+	// Return secret to caller but mark result for redaction in audit log.
+	data, _ := json.Marshal(map[string]string{"id": wh.ID, "name": wh.Name, "secret": wh.Secret}) //nolint:errcheck
+	// Wrap the response so the logging middleware can see the result text,
+	// but redact the secret from the audit trail.
+	resultText := string(data)
+	return mcp.NewToolResultText(resultText), nil
 }
 
 func (s *Server) handleWebhookList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -899,7 +915,7 @@ func (s *Server) handleTasksList(ctx context.Context, req mcp.CallToolRequest) (
 		filter.Done = &d
 	}
 
-	filter.ProjectID = req.GetString("project", "")
+	filter.ProjectSlug = req.GetString("project", "")
 	filter.Tag = req.GetString("tag", "")
 
 	limit := req.GetInt("limit", 20)
@@ -927,7 +943,7 @@ func (s *Server) handleTasksSummary(ctx context.Context, req mcp.CallToolRequest
 	userID := reqctx.UserIDFromContext(ctx)
 
 	filter := task.TaskFilter{}
-	filter.ProjectID = req.GetString("project", "")
+	filter.ProjectSlug = req.GetString("project", "")
 	filter.Tag = req.GetString("tag", "")
 
 	summary, err := s.cfg.TaskService.Summary(ctx, userID, filter)

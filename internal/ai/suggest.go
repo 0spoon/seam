@@ -53,8 +53,8 @@ func (s *Suggester) SuggestTags(ctx context.Context, noteTitle, noteBody string,
 
 	// Truncate body to avoid overloading the prompt.
 	body := noteBody
-	if len(body) > 3000 {
-		body = body[:3000]
+	if runes := []rune(body); len(runes) > 3000 {
+		body = string(runes[:3000])
 	}
 
 	prompt := fmt.Sprintf(`You are a tag classifier for a personal knowledge base.
@@ -106,8 +106,8 @@ func (s *Suggester) SuggestProject(ctx context.Context, noteTitle, noteBody stri
 
 	// Truncate body to avoid overloading the prompt.
 	body := noteBody
-	if len(body) > 3000 {
-		body = body[:3000]
+	if runes := []rune(body); len(runes) > 3000 {
+		body = string(runes[:3000])
 	}
 
 	// Build project list for the prompt.

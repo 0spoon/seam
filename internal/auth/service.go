@@ -116,8 +116,12 @@ func (s *Service) Register(ctx context.Context, req RegisterReq) (*AuthResponse,
 	}
 
 	now := time.Now().UTC()
+	id, idErr := ulid.New(ulid.Now(), rand.Reader)
+	if idErr != nil {
+		return nil, fmt.Errorf("auth.Service.Register: generate id: %w", idErr)
+	}
 	user := &User{
-		ID:        ulid.MustNew(ulid.Now(), rand.Reader).String(),
+		ID:        id.String(),
 		Username:  req.Username,
 		Email:     req.Email,
 		Password:  string(hash),
@@ -180,14 +184,19 @@ func (s *Service) Login(ctx context.Context, req LoginReq) (*AuthResponse, error
 }
 
 // Refresh issues a new access token and rotates the refresh token.
-// The old refresh token is invalidated and a new one is issued.
+// The old refresh token is atomically consumed (deleted) and a new pair is issued.
+// The delete-first pattern prevents TOCTOU races where two concurrent requests
+// could both read and use the same token before either deletes it.
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	if refreshToken == "" {
 		return nil, fmt.Errorf("auth.Service.Refresh: %w", ErrInvalidCredentials)
 	}
 
 	tokenHash := hashToken(refreshToken)
-	userID, expiresAt, err := s.store.GetRefreshToken(ctx, tokenHash)
+
+	// Atomically consume the token: delete it and get its metadata in one step.
+	// If two concurrent requests race, only one will get a non-zero result.
+	userID, expiresAt, err := s.store.ConsumeRefreshToken(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("auth.Service.Refresh: %w", ErrInvalidCredentials)
@@ -196,7 +205,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	}
 
 	if time.Now().UTC().After(expiresAt) {
-		_ = s.store.DeleteRefreshToken(ctx, tokenHash)
 		return nil, fmt.Errorf("auth.Service.Refresh: %w", ErrTokenExpired)
 	}
 
@@ -204,9 +212,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if err != nil {
 		return nil, fmt.Errorf("auth.Service.Refresh: %w", err)
 	}
-
-	// Rotate: delete the old refresh token and issue a new one.
-	_ = s.store.DeleteRefreshToken(ctx, tokenHash)
 
 	tokens, err := s.generateTokenPair(ctx, user)
 	if err != nil {

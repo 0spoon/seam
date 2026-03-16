@@ -40,6 +40,9 @@ func (s *Server) loggingMiddleware() mcpserver.ToolHandlerMiddleware {
 			}
 
 			var resultText, errText string
+			// Redact sensitive tool results (e.g., webhook secrets) from audit log.
+			sensitiveTools := map[string]bool{"webhook_register": true}
+
 			if err != nil {
 				errText = err.Error()
 			} else if result != nil && result.IsError {
@@ -55,7 +58,9 @@ func (s *Server) loggingMiddleware() mcpserver.ToolHandlerMiddleware {
 				for _, c := range result.Content {
 					if tc, ok := c.(mcp.TextContent); ok {
 						resultText = tc.Text
-						if len(resultText) > 1000 {
+						if sensitiveTools[req.Params.Name] {
+							resultText = "[REDACTED]"
+						} else if len(resultText) > 1000 {
 							resultText = resultText[:1000] + "..."
 						}
 						break
@@ -72,8 +77,13 @@ func (s *Server) loggingMiddleware() mcpserver.ToolHandlerMiddleware {
 
 			// Persist to database if logger is available.
 			if s.cfg.ToolCallLogger != nil && userID != "" {
+				auditID, idErr := ulid.New(ulid.Now(), rand.Reader)
+				if idErr != nil {
+					s.logger.Warn("failed to generate audit record ID", "error", idErr)
+					return result, err
+				}
 				tc := &agent.ToolCallRecord{
-					ID:         ulid.MustNew(ulid.Now(), rand.Reader).String(),
+					ID:         auditID.String(),
 					ToolName:   req.Params.Name,
 					Arguments:  argsJSON,
 					Result:     resultText,

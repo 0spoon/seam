@@ -43,9 +43,12 @@ type OllamaClient struct {
 // NewOllamaClient creates a new Ollama API client.
 func NewOllamaClient(baseURL string, embeddingTimeout, chatTimeout time.Duration) *OllamaClient {
 	return &OllamaClient{
-		baseURL:    baseURL,
+		baseURL: baseURL,
 		httpClient: &http.Client{
-			// No global timeout; we use per-request context timeouts.
+			// Fallback timeout prevents indefinite hangs if a caller
+			// forgets to set a context deadline. Per-request context
+			// timeouts override this for normal operations.
+			Timeout: 10 * time.Minute,
 		},
 		embeddingTimeout: embeddingTimeout,
 		chatTimeout:      chatTimeout,

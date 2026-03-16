@@ -57,6 +57,14 @@ func Reconcile(ctx context.Context, userID string, notesDir string, handler File
 			return walkErr
 		}
 		if d.IsDir() {
+			// Skip symlinked directories to prevent indexing outside notes dir.
+			if d.Type()&os.ModeSymlink != 0 {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// Skip symlinked files.
+		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 		if !strings.HasSuffix(d.Name(), ".md") {

@@ -252,7 +252,8 @@ func (s *Service) GetTwoHopBacklinks(ctx context.Context, userID, noteID string)
 		       SELECT source_note_id FROM links
 		       WHERE target_note_id = ? AND target_note_id IS NOT NULL
 		   )
-		 ORDER BY n.title`,
+		 ORDER BY n.title
+		 LIMIT 500`,
 		noteID, noteID, noteID,
 	)
 	if err != nil {

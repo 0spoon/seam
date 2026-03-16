@@ -280,17 +280,17 @@ func (s *SemanticSearcher) batchGetNoteBodies(ctx context.Context, userID string
 
 // batchGetNoteTimestamps loads updated_at timestamps for all given note IDs
 // in a single query, returning a map of note_id -> updated_at.
-func (s *SemanticSearcher) batchGetNoteTimestamps(ctx context.Context, userID string, noteIDs []string) map[string]time.Time {
+func (s *SemanticSearcher) batchGetNoteTimestamps(ctx context.Context, userID string, noteIDs []string) (map[string]time.Time, error) {
 	result := make(map[string]time.Time, len(noteIDs))
 	if len(noteIDs) == 0 {
-		return result
+		return result, nil
 	}
 
 	db, err := s.dbManager.Open(ctx, userID)
 	if err != nil {
 		s.logger.Warn("search.SemanticSearcher.batchGetNoteTimestamps: open db failed",
 			"user_id", userID, "error", err)
-		return result
+		return result, fmt.Errorf("search.SemanticSearcher.batchGetNoteTimestamps: open db: %w", err)
 	}
 
 	placeholders := make([]string, len(noteIDs))
@@ -309,7 +309,7 @@ func (s *SemanticSearcher) batchGetNoteTimestamps(ctx context.Context, userID st
 	if err != nil {
 		s.logger.Warn("search.SemanticSearcher.batchGetNoteTimestamps: query failed",
 			"error", err)
-		return result
+		return result, fmt.Errorf("search.SemanticSearcher.batchGetNoteTimestamps: query: %w", err)
 	}
 	defer rows.Close()
 
@@ -327,9 +327,10 @@ func (s *SemanticSearcher) batchGetNoteTimestamps(ctx context.Context, userID st
 	if err := rows.Err(); err != nil {
 		s.logger.Warn("search.SemanticSearcher.batchGetNoteTimestamps: rows error",
 			"error", err)
+		return result, fmt.Errorf("search.SemanticSearcher.batchGetNoteTimestamps: rows: %w", err)
 	}
 
-	return result
+	return result, nil
 }
 
 // SearchWithRecency performs semantic search with recency-weighted scoring.
@@ -386,7 +387,12 @@ func (s *SemanticSearcher) SearchWithRecency(ctx context.Context, userID, query 
 		noteIDs = append(noteIDs, noteID)
 	}
 	bodyMap := s.batchGetNoteBodies(ctx, userID, noteIDs)
-	tsMap := s.batchGetNoteTimestamps(ctx, userID, noteIDs)
+	tsMap, err := s.batchGetNoteTimestamps(ctx, userID, noteIDs)
+	if err != nil {
+		s.logger.Warn("search.SemanticSearcher.SearchWithRecency: failed to get timestamps, skipping recency adjustment",
+			"error", err)
+		tsMap = nil // Ensure no partial results are used for recency adjustment.
+	}
 
 	var results []SemanticResult
 	for _, br := range seen {
@@ -398,12 +404,12 @@ func (s *SemanticSearcher) SearchWithRecency(ctx context.Context, userID, query 
 			score = 1
 		}
 
-		// Apply recency adjustment: score * (1 + recencyBias * weight), clamped to [0,1].
+		// Additive blend: mix similarity score with recency to preserve
+		// relative ordering. At max recencyBias (1.0), up to 30% of the
+		// final score comes from recency.
 		if updatedAt, ok := tsMap[br.noteID]; ok {
-			score = score * (1 + recencyBias*recencyWeight(updatedAt))
-			if score > 1 {
-				score = 1
-			}
+			recency := recencyWeight(updatedAt)
+			score = score*(1-recencyBias*0.3) + recency*recencyBias*0.3
 		}
 
 		snippet := extractSnippet(bodyMap[br.noteID], query, 200)
@@ -486,7 +492,12 @@ func (s *SemanticSearcher) SearchScopedWithRecency(ctx context.Context, userID, 
 		noteIDs = append(noteIDs, noteID)
 	}
 	bodyMap := s.batchGetNoteBodies(ctx, userID, noteIDs)
-	tsMap := s.batchGetNoteTimestamps(ctx, userID, noteIDs)
+	tsMap, err := s.batchGetNoteTimestamps(ctx, userID, noteIDs)
+	if err != nil {
+		s.logger.Warn("search.SemanticSearcher.SearchScopedWithRecency: failed to get timestamps, skipping recency adjustment",
+			"error", err)
+		tsMap = nil // Ensure no partial results are used for recency adjustment.
+	}
 
 	var results []SemanticResult
 	for _, br := range seen {
@@ -498,12 +509,12 @@ func (s *SemanticSearcher) SearchScopedWithRecency(ctx context.Context, userID, 
 			score = 1
 		}
 
-		// Apply recency adjustment: score * (1 + recencyBias * weight), clamped to [0,1].
+		// Additive blend: mix similarity score with recency to preserve
+		// relative ordering. At max recencyBias (1.0), up to 30% of the
+		// final score comes from recency.
 		if updatedAt, ok := tsMap[br.noteID]; ok {
-			score = score * (1 + recencyBias*recencyWeight(updatedAt))
-			if score > 1 {
-				score = 1
-			}
+			recency := recencyWeight(updatedAt)
+			score = score*(1-recencyBias*0.3) + recency*recencyBias*0.3
 		}
 
 		snippet := extractSnippet(bodyMap[br.noteID], query, 200)

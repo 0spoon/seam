@@ -32,15 +32,15 @@ import (
 func setupAgentServer(t *testing.T) *testClient {
 	t.Helper()
 	dataDir := testutil.TestDataDir(t)
-	serverDB := testutil.TestDB(t)
+	db := testutil.TestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	userDBMgr := userdb.NewSQLManager(dataDir, 10*time.Minute, logger)
+	userDBMgr := userdb.NewSQLManager(dataDir, logger)
 	t.Cleanup(func() { userDBMgr.CloseAll() })
 
 	// Auth stack.
 	jwtMgr := auth.NewJWTManager("test-secret-key-for-agent-e2e", 15*time.Minute)
-	authStore := auth.NewSQLStore(serverDB)
+	authStore := auth.NewSQLStore(db)
 	authSvc := auth.NewService(authStore, jwtMgr, userDBMgr, 24*time.Hour, bcrypt.MinCost, logger)
 	authHandler := auth.NewHandler(authSvc, logger)
 
@@ -124,7 +124,7 @@ func setupAgentService(t *testing.T) (*agent.Service, userdb.Manager) {
 	dataDir := testutil.TestDataDir(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	userDBMgr := userdb.NewSQLManager(dataDir, 10*time.Minute, logger)
+	userDBMgr := userdb.NewSQLManager(dataDir, logger)
 	t.Cleanup(func() { userDBMgr.CloseAll() })
 
 	projectStore := project.NewStore()
@@ -404,7 +404,7 @@ func TestE2E_ContextGather_WithRealFTS(t *testing.T) {
 	require.NoError(t, err)
 
 	// ContextGather should find relevant notes via FTS.
-	hits, err := svc.ContextGather(ctx, userID, "middleware", 3000)
+	hits, err := svc.ContextGather(ctx, userID, "middleware", "all", 3000, 0.0)
 	require.NoError(t, err)
 	require.NotEmpty(t, hits, "should find notes matching the query")
 
@@ -436,7 +436,7 @@ func TestE2E_ContextGather_BudgetTruncation(t *testing.T) {
 	}
 
 	// Search with a small budget.
-	hits, err := svc.ContextGather(ctx, userID, "middleware patterns authentication", 200)
+	hits, err := svc.ContextGather(ctx, userID, "middleware patterns authentication", "all", 200, 0.0)
 	require.NoError(t, err)
 
 	// Verify total output is within budget.
@@ -497,44 +497,33 @@ func TestE2E_MixedSessionAndMemory(t *testing.T) {
 	require.Len(t, items, 2)
 }
 
-// TestE2E_UserIsolation verifies user data isolation.
-func TestE2E_UserIsolation(t *testing.T) {
+// TestE2E_SingleDB_SharedAccess verifies that all userID values share the
+// same database in the single-user system.
+func TestE2E_SingleDB_SharedAccess(t *testing.T) {
 	svc, userDBMgr := setupAgentService(t)
 	ctx := context.Background()
 	user1 := "iso-user-001"
 	user2 := "iso-user-002"
 	_, err := userDBMgr.Open(ctx, user1)
 	require.NoError(t, err)
-	_, err = userDBMgr.Open(ctx, user2)
+
+	// Write knowledge via user1.
+	_, err = svc.MemoryWrite(ctx, user1, "secrets", "api-key", "sk-shared-secret-key")
 	require.NoError(t, err)
 
-	// User1 writes knowledge.
-	_, err = svc.MemoryWrite(ctx, user1, "secrets", "api-key", "sk-user1-secret-key")
+	// Start a session via user1.
+	_, err = svc.SessionStart(ctx, user1, "shared-session", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 
-	// User1 starts a session.
-	_, err = svc.SessionStart(ctx, user1, "user1-session", agent.DefaultMaxContextChars)
-	require.NoError(t, err)
-
-	// User2 cannot read user1's knowledge.
-	_, _, err = svc.MemoryRead(ctx, user2, "secrets", "api-key")
-	require.Error(t, err)
-	require.ErrorIs(t, err, agent.ErrNotFound)
-
-	// User2 cannot see user1's sessions.
-	sessions, err := svc.SessionList(ctx, user2, "", 20)
-	require.NoError(t, err)
-	require.Empty(t, sessions)
-
-	// User2 creates their own.
-	_, err = svc.MemoryWrite(ctx, user2, "secrets", "api-key", "sk-user2-different-key")
-	require.NoError(t, err)
-
-	// User2 reads their own -- different content.
+	// user2 can read user1's knowledge (single DB).
 	_, body, err := svc.MemoryRead(ctx, user2, "secrets", "api-key")
 	require.NoError(t, err)
-	require.Contains(t, body, "user2-different-key")
-	require.NotContains(t, body, "user1-secret-key")
+	require.Contains(t, body, "sk-shared-secret-key")
+
+	// user2 can see user1's sessions (single DB).
+	sessions, err := svc.SessionList(ctx, user2, "", 20)
+	require.NoError(t, err)
+	require.NotEmpty(t, sessions)
 }
 
 // TestE2E_MCPEndpoint_Accessible verifies the MCP endpoint is reachable.

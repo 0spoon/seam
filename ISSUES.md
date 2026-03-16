@@ -1908,4 +1908,116 @@ index via `globalIndexMap.get(item.id)`, which is stable under concurrent render
 | Third full scan | 17 | 17 | 0 |
 | LLM provider review | 10 | 10 | 0 |
 | Fourth full scan | 38 | 38 | 0 |
-| **All** | **171** | **171** | **0** |
+| Migration flattening + single-DB | 6 | 6 | 0 |
+| **All** | **177** | **177** | **0** |
+
+---
+
+## Migration Flattening + Single-DB Consolidation (2026-03-15)
+
+Two-phase change:
+1. **Migration flattening**: Merged 5 user migrations + 1 server migration into single
+   `001_initial.sql`. Renamed `users` table to `owner`, `user_id` to `owner_id`.
+   Added `api_keys` table. Eliminated `server.db`.
+2. **Single-DB consolidation**: Rewrote `userdb.Manager` to use a single `seam.db` with
+   flat data paths (`{data_dir}/notes/` instead of `{data_dir}/users/{id}/notes/`).
+   Both auth and domain data now live in the same database file.
+
+All tests pass: `make build && make test && make test-integration && make test-web`.
+
+### Issues Found -- All Fixed
+
+#### MIG-1. `.gitignore` ignores `data/server.db` instead of `data/seam.db` -- FIXED
+
+**Severity:** MEDIUM
+**Status:** FIXED (2026-03-15)
+**File:** `.gitignore:13`
+**Fix:** Added `data/seam.db` entry. Kept `data/server.db` for safety.
+
+---
+
+#### MIG-2. Integration test variable names still say `serverDB` -- FIXED
+
+**Severity:** LOW
+**Status:** FIXED (2026-03-15)
+**Files:** `internal/integration/e2e_test.go`, `agent_e2e_test.go`, `performance_test.go`
+**Fix:** Renamed `serverDB` to `db` in all three integration test files.
+
+---
+
+#### MIG-3. `agent_e2e_test.go` `ContextGather` signature mismatch -- FIXED
+
+**Severity:** HIGH (pre-existing compile error)
+**Status:** FIXED (2026-03-15)
+**File:** `internal/integration/agent_e2e_test.go:407,439`
+**Fix:** Added missing `scope` and `recencyBias` arguments to both calls.
+
+---
+
+#### MIG-4. Stale documentation references to old multi-user architecture -- FIXED
+
+**Severity:** MEDIUM
+**Status:** FIXED (2026-03-15)
+**Files:** `AGENTS.md` (project overview, database section, test helpers, key files table)
+**Fix:** Updated to reflect single-user architecture, single `seam.db`, `TestDB(t)`,
+and `migrations/001_initial.sql`.
+
+---
+
+#### MIG-5. Redundant schema in both database files -- FIXED
+
+**Severity:** LOW
+**Status:** FIXED (2026-03-15)
+**Fix:** Eliminated the dual-DB architecture entirely. `userdb.SQLManager` now accepts
+a pre-opened `*sql.DB` via `NewSQLManagerWithDB()`. The server opens one DB and shares
+the handle between `auth.NewSQLStore` and `userdb.NewSQLManagerWithDB`. No more redundant
+tables.
+
+---
+
+#### MIG-6. `seam-server.yaml.example` has stale `userdb` config section -- FIXED
+
+**Severity:** LOW
+**Status:** FIXED (2026-03-15)
+**File:** `seam-server.yaml.example:76-78`
+**Fix:** Updated comment to "unused in single-user mode (kept for compatibility)".
+
+---
+
+### Single-DB Consolidation: Key Changes
+
+| File | Change |
+|------|--------|
+| `internal/userdb/manager.go` | Rewrote: `Open()` ignores userID, returns single DB. `UserNotesDir()` returns `{dataDir}/notes/`. `ListUsers()` returns `["default"]`. Added `NewSQLManagerWithDB()`. Removed per-user paths, caching, eviction, `validate.UserID` dependency. |
+| `internal/userdb/manager_test.go` | Rewrote: Tests verify single-DB behavior (same handle for all userIDs, flat paths). |
+| `cmd/seamd/main.go` | Opens one DB via `auth.OpenDB()`, passes to `userdb.NewSQLManagerWithDB()` and `auth.NewSQLStore()`. Removed separate DB handles. |
+| `cmd/seed/main.go` | Uses `userdb.NewSQLManager()` which lazily opens `seam.db`. Removed separate `auth.OpenDB()` call. |
+| `internal/agent/service_test.go` | Replaced `TestService_MultipleUsers_Isolation` with `TestService_SingleDB_SharedData`. |
+| `internal/integration/agent_e2e_test.go` | Replaced `TestE2E_UserIsolation` with `TestE2E_SingleDB_SharedAccess`. Fixed `ContextGather` calls. |
+| 4 test files | Removed unused `"time"` import after `NewSQLManager` signature change. |
+| 12 test files | Updated `NewSQLManager` calls (removed eviction timeout parameter). |
+
+### Summary: Migration Flattening + Single-DB
+
+| Severity | Count | Fixed | Status |
+|----------|-------|-------|--------|
+| High | 1 | 1 | All resolved |
+| Medium | 2 | 2 | All resolved |
+| Low | 3 | 3 | All resolved |
+| **Total** | **6** | **6** | **All resolved** |
+
+### Updated Grand Total
+
+| Category | Total | Resolved | Open |
+|----------|-------|----------|------|
+| Original audit | 27 | 27 | 0 |
+| Post-fix review | 7 | 7 | 0 |
+| Test issues | 4 | 4 | 0 |
+| Pre-existing | 16 | 16 | 0 |
+| First full scan | 13 | 13 | 0 |
+| Second full scan | 39 | 39 | 0 |
+| Third full scan | 17 | 17 | 0 |
+| LLM provider review | 10 | 10 | 0 |
+| Fourth full scan | 38 | 38 | 0 |
+| Migration flattening + single-DB | 6 | 6 | 0 |
+| **All** | **177** | **177** | **0** |

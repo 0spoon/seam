@@ -99,33 +99,28 @@ func run() error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	// Open seam.db (owner account, refresh tokens, and auth data).
+	// Open seam.db -- single database for everything (owner, notes, projects, etc.).
 	seamDBPath := filepath.Join(cfg.DataDir, "seam.db")
 	seamDB, err := auth.OpenDB(seamDBPath)
 	if err != nil {
 		return fmt.Errorf("open seam db: %w", err)
 	}
-	defer seamDB.Close()
 
-	// Create per-user database manager.
-	userDBMgr := userdb.NewSQLManager(
-		cfg.DataDir,
-		cfg.UserDB.EvictionTimeout.Duration,
-		logger,
-	)
+	// Create database manager backed by the same DB handle.
+	userDBMgr := userdb.NewSQLManagerWithDB(seamDB, cfg.DataDir, logger)
 	// NOTE: userDBMgr.CloseAll is deferred here but watcher.Close and
 	// aiQueue shutdown are deferred AFTER this (below), so in LIFO order
-	// the watcher and AI queue stop before the DBs are closed.
+	// the watcher and AI queue stop before the DB is closed.
 	defer userDBMgr.CloseAll()
 
 	// Set up context with signal handling for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Start userdb eviction loop.
+	// Start manager run loop.
 	go userDBMgr.Run(ctx)
 
-	// Create auth components.
+	// Create auth components (same DB handle).
 	authStore := auth.NewSQLStore(seamDB)
 	jwtMgr := auth.NewJWTManager(cfg.JWTSecret, cfg.Auth.AccessTokenTTL.Duration)
 	authSvc := auth.NewService(
@@ -770,9 +765,8 @@ func run() error {
 	// 4. Wait for AI queue workers to finish before closing databases.
 	<-aiQueueDone
 
-	// 5. Stop file watcher (deferred w.Close() handles this -- LIFO before DBs).
-	// 6. Close all user databases (deferred userDBMgr.CloseAll() handles this).
-	// 7. Close seam database (deferred seamDB.Close() handles this).
+	// 5. Stop file watcher (deferred w.Close() handles this -- LIFO before DB).
+	// 6. Close database (deferred userDBMgr.CloseAll() handles this).
 
 	logger.Info("shutdown complete")
 	return nil

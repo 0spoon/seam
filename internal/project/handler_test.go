@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
@@ -23,7 +22,7 @@ const handlerTestUserID = "01HTEST000000000000000099"
 func newTestHandler(t *testing.T) *project.Handler {
 	t.Helper()
 	dataDir := t.TempDir()
-	mgr := userdb.NewSQLManager(dataDir, 30*time.Minute, slog.Default())
+	mgr := userdb.NewSQLManager(dataDir, slog.Default())
 	t.Cleanup(func() { mgr.CloseAll() })
 	store := project.NewStore()
 	svc := project.NewService(store, mgr, slog.Default())

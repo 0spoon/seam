@@ -32,14 +32,14 @@ import (
 func setupPerfServer(t *testing.T) (*httptest.Server, *auth.JWTManager, userdb.Manager) {
 	t.Helper()
 	dataDir := testutil.TestDataDir(t)
-	serverDB := testutil.TestDB(t)
+	db := testutil.TestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	userDBMgr := userdb.NewSQLManager(dataDir, 10*time.Minute, logger)
+	userDBMgr := userdb.NewSQLManager(dataDir, logger)
 	t.Cleanup(func() { userDBMgr.CloseAll() })
 
 	jwtMgr := auth.NewJWTManager("perf-test-secret", 15*time.Minute)
-	authStore := auth.NewSQLStore(serverDB)
+	authStore := auth.NewSQLStore(db)
 	authSvc := auth.NewService(authStore, jwtMgr, userDBMgr, 24*time.Hour, bcrypt.MinCost, logger)
 	authHandler := auth.NewHandler(authSvc, logger)
 

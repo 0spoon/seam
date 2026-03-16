@@ -1,5 +1,4 @@
-// Package userdb manages per-user SQLite database lifecycle: open, cache,
-// migrate, and evict idle databases.
+// Package userdb manages the application SQLite database and data directory.
 package userdb
 
 import (
@@ -9,187 +8,157 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
-	"time"
 
-	"github.com/katata/seam/internal/validate"
 	"github.com/katata/seam/migrations"
 	_ "modernc.org/sqlite"
 )
 
-// Manager defines the interface for managing per-user SQLite databases.
+// Manager defines the interface for managing the application database.
+// The userID parameter is accepted for interface compatibility but is
+// ignored in the single-user implementation -- all calls return the
+// same database and data paths.
 type Manager interface {
-	// Open returns a *sql.DB for the given user, creating the DB
-	// and running migrations if it does not exist. Caches open handles.
+	// Open returns the application *sql.DB. The userID parameter is
+	// ignored (single-user system).
 	Open(ctx context.Context, userID string) (*sql.DB, error)
 
-	// Close closes the DB for a specific user.
+	// Close is a no-op in the single-user implementation.
 	Close(userID string) error
 
-	// CloseAll closes all open databases (graceful shutdown).
+	// CloseAll closes the database (graceful shutdown).
 	CloseAll() error
 
-	// UserNotesDir returns the absolute path to a user's notes/ directory.
+	// UserNotesDir returns the absolute path to the notes/ directory.
+	// The userID parameter is ignored.
 	UserNotesDir(userID string) string
 
-	// UserDataDir returns the absolute path to a user's data directory.
+	// UserDataDir returns the absolute path to the data directory.
+	// The userID parameter is ignored.
 	UserDataDir(userID string) string
 
-	// ListUsers returns the IDs of all users who have a data directory.
+	// ListUsers returns a single-element slice for the single-user system.
 	ListUsers(ctx context.Context) ([]string, error)
 
-	// EnsureUserDirs creates the directory tree for a user if it does not exist.
+	// EnsureUserDirs creates the notes directory tree if it does not exist.
+	// The userID parameter is ignored.
 	EnsureUserDirs(userID string) error
 }
 
-type dbEntry struct {
-	db       *sql.DB
-	lastUsed time.Time
-}
+// DefaultUserID is the constant user ID used in the single-user system.
+// Domain services receive this value from JWT middleware via reqctx.
+const DefaultUserID = "default"
 
-// SQLManager implements Manager using the filesystem and SQLite.
+// SQLManager implements Manager for a single SQLite database with a
+// flat data directory layout.
 type SQLManager struct {
-	dataDir         string
-	evictionTimeout time.Duration
-	logger          *slog.Logger
+	dataDir string
+	logger  *slog.Logger
 
 	mu      sync.Mutex
-	dbs     map[string]*dbEntry
+	db      *sql.DB
 	closeCh chan struct{}
 }
 
-// NewSQLManager creates a new SQLManager.
-// Call Run() in a goroutine to block until shutdown.
-func NewSQLManager(dataDir string, evictionTimeout time.Duration, logger *slog.Logger) *SQLManager {
+// NewSQLManagerWithDB creates a Manager backed by a pre-opened database.
+// The dataDir is the root data directory (notes live at dataDir/notes/).
+func NewSQLManagerWithDB(db *sql.DB, dataDir string, logger *slog.Logger) *SQLManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &SQLManager{
-		dataDir:         dataDir,
-		evictionTimeout: evictionTimeout,
-		logger:          logger,
-		dbs:             make(map[string]*dbEntry),
-		closeCh:         make(chan struct{}),
+		dataDir: dataDir,
+		logger:  logger,
+		db:      db,
+		closeCh: make(chan struct{}),
 	}
 }
 
-// Open returns a cached or newly created *sql.DB for the given user.
-// A-2: Validates userID to prevent path traversal via crafted IDs.
-func (m *SQLManager) Open(ctx context.Context, userID string) (*sql.DB, error) {
-	if err := validate.UserID(userID); err != nil {
-		return nil, fmt.Errorf("userdb.Manager.Open: %w", err)
+// NewSQLManager creates a Manager that opens the database at dataDir/seam.db.
+// This constructor is used by tests and the seed command. For the server,
+// prefer NewSQLManagerWithDB to share the DB handle with the auth store.
+func NewSQLManager(dataDir string, logger *slog.Logger) *SQLManager {
+	if logger == nil {
+		logger = slog.Default()
 	}
+	return &SQLManager{
+		dataDir: dataDir,
+		logger:  logger,
+		closeCh: make(chan struct{}),
+	}
+}
 
+// Open returns the single application database. The userID parameter is
+// ignored. If the database was not provided via NewSQLManagerWithDB, it
+// is lazily opened on the first call.
+func (m *SQLManager) Open(ctx context.Context, userID string) (*sql.DB, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if entry, ok := m.dbs[userID]; ok {
-		entry.lastUsed = time.Now()
-		return entry.db, nil
+	if m.db != nil {
+		return m.db, nil
 	}
 
-	db, err := m.openDB(userID)
+	db, err := m.openDB()
 	if err != nil {
 		return nil, err
 	}
-
-	m.dbs[userID] = &dbEntry{db: db, lastUsed: time.Now()}
+	m.db = db
 	return db, nil
 }
 
-// Close closes the database for a specific user and removes it from the cache.
+// Close is a no-op in the single-user implementation. The database is
+// closed via CloseAll at shutdown.
 func (m *SQLManager) Close(userID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.dbs[userID]
-	if !ok {
-		return nil
-	}
-	delete(m.dbs, userID)
-	return entry.db.Close()
+	return nil
 }
 
-// CloseAll closes all cached databases.
+// CloseAll closes the database handle.
 func (m *SQLManager) CloseAll() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Signal eviction loop to stop (safe under m.mu which is held).
 	select {
 	case <-m.closeCh:
 		// Already closed.
 	default:
 		close(m.closeCh)
 	}
-	// Note: the select-default pattern is safe here because m.mu is held,
-	// preventing concurrent CloseAll() calls from reaching the close().
 
-	var firstErr error
-	for userID, entry := range m.dbs {
-		if err := entry.db.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		delete(m.dbs, userID)
+	if m.db != nil {
+		err := m.db.Close()
+		m.db = nil
+		return err
 	}
-	return firstErr
+	return nil
 }
 
-// UserNotesDir returns the absolute path to a user's notes/ directory.
-// Callers must validate userID before calling this method, or use
-// ValidatedUserNotesDir which returns an error.
+// UserNotesDir returns the absolute path to the notes/ directory.
+// The userID parameter is ignored.
 func (m *SQLManager) UserNotesDir(userID string) string {
-	return filepath.Join(m.dataDir, "users", userID, "notes")
+	return filepath.Join(m.dataDir, "notes")
 }
 
-// UserDataDir returns the absolute path to a user's data directory.
-// Callers must validate userID before calling this method, or use
-// ValidatedUserDataDir which returns an error.
+// UserDataDir returns the absolute path to the data directory.
+// The userID parameter is ignored.
 func (m *SQLManager) UserDataDir(userID string) string {
-	return filepath.Join(m.dataDir, "users", userID)
+	return m.dataDir
 }
 
-// ListUsers returns the IDs of all users who have a data directory.
+// ListUsers returns a single-element slice containing DefaultUserID.
+// This satisfies callers that iterate over users (e.g., AI queue,
+// watcher reconciliation).
 func (m *SQLManager) ListUsers(ctx context.Context) ([]string, error) {
-	usersDir := filepath.Join(m.dataDir, "users")
-	entries, err := os.ReadDir(usersDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("userdb.Manager.ListUsers: %w", err)
-	}
-
-	var users []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		// Validate that directory names are reasonable user IDs:
-		// not empty, no path traversal characters.
-		if name == "" || name == "." || name == ".." ||
-			strings.ContainsAny(name, "/\\\x00") {
-			continue
-		}
-		users = append(users, name)
-	}
-	return users, nil
+	return []string{DefaultUserID}, nil
 }
 
-// EnsureUserDirs creates the directory tree for a user if it does not exist.
-// A-2: Validates userID to prevent path traversal via crafted IDs.
+// EnsureUserDirs creates the notes directory tree if it does not exist.
+// The userID parameter is ignored.
 func (m *SQLManager) EnsureUserDirs(userID string) error {
-	if err := validate.UserID(userID); err != nil {
-		return fmt.Errorf("userdb.Manager.EnsureUserDirs: %w", err)
-	}
-
 	notesDir := m.UserNotesDir(userID)
 	if err := os.MkdirAll(notesDir, 0o755); err != nil {
 		return fmt.Errorf("userdb.Manager.EnsureUserDirs: %w", err)
 	}
-	// C-3: Also create notes/inbox/ subdirectory per TEST_PLAN.md spec.
 	inboxDir := filepath.Join(notesDir, "inbox")
 	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
 		return fmt.Errorf("userdb.Manager.EnsureUserDirs: create inbox: %w", err)
@@ -198,9 +167,6 @@ func (m *SQLManager) EnsureUserDirs(userID string) error {
 }
 
 // Run blocks until the context is cancelled or CloseAll is called.
-// Previously this ran an eviction loop, but eviction was removed to avoid
-// closing a *sql.DB handle while other goroutines still hold references.
-// Databases are now only closed on shutdown via CloseAll.
 func (m *SQLManager) Run(ctx context.Context) {
 	select {
 	case <-ctx.Done():
@@ -208,13 +174,13 @@ func (m *SQLManager) Run(ctx context.Context) {
 	}
 }
 
-// openDB creates and configures a new SQLite database for a user.
-func (m *SQLManager) openDB(userID string) (*sql.DB, error) {
-	if err := m.EnsureUserDirs(userID); err != nil {
+// openDB creates and configures a new SQLite database.
+func (m *SQLManager) openDB() (*sql.DB, error) {
+	if err := m.EnsureUserDirs(""); err != nil {
 		return nil, fmt.Errorf("userdb.Manager.Open: %w", err)
 	}
 
-	dbPath := filepath.Join(m.UserDataDir(userID), "seam.db")
+	dbPath := filepath.Join(m.dataDir, "seam.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("userdb.Manager.Open: %w", err)
@@ -234,9 +200,6 @@ func (m *SQLManager) openDB(userID string) (*sql.DB, error) {
 		return nil, fmt.Errorf("userdb.Manager.Open: migrations: %w", err)
 	}
 
-	// C-1: Limit open connections to 1 for SQLite. SQLite only supports a
-	// single writer at a time; allowing the Go connection pool to open
-	// multiple connections can lead to SQLITE_BUSY errors under contention.
 	db.SetMaxOpenConns(1)
 
 	return db, nil

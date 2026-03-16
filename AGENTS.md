@@ -4,7 +4,7 @@ Instructions for AI coding agents operating in this repository.
 
 ## Project overview
 
-Seam is a local-first, AI-powered knowledge system. Go backend (REST + WebSocket), Bubble Tea TUI, React web frontend. Multi-user, single machine. Notes are plain `.md` files on disk. AI via Ollama (local). See README.md for architecture and feature overview.
+Seam is a local-first, AI-powered knowledge system. Go backend (REST + WebSocket), Bubble Tea TUI, React web frontend. Single-user, single machine. Notes are plain `.md` files on disk. AI via Ollama (local). See README.md for architecture and feature overview.
 
 ## Build and run
 
@@ -113,9 +113,8 @@ No package imports `internal/server`. The server wires dependencies at startup.
 ### Database
 
 - SQLite with WAL mode and foreign keys ON. Always.
-- Per-user `seam.db` for notes/projects/links/FTS/AI tasks.
-- Shared `server.db` for user accounts and refresh tokens.
-- Migrations: embedded SQL files via `go:embed`. Run on DB open. Must be idempotent.
+- Single `seam.db` at `{data_dir}/seam.db` for everything (owner account, notes, projects, links, FTS, AI tasks, settings, etc.).
+- Migrations: single embedded SQL file (`migrations/001_initial.sql`) via `go:embed`. Run on DB open. Must be idempotent.
 - FTS5 uses external-content mode (`content='notes'`) -- body text is stored in `notes.body` (denormalized from `.md` files) so that SQLite triggers can automatically sync the FTS index on insert, update, and delete. The `.md` file on disk is always source of truth; `notes.body` is a copy for FTS.
 - Use `content_hash` (SHA-256 of the full file, frontmatter + body) to skip re-indexing unchanged files.
 
@@ -134,12 +133,12 @@ No package imports `internal/server`. The server wires dependencies at startup.
 - External services (Ollama, ChromaDB) mocked with `httptest.NewServer()`. Never call real services in unit tests.
 - Each test is independent. No shared mutable state between test functions.
 - No `time.Sleep` for synchronization. Use channels or `sync.WaitGroup`.
-- Test helpers in `internal/testutil/`: `TestServerDB(t)`, `TestUserDB(t)`, `TestDataDir(t)`.
+- Test helpers in `internal/testutil/`: `TestDB(t)`, `TestDataDir(t)`.
 
 ### Security invariants
 
 - Path traversal: reject any file path containing `..`, absolute paths, or null bytes.
-- User isolation: resolve user ID from JWT in middleware, pass to service layer. Never accept user ID from request body/params.
+- Owner identity: resolve user ID from JWT in middleware, pass to service layer. Never accept user ID from request body/params.
 - Input validation: sanitize note titles, project names, tags for filesystem safety (no `/`, `\`, `..`, `\x00`).
 - SSRF: URL capture must reject private IPs, localhost, `file://` protocol.
 
@@ -172,5 +171,4 @@ No package imports `internal/server`. The server wires dependencies at startup.
 |---|---|
 | `README.md` | Architecture, features, API reference, getting started |
 | `seam-server.yaml.example` | Server configuration template |
-| `migrations/server/` | server.db SQL migrations |
-| `migrations/user/` | per-user seam.db SQL migrations |
+| `migrations/001_initial.sql` | Complete database schema (single flattened migration) |

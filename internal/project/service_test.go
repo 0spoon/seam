@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -19,7 +18,7 @@ const testUserID = "01HTEST000000000000000001"
 func newTestService(t *testing.T) (*project.Service, userdb.Manager) {
 	t.Helper()
 	dataDir := t.TempDir()
-	mgr := userdb.NewSQLManager(dataDir, 30*time.Minute, slog.Default())
+	mgr := userdb.NewSQLManager(dataDir, slog.Default())
 	t.Cleanup(func() { mgr.CloseAll() })
 	store := project.NewStore()
 	svc := project.NewService(store, mgr, slog.Default())

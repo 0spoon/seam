@@ -73,9 +73,9 @@ ai:
   embedding_timeout: "60s"     # per-embedding call timeout (increase for large models)
   chat_timeout: "5m"           # per-chat call timeout (local models can take several minutes)
 
-# Per-user database manager settings.
+# Database manager settings.
 userdb:
-  eviction_timeout: "30m"     # close idle user DBs after this duration
+  eviction_timeout: "30m"     # unused in single-user mode (kept for compatibility)
 
 # File watcher settings.
 watcher:

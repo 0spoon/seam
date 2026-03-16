@@ -10,6 +10,7 @@ seamd
 # Data / runtime state
 data/users/
 data/chromadb/
+data/seam.db
 data/server.db
 *.db-journal
 *.db-wal

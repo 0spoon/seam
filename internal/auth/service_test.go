@@ -19,7 +19,7 @@ func newTestService(t *testing.T) *auth.Service {
 	store := auth.NewSQLStore(db)
 	jwtMgr := auth.NewJWTManager("test-secret-key", 15*time.Minute)
 	dataDir := testutil.TestDataDir(t)
-	userDBMgr := userdb.NewSQLManager(dataDir, 30*time.Minute, slog.Default())
+	userDBMgr := userdb.NewSQLManager(dataDir, slog.Default())
 	t.Cleanup(func() { userDBMgr.CloseAll() })
 	// Use bcrypt cost 4 for fast tests.
 	return auth.NewService(store, jwtMgr, userDBMgr, 168*time.Hour, 4, slog.Default())

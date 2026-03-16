@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +25,7 @@ func setupTestService(t *testing.T) (*Service, userdb.Manager) {
 
 	dataDir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := userdb.NewSQLManager(dataDir, time.Hour, logger)
+	mgr := userdb.NewSQLManager(dataDir, logger)
 	t.Cleanup(func() { mgr.CloseAll() })
 
 	noteStore := note.NewSQLStore()
@@ -852,28 +851,30 @@ func TestService_MemoryWrite_EmptyContent(t *testing.T) {
 	require.Empty(t, body)
 }
 
-func TestService_MultipleUsers_Isolation(t *testing.T) {
+func TestService_SingleDB_SharedData(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
+	// In single-user mode, any userID value accesses the same database.
 	userA := "user-a-001"
 	userB := "user-b-002"
 
-	// Write knowledge for user A.
+	// Write knowledge via one userID.
 	_, err := svc.MemoryWrite(ctx, userA, "go", "error-handling", "Wrap errors with context")
 	require.NoError(t, err)
 
-	// Verify user A can read it.
+	// Read via same userID.
 	title, body, err := svc.MemoryRead(ctx, userA, "go", "error-handling")
 	require.NoError(t, err)
 	require.Equal(t, KnowledgeNoteTitle("go", "error-handling"), title)
 	require.Contains(t, body, "Wrap errors")
 
-	// User B should not be able to read user A's knowledge.
-	// First ensure user B's agent-memory project exists.
+	// Same data is accessible via a different userID (single DB).
 	_, err = svc.ensureAgentMemoryProject(ctx, userB)
 	require.NoError(t, err)
 
-	_, _, err = svc.MemoryRead(ctx, userB, "go", "error-handling")
-	require.ErrorIs(t, err, ErrNotFound)
+	title2, body2, err := svc.MemoryRead(ctx, userB, "go", "error-handling")
+	require.NoError(t, err)
+	require.Equal(t, title, title2)
+	require.Equal(t, body, body2)
 }

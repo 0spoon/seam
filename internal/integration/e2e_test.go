@@ -65,16 +65,16 @@ func (c *testClient) do(method, path string, body interface{}, out interface{}) 
 func setupServer(t *testing.T) *testClient {
 	t.Helper()
 	dataDir := testutil.TestDataDir(t)
-	serverDB := testutil.TestDB(t)
+	db := testutil.TestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// User DB manager (real filesystem).
-	userDBMgr := userdb.NewSQLManager(dataDir, 10*time.Minute, logger)
+	userDBMgr := userdb.NewSQLManager(dataDir, logger)
 	t.Cleanup(func() { userDBMgr.CloseAll() })
 
 	// Auth stack.
 	jwtMgr := auth.NewJWTManager("test-secret-key-for-integration", 15*time.Minute)
-	authStore := auth.NewSQLStore(serverDB)
+	authStore := auth.NewSQLStore(db)
 	authSvc := auth.NewService(authStore, jwtMgr, userDBMgr, 24*time.Hour, bcrypt.MinCost, logger)
 	authHandler := auth.NewHandler(authSvc, logger)
 

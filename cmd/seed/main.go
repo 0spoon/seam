@@ -63,11 +63,14 @@ func main() {
 	dataDir := "./data"
 	ctx := context.Background()
 
-	seamDB, err := auth.OpenDB(filepath.Join(dataDir, "seam.db"))
+	mgr := userdb.NewSQLManager(dataDir, nil)
+	defer mgr.CloseAll()
+
+	// Open the single database (creates seam.db + notes/ directory).
+	seamDB, err := mgr.Open(ctx, "")
 	if err != nil {
 		log.Fatalf("open seam.db: %v", err)
 	}
-	defer seamDB.Close()
 
 	store := auth.NewSQLStore(seamDB)
 	if _, err := store.GetUserByUsername(ctx, "demo"); err == nil {
@@ -93,14 +96,7 @@ func main() {
 	}
 	fmt.Printf("created user: demo (id=%s)\n", userID)
 
-	mgr := userdb.NewSQLManager(dataDir, 30*time.Minute, nil)
-	defer mgr.CloseAll()
-
-	userDB, err := mgr.Open(ctx, userID)
-	if err != nil {
-		log.Fatalf("open user db: %v", err)
-	}
-	notesDir := mgr.UserNotesDir(userID)
+	notesDir := mgr.UserNotesDir("")
 
 	projects := []projectDef{
 		{Name: "Cortical Decoder", Description: "Motor cortex neural decoder for real-time prosthetic control. ECoG signal processing pipeline and online calibration."},
@@ -134,7 +130,7 @@ func main() {
 		}
 
 		ts := now.Add(-180 * 24 * time.Hour).Add(time.Duration(i) * time.Hour).Format(time.RFC3339)
-		if _, err := userDB.ExecContext(ctx,
+		if _, err := seamDB.ExecContext(ctx,
 			`INSERT INTO projects (id, name, slug, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`,
 			id, p.Name, slug, p.Description, ts, ts,
 		); err != nil {
@@ -145,7 +141,7 @@ func main() {
 
 	allNotes := append(coreNotes(), extraNotes...)
 
-	tx, err := userDB.BeginTx(ctx, nil)
+	tx, err := seamDB.BeginTx(ctx, nil)
 	if err != nil {
 		log.Fatalf("begin tx: %v", err)
 	}

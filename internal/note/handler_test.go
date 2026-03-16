@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
@@ -27,7 +26,7 @@ func setupHandler(t *testing.T) (http.Handler, *Service) {
 
 	dataDir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := userdb.NewSQLManager(dataDir, time.Hour, logger)
+	mgr := userdb.NewSQLManager(dataDir, logger)
 	t.Cleanup(func() { mgr.CloseAll() })
 
 	noteStore := NewSQLStore()
@@ -341,7 +340,7 @@ func TestHandler_Backlinks_NotFound(t *testing.T) {
 func TestHandler_MissingAuth(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	dataDir := t.TempDir()
-	mgr := userdb.NewSQLManager(dataDir, time.Hour, logger)
+	mgr := userdb.NewSQLManager(dataDir, logger)
 	t.Cleanup(func() { mgr.CloseAll() })
 
 	noteStore := NewSQLStore()

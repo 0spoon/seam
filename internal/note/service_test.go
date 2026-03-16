@@ -22,7 +22,7 @@ func setupService(t *testing.T) (*Service, userdb.Manager, string) {
 
 	dataDir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	mgr := userdb.NewSQLManager(dataDir, time.Hour, logger)
+	mgr := userdb.NewSQLManager(dataDir, logger)
 	t.Cleanup(func() { mgr.CloseAll() })
 
 	noteStore := NewSQLStore()

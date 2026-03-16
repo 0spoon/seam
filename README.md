@@ -8,15 +8,16 @@
 <h1 align="center">Seam</h1>
 
 <p align="center">
-  <strong>Your second brain. A local-first, AI-powered knowledge system built on markdown.</strong>
+  <strong>Your second brain, except it actually remembers things.</strong><br/>
+  <em>A local-first, AI-powered knowledge system built on plain markdown.</em>
 </p>
 
 <p align="center">
+  <a href="#ai">AI</a> &middot;
   <a href="#features">Features</a> &middot;
   <a href="#architecture">Architecture</a> &middot;
   <a href="#getting-started">Getting Started</a> &middot;
-  <a href="#development">Development</a> &middot;
-  <a href="#documentation">Documentation</a>
+  <a href="#development">Development</a>
 </p>
 
 <p align="center">
@@ -24,18 +25,66 @@
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5.9">
   <img src="https://img.shields.io/badge/SQLite-FTS5-003B57?logo=sqlite&logoColor=white" alt="SQLite FTS5">
-  <img src="https://img.shields.io/badge/AI-Ollama_(local)-000000?logo=ollama&logoColor=white" alt="Ollama">
+  <img src="https://img.shields.io/badge/AI-Local_First-000000?logo=ollama&logoColor=white" alt="Local AI">
 </p>
 
 ---
 
 <p align="center">
-  <img src="./resources/feature-image.webp" alt="Seam — where things connect" width="100%">
+  <img src="./resources/feature-image.webp" alt="Seam -- where things connect" width="100%">
 </p>
 
-Seam helps you capture, organize, and retrieve everything you know. All your notes live as plain `.md` files on your filesystem. AI runs entirely locally via [Ollama](https://ollama.com) -- no cloud, no API costs, no privacy trade-offs.
+Seam is a knowledge system where your notes are plain `.md` files on disk and AI helps you actually find things again later. It runs locally by default via [Ollama](https://ollama.com) -- no cloud, no API costs, no one reading your journal entries about that weird dream you had. But if you want the horsepower of GPT-4 or Claude, just flip the provider config. Your notes stay local either way.
 
 > **Seam** -- *where things connect.* The seam is the join between two pieces; knowledge gains meaning at the intersections.
+
+---
+
+## AI
+
+This is the part you probably scrolled to. Seam treats AI as a core tool, not a sidebar widget.
+
+### Pick Your Brain (Provider)
+
+Seam supports three LLM providers. Embeddings always run locally on Ollama (your vectors, your machine), but chat completions can come from wherever you want:
+
+| Provider | Config | Good for |
+|---|---|---|
+| **Ollama** (default) | `llm.provider: "ollama"` | Privacy maximalists, people with beefy GPUs, not paying per token |
+| **OpenAI** | `llm.provider: "openai"` | GPT-4o, or any OpenAI-compatible API (Azure, Together, Groq, etc.) |
+| **Anthropic** | `llm.provider: "anthropic"` | Claude. You know why you're here |
+
+Switch providers with one config line. Mix and match -- local embeddings with cloud chat is the sweet spot for most setups.
+
+### What the AI Actually Does
+
+**Ask Seam** -- Chat with your notes. Ask a question, get an answer grounded in things you actually wrote, with citations. It embeds your query, retrieves relevant chunks from ChromaDB, and streams a response with full conversation history. Basically RAG, but it's *your* knowledge base, so the hallucinations are at least *your* hallucinations.
+
+**Semantic Search** -- "What did I write about caching strategies?" works even if you never used the word "caching." Embedding-based similarity search with optional recency bias, because sometimes your best ideas were recent and sometimes they were from 2am six months ago.
+
+**Synthesis** -- "Summarize everything I know about project X." Seam pulls up to 50 relevant notes and generates a cross-note synthesis. Available as a regular response or SSE streaming for that satisfying typewriter effect.
+
+**Auto-Link Suggestions** -- On save, Seam reads your note, finds semantically similar content, and suggests wikilinks you probably should have added. It's like having a librarian who's read everything you've ever written.
+
+**Writing Assist** -- Select text and ask AI to expand a bullet into a paragraph, summarize a wall of text, or extract action items into a checklist. Three modes: `expand`, `summarize`, `extract-actions`.
+
+**Tag & Project Suggestions** -- AI reads your note content and suggests tags from your existing taxonomy and which project it belongs to. No more "I'll organize this later" (you won't).
+
+**Related Notes** -- Every note shows semantically similar notes in a sidebar. The connections you didn't know you had.
+
+**Voice Transcription** -- Record audio, Whisper transcribes locally, AI auto-summarizes. Dump a voice memo, get a structured note. No audio leaves your machine.
+
+### AI Task Queue
+
+All AI work runs through a priority queue with fair round-robin scheduling across users. Interactive requests (chat, writing assist) jump the line. Background tasks (embeddings, auto-linking) wait politely. Tasks survive server restarts. Configurable workers, timeouts, and retries.
+
+### Default Models
+
+| Role | Default Model | Swappable? |
+|---|---|---|
+| Embeddings | `qwen3-embedding:8b` | Yes, any Ollama model |
+| Chat | `qwen3:32b` | Yes, or use OpenAI/Anthropic |
+| Background tasks | `qwen3:32b` | Yes, or use OpenAI/Anthropic |
 
 ---
 
@@ -43,34 +92,107 @@ Seam helps you capture, organize, and retrieve everything you know. All your not
 
 ### Capture
 
-- **Quick capture** -- keyboard shortcut, dump the thought, organize later
-- **URL-to-note** -- paste a URL to auto-fetch page title, og:title, and content as a note with source link
+- **Quick capture** -- keyboard shortcut, dump the thought, organize later (or never, we won't judge)
+- **URL-to-note** -- paste a URL, Seam fetches the title and content, saves it as a note with source link. SSRF-safe, because we're not animals
 - **Voice transcription** -- record audio, Whisper transcribes locally, AI auto-summarizes
-- **Inbox** -- nothing needs to be organized at capture time
-- **Templates** -- project kick-off, meeting notes, research summary, daily log (with `{{variable}}` substitution)
+- **Daily notes** -- auto-created per day, because some of us think in dates
+- **Templates** -- project kick-off, meeting notes, research summary, daily log, with `{{variable}}` substitution
+- **Inbox** -- everything starts here. Structure is optional and can happen later
 
 ### Organize
 
 - **Projects** as first-class entities -- every note belongs to a project or lives in Inbox
-- **`[[Wikilinks]]`** with autocomplete, alias support, and amber-highlighted decoration in the editor
+- **`[[Wikilinks]]`** with autocomplete and alias support
 - **`#Tags`** inline or in YAML frontmatter
-- **AI auto-link suggestions** -- on save, AI reads the note and suggests links to related existing content
-- **AI writing assist** -- expand a bullet into a paragraph, summarize a long doc, extract action items
+- **Bulk actions** -- add tags, move notes between projects, operate on many notes at once
+- **Version history** -- list, view, and restore previous versions of any note
+- **Task extraction** -- checkbox items (`- [ ]`) are automatically extracted and trackable across all your notes
 
 ### Retrieve
 
 - **Full-text search** across all notes (SQLite FTS5 with BM25 ranking)
-- **Semantic search** -- embeddings-based ("what did I write about caching strategies?")
-- **Ask Seam** -- conversational chat grounded in your notes, with citations and streaming responses
-- **AI synthesis** -- "summarize everything I know about project X" across all your notes
+- **Semantic search** -- embeddings-based search with recency bias
+- **Ask Seam** -- conversational RAG chat grounded in your notes, with citations and streaming
+- **AI synthesis** -- cross-note summaries scoped by project or tag
 - **Backlinks panel** -- direct backlinks and two-hop backlinks with intermediate path display
 - **Related notes** -- semantically similar notes, always visible alongside the editor
+- **Review queue** -- knowledge gardening: find orphans, untagged notes, inbox stragglers, and similar note pairs
 
 ### Visualize
 
-- **Knowledge graph** -- interactive node graph (Cytoscape.js), filterable by project/tag/date, click to open note, minimap
-- **Timeline view** -- date-grouped notes with created/modified toggle, date picker for jump-to-date
-- **Orphan detection** -- identifies notes with no inbound or outbound links
+- **Knowledge graph** -- interactive node graph (Cytoscape.js), filterable by project/tag/date, click to open
+- **Timeline view** -- date-grouped notes with created/modified toggle, date picker
+- **Orphan detection** -- notes with no links in or out. The lonely ones
+
+---
+
+## MCP Agent Memory
+
+Seam exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp`, giving AI coding agents persistent long-term memory. Your agents can track sessions, store knowledge, search your notes, create new ones, manage tasks, and register webhooks -- all through standard MCP tools.
+
+### Connecting
+
+Any MCP-compatible client (Claude Code, Cursor, etc.) connects via Streamable HTTP:
+
+```json
+{
+  "mcpServers": {
+    "seam": {
+      "url": "http://localhost:8080/api/mcp",
+      "headers": {
+        "Authorization": "Bearer <jwt_access_token>"
+      }
+    }
+  }
+}
+```
+
+### Available Tools
+
+**Session Management** -- Track agent working sessions with plans, progress, and findings. Sessions form hierarchies (subagents see parent plans and sibling findings).
+
+| Tool | What it does |
+|---|---|
+| `session_start` | Start or resume a named session. Returns a briefing with context |
+| `session_plan_set` | Set the session plan |
+| `session_progress_update` | Log task progress (pending/in_progress/completed/blocked) |
+| `session_context_set` | Set session context notes |
+| `session_end` | End session with findings summary |
+| `session_list` | List sessions by status |
+| `session_metrics` | Aggregate stats (tool calls, durations, errors) |
+
+**Agent Memory** -- Persistent knowledge that survives across sessions. Your agent's long-term memory.
+
+| Tool | What it does |
+|---|---|
+| `memory_write` | Create or update a knowledge note by category and name |
+| `memory_read` | Read a knowledge note |
+| `memory_append` | Append to an existing note |
+| `memory_list` | List notes, optionally by category |
+| `memory_delete` | Delete a knowledge note |
+| `memory_search` | FTS + semantic search scoped to agent memory |
+
+**User Notes** -- Read, search, and create user-facing notes.
+
+| Tool | What it does |
+|---|---|
+| `notes_search` | Full-text search with recency bias |
+| `notes_read` | Read a note by ID |
+| `notes_list` | List notes with project/tag filtering |
+| `notes_create` | Create a user note (auto-tagged `created-by:agent`) |
+
+**Tasks & Webhooks** -- Track tasks from your notes and register HTTP callbacks for events.
+
+| Tool | What it does |
+|---|---|
+| `tasks_list` | List checkbox tasks from notes |
+| `tasks_summary` | Aggregate task counts |
+| `context_gather` | Budgeted search across notes with ranked snippets |
+| `webhook_register` | Register webhook for note/task events |
+| `webhook_list` | List registered webhooks |
+| `webhook_delete` | Delete a webhook |
+
+Rate limited to 60 requests/minute per user.
 
 ---
 
@@ -81,9 +203,10 @@ graph TD
     subgraph Clients
         TUI["TUI (Bubble Tea)"]
         Web["Web (React 19)"]
+        MCP["MCP Agents"]
     end
 
-    TUI & Web <-->|"REST + WebSocket"| Backend
+    TUI & Web & MCP <-->|"REST + WebSocket + MCP"| Backend
 
     subgraph Backend["Go Backend"]
         Router["chi router"]
@@ -93,7 +216,7 @@ graph TD
 
     Backend --> SQLite["SQLite (per-user)<br/>Metadata + FTS5"]
     Backend --> Chroma["ChromaDB<br/>Vector embeddings"]
-    Backend --> Ollama["Ollama<br/>Local LLM"]
+    Backend --> LLM["LLM Provider<br/>Ollama / OpenAI / Anthropic"]
     Backend --> FS["Filesystem<br/>Plain .md files"]
 
     FS -.->|"fsnotify"| Backend
@@ -102,43 +225,33 @@ graph TD
     style Clients fill:#1d2130,stroke:#3a4260,color:#e8e2d9
     style TUI fill:#161922,stroke:#3a4260,color:#e8e2d9
     style Web fill:#161922,stroke:#3a4260,color:#e8e2d9
+    style MCP fill:#161922,stroke:#3a4260,color:#e8e2d9
     style Router fill:#161922,stroke:#3a4260,color:#e8e2d9
     style Auth fill:#161922,stroke:#3a4260,color:#e8e2d9
     style Queue fill:#161922,stroke:#3a4260,color:#e8e2d9
     style SQLite fill:#161922,stroke:#6b9b7a,color:#e8e2d9
     style Chroma fill:#161922,stroke:#7b8ec4,color:#e8e2d9
-    style Ollama fill:#161922,stroke:#b87ba4,color:#e8e2d9
+    style LLM fill:#161922,stroke:#b87ba4,color:#e8e2d9
     style FS fill:#161922,stroke:#c4915c,color:#e8e2d9
 ```
 
-**Multi-user, single machine.** Each user gets fully isolated storage -- their own SQLite database, their own notes directory on disk, their own embedding collection in ChromaDB. Users can browse and edit their `.md` files directly with any text editor; the server detects changes via `fsnotify` and re-indexes automatically.
+**Multi-user, single machine.** Each user gets isolated storage -- their own SQLite database, notes directory, and ChromaDB collection. Edit your `.md` files with vim, VS Code, or a napkin scanner -- Seam watches for changes via `fsnotify` and re-indexes automatically.
 
 ### Tech Stack
 
 | Layer | Technology | Why |
 |---|---|---|
-| **Backend** | Go + `net/http` + chi router | Strong concurrency, single binary, low memory footprint |
-| **Storage** | Plain `.md` files on disk | Portable, human-readable, user-accessible. Source of truth for content |
-| **Metadata** | SQLite (per-user) via `modernc.org/sqlite` | ACID transactions, FTS5, zero infrastructure. Pure Go, no CGO |
-| **Full-text search** | SQLite FTS5 | Comes free with SQLite. BM25 ranking, highlighting, snippets |
-| **Vector store** | ChromaDB (client-server mode) | Per-user collections, HTTP API, lightweight |
-| **AI / LLM** | Ollama (local) | 100% private, no API costs. Language-agnostic HTTP API |
-| **TUI** | Bubble Tea (Charm) | Elm architecture, mature Go TUI framework |
-| **Web frontend** | React 19 + TypeScript 5.9 + Vite 7 | Best markdown editing experience via CodeMirror 6 |
-| **Graph** | Cytoscape.js + fcose layout | Built-in zoom/pan/filter/click |
-| **State management** | Zustand | Minimal, hook-based stores |
-| **Auth** | JWT + bcrypt | Stateless tokens, mobile-ready |
-| **File watching** | fsnotify | Detects external edits, triggers re-indexing |
-
-### AI Models (via Ollama)
-
-| Role | Default Model | Notes |
-|---|---|---|
-| Embeddings | `qwen3-embedding:8b` | Top-ranked on MTEB multilingual leaderboard |
-| Chat + Synthesis | `qwen3:32b` | Ask Seam, summarization, auto-linking |
-| Transcription | Whisper | Voice-to-text, runs fully locally |
-
-All model names are config values -- swap based on your hardware with no code changes.
+| **Backend** | Go + chi router | Single binary, low memory, strong concurrency. No CGO |
+| **Storage** | Plain `.md` files on disk | Portable, human-readable, yours forever. Source of truth |
+| **Metadata** | SQLite per-user (`modernc.org/sqlite`) | ACID, FTS5, zero infrastructure. Pure Go |
+| **Vector store** | ChromaDB | Per-user collections, HTTP API |
+| **AI** | Ollama / OpenAI / Anthropic | Local by default, cloud when you want it |
+| **TUI** | Bubble Tea | Elm architecture for your terminal |
+| **Web** | React 19 + TypeScript 5.9 + Vite 7 | CodeMirror 6 markdown editor |
+| **Graph** | Cytoscape.js + fcose | Interactive knowledge graph |
+| **State** | Zustand | Minimal, hook-based |
+| **Auth** | JWT + bcrypt | Stateless tokens |
+| **File watching** | fsnotify | Detects external edits |
 
 ---
 
@@ -146,12 +259,14 @@ All model names are config values -- swap based on your hardware with no code ch
 
 ### Prerequisites
 
-| Requirement | Version | Purpose |
+| Requirement | Version | Required? |
 |---|---|---|
-| [Go](https://go.dev) | 1.25+ | Build the server and TUI |
-| [Node.js](https://nodejs.org) | 22+ | Build the web frontend |
-| [Ollama](https://ollama.com) | Latest | AI features (embeddings, chat, synthesis) |
-| [ChromaDB](https://www.trychroma.com) | Latest | Semantic search and embeddings (optional) |
+| [Go](https://go.dev) | 1.25+ | Yes |
+| [Node.js](https://nodejs.org) | 22+ | For web frontend |
+| [Ollama](https://ollama.com) | Latest | For AI features |
+| [ChromaDB](https://www.trychroma.com) | Latest | For semantic search |
+
+Seam works without AI -- you'll just have a really nice markdown note system with full-text search. Add Ollama when you're ready for the fun stuff. Add ChromaDB when you want semantic search. Add OpenAI or Anthropic when your GPU starts crying.
 
 ### Quick Start
 
@@ -167,8 +282,9 @@ cp seam-server.yaml.example seam-server.yaml
 #   - Set jwt_secret (run: openssl rand -hex 32)
 #   - Set data_dir to where you want notes stored
 #   - Set ollama_base_url if not localhost
+#   - Optionally set llm.provider to "openai" or "anthropic"
 
-# 3. Start Ollama + pull models
+# 3. Pull models (if using Ollama)
 ollama pull qwen3:32b
 ollama pull qwen3-embedding:8b
 
@@ -184,7 +300,7 @@ cd web && npm install && npm run dev # Vite dev server on :5173, proxies /api to
 
 ### Configuration
 
-Seam is configured via `seam-server.yaml` with environment variable overrides:
+`seam-server.yaml` with environment variable overrides:
 
 ```yaml
 listen: ":8080"                      # SEAM_LISTEN
@@ -193,10 +309,26 @@ jwt_secret: ""                       # SEAM_JWT_SECRET (required, min 32 chars)
 ollama_base_url: "http://localhost:11434"  # SEAM_OLLAMA_URL
 chromadb_url: "http://localhost:8000"      # SEAM_CHROMADB_URL
 
+# AI model names (embeddings always use local Ollama)
 models:
   embeddings: "qwen3-embedding:8b"
   background: "qwen3:32b"
   chat: "qwen3:32b"
+
+# LLM provider for chat completions
+# Embeddings stay local regardless of this setting
+llm:
+  provider: "ollama"               # SEAM_LLM_PROVIDER: "ollama", "openai", "anthropic"
+  openai:
+    api_key: ""                    # SEAM_OPENAI_API_KEY
+    base_url: ""                   # SEAM_OPENAI_BASE_URL (for Azure, Together, Groq, etc.)
+  anthropic:
+    api_key: ""                    # SEAM_ANTHROPIC_API_KEY
+
+# Whisper.cpp for voice transcription (optional)
+whisper:
+  model_path: ""                   # path to ggml model file
+  binary_path: "whisper-cli"
 
 auth:
   access_token_ttl: "15m"
@@ -208,9 +340,14 @@ ai:
   embedding_timeout: "60s"
   chat_timeout: "5m"
 
+userdb:
+  eviction_timeout: "30m"          # close idle user DBs
+
 watcher:
   debounce_interval: "200ms"
 ```
+
+**Graceful degradation**: No Ollama URL? AI features disabled, you get a solid markdown note system. No ChromaDB? No semantic search, FTS still works. No Whisper model? No voice capture. Seam doesn't crash because you didn't install everything.
 
 ---
 
@@ -236,17 +373,16 @@ Your notes here, with [[wikilinks]] and #tags inline.
 
 ```
 {data_dir}/
-  seam-server.yaml
-  server.db                        # shared SQLite: user accounts, refresh tokens
+  server.db                        # shared: user accounts, refresh tokens
   users/
     {user_id}/
-      notes/                       # markdown files -- browse and edit directly
+      notes/                       # your markdown files -- edit with anything
         inbox/                     # unsorted captures
         {project-slug}/            # one directory per project
-      seam.db                      # per-user SQLite: metadata, FTS, links, AI tasks
+      seam.db                      # per-user: metadata, FTS, links, AI tasks
 ```
 
-Files live on disk at `{data_dir}/users/{user_id}/notes/`. Edit them with any tool you like -- Seam watches for changes and re-indexes automatically.
+Files live on disk. Edit them with whatever you want. Seam watches and re-indexes.
 
 ---
 
@@ -260,15 +396,24 @@ Auth
   POST   /api/auth/login
   POST   /api/auth/refresh
   POST   /api/auth/logout
+  GET    /api/auth/me
+  PUT    /api/auth/password
+  PUT    /api/auth/email
 
 Notes
+  POST   /api/notes                     # create (supports template field)
   GET    /api/notes                     # list (filter by project, tag, date; paginated)
-  POST   /api/notes                     # create
-  GET    /api/notes/{id}                # read
-  PUT    /api/notes/{id}                # update
-  DELETE /api/notes/{id}                # delete
-  GET    /api/notes/{id}/backlinks      # notes linking to this note
-  GET    /api/notes/{id}/related        # semantically similar notes
+  GET    /api/notes/daily               # get/create daily note (?date=YYYY-MM-DD)
+  PATCH  /api/notes/bulk                # bulk actions
+  GET    /api/notes/{id}
+  PUT    /api/notes/{id}
+  DELETE /api/notes/{id}
+  POST   /api/notes/{id}/append         # append content
+  GET    /api/notes/{id}/backlinks
+  GET    /api/notes/resolve              # resolve wikilink to note ID
+  GET    /api/notes/{id}/versions        # version history
+  GET    /api/notes/{id}/versions/{v}    # specific version
+  POST   /api/notes/{id}/versions/{v}/restore
 
 Projects
   GET    /api/projects
@@ -278,86 +423,105 @@ Projects
   DELETE /api/projects/{id}
 
 Search
-  GET    /api/search?q=...              # full-text search (FTS5)
-  GET    /api/search/semantic?q=...     # semantic search (embeddings)
+  GET    /api/search?q=...              # full-text (FTS5, recency_bias param)
+  GET    /api/search/semantic?q=...     # semantic (embeddings, recency_bias param)
 
 AI
-  POST   /api/ai/synthesize             # AI synthesis over a scope
-  POST   /api/ai/notes/{id}/assist      # writing assist (expand, summarize, extract)
-  POST   /api/ai/reindex-embeddings     # batch reindex all embeddings
+  POST   /api/ai/ask                    # RAG chat (query + history -> response + citations)
+  POST   /api/ai/synthesize             # cross-note synthesis
+  POST   /api/ai/synthesize/stream      # streaming synthesis (SSE)
+  POST   /api/ai/reindex-embeddings     # bulk reindex all embeddings
+  GET    /api/ai/notes/{id}/related     # semantically similar notes
+  POST   /api/ai/notes/{id}/assist      # writing assist (expand/summarize/extract-actions)
+  POST   /api/ai/suggest-tags           # AI tag suggestions
+  POST   /api/ai/suggest-project        # AI project suggestions
 
 Capture
-  POST   /api/capture                   # quick capture (text, URL, or voice)
+  POST   /api/capture                   # quick capture (URL or voice)
 
 Templates
-  GET    /api/templates                 # list available templates
-  POST   /api/templates/{name}/apply    # apply a template
+  GET    /api/templates
+  GET    /api/templates/{name}
+  POST   /api/templates/{name}/apply
 
 Graph
-  GET    /api/graph                     # node/edge data for graph view
+  GET    /api/graph                     # nodes + edges (filter by project/tag/date)
   GET    /api/graph/two-hop-backlinks/{id}
-  GET    /api/graph/orphans             # notes with no links
+  GET    /api/graph/orphans
 
 Tags
   GET    /api/tags                      # all tags with note counts
 
-Chat
-  POST   /api/chat/conversations        # create a conversation
-  GET    /api/chat/conversations        # list conversations (paginated)
-  GET    /api/chat/conversations/{id}   # get conversation with messages
-  DELETE /api/chat/conversations/{id}   # delete a conversation
-  POST   /api/chat/conversations/{id}/messages  # add a message
+Tasks
+  GET    /api/tasks                     # checkbox items from notes
+  GET    /api/tasks/summary             # aggregate counts
+  GET    /api/tasks/{id}
+  PATCH  /api/tasks/{id}               # toggle done
 
-Settings
-  GET    /api/settings                  # get all user settings
-  PUT    /api/settings                  # update user settings
-  DELETE /api/settings/{key}            # delete a setting
+Chat History
+  POST   /api/chat/conversations
+  GET    /api/chat/conversations
+  GET    /api/chat/conversations/{id}
+  DELETE /api/chat/conversations/{id}
+  POST   /api/chat/conversations/{id}/messages
 
 Review
-  GET    /api/review/queue              # knowledge gardening review queue
+  GET    /api/review/queue              # knowledge gardening queue
+
+Settings
+  GET    /api/settings
+  PUT    /api/settings
+  DELETE /api/settings/{key}
+
+Webhooks
+  POST   /api/webhooks                  # create (returns HMAC secret)
+  GET    /api/webhooks
+  GET    /api/webhooks/events           # subscribable event types
+  GET    /api/webhooks/{id}
+  PUT    /api/webhooks/{id}
+  DELETE /api/webhooks/{id}
+  GET    /api/webhooks/{id}/deliveries  # delivery history
+
+Health
+  GET    /api/health
+
+MCP
+  POST   /api/mcp                       # Streamable HTTP (Model Context Protocol)
 ```
 
 ### WebSocket
 
 ```
-/ws                                     # authenticated connection per user
+/api/ws                                 # authenticated connection per user
 ```
 
-Events pushed to clients: `task.progress`, `task.complete`, `task.failed`, `note.changed`, `note.link_suggestions`, `chat.stream`, `chat.done`
+Events: `note.changed`, `task.progress`, `task.complete`, `task.failed`, `chat.stream`, `chat.done`, `note.link_suggestions`, `webhook.delivery`
 
 ---
 
 ## Development
 
 ```bash
-make build                # build seamd (server) + seam (TUI) to ./bin/
+make build                # build seamd + seam to ./bin/
 make run                  # build and run the server
-make dev-web              # run React dev server (Vite on :5173, proxies /api to :8080)
+make dev-web              # React dev server (Vite on :5173, proxies /api to :8080)
 make test                 # all Go unit tests
 make test-integration     # integration tests (real filesystem, on-disk SQLite)
 make test-web             # all frontend tests (Vitest)
 make lint                 # golangci-lint + eslint
-make fmt                  # gofmt
+make fmt                  # gofmt + prettier
 make clean                # remove build artifacts + web/dist
 ```
 
 ### Running Specific Tests
 
 ```bash
-# Single Go test
-go test ./internal/note/ -run TestService_Create_WritesFile -v
+go test ./internal/note/ -run TestService_Create_WritesFile -v   # single test
+go test ./internal/note/ -v                                       # one package
+go test ./internal/note/ -run "TestStore_.*" -v                   # pattern match
+go test -race ./internal/...                                      # race detector
 
-# All tests in a package
-go test ./internal/note/ -v
-
-# Tests matching a pattern
-go test ./internal/note/ -run "TestStore_.*" -v
-
-# With race detector
-go test -race ./internal/...
-
-# Frontend tests
-cd web && npx vitest run                       # all
+cd web && npx vitest run                       # all frontend
 cd web && npx vitest run src/api/client        # single file
 ```
 
@@ -365,15 +529,10 @@ cd web && npx vitest run src/api/client        # single file
 
 | Tag | Purpose |
 |---|---|
-| *(default)* | Unit tests only. No filesystem, no external services |
+| *(default)* | Unit tests. No filesystem, no external services |
 | `integration` | Real filesystem, on-disk SQLite |
 | `external` | Requires running Ollama and/or ChromaDB |
-| `performance` | Benchmarks (1000-note stress tests, concurrent users) |
-
-### Test Coverage
-
-- **Go:** 16 packages, 200+ tests across `auth`, `config`, `note`, `project`, `search`, `ai`, `capture`, `template`, `graph`, `watcher`, `ws`, `userdb`, `server`, `integration`
-- **Frontend:** 18 test files, 153+ tests covering API client, stores, pages, components, and utilities
+| `performance` | Benchmarks |
 
 ---
 
@@ -383,143 +542,70 @@ cd web && npx vitest run src/api/client        # single file
 cmd/
   seamd/                    # server binary
   seam/                     # TUI binary
-  seed/                     # seed data generator for development
+  seed/                     # seed data generator
 internal/
-  ai/                       # Ollama client, ChromaDB client, task queue,
-                            #   embedder, synthesis, auto-linker, writer
-  auth/                     # user registration, login, JWT, bcrypt
+  agent/                    # MCP agent sessions, memory, briefings, tool audit
+  ai/                       # providers (Ollama, OpenAI, Anthropic), embedder,
+                            #   synthesizer, auto-linker, writer, suggester, queue
+  auth/                     # registration, login, JWT, bcrypt
   capture/                  # URL fetch (SSRF-safe), voice transcription
-  chat/                     # Ask Seam conversational chat (RAG, streaming)
+  chat/                     # conversation history persistence
   config/                   # YAML + env config loading
-  graph/                    # knowledge graph data (nodes, edges, orphans, two-hop)
-  note/                     # note CRUD, frontmatter parser, wikilink parser, tag parser
-  project/                  # project CRUD, slug generation, cascade delete
-  reqctx/                   # request-scoped context keys (user ID, request ID)
-  review/                   # knowledge gardening review queue (orphans, untagged, similar)
-  search/                   # full-text search (FTS5) + semantic search
+  graph/                    # knowledge graph (nodes, edges, orphans, two-hop)
+  mcp/                      # MCP server, Streamable HTTP, tool handlers
+  note/                     # CRUD, frontmatter, wikilinks, tags, versions, daily
+  project/                  # CRUD, slugs, cascade delete
+  reqctx/                   # request-scoped context (user ID, request ID)
+  review/                   # knowledge gardening queue
+  search/                   # FTS5 + semantic search
   server/                   # HTTP server, middleware, router wiring
-  settings/                 # per-user settings (editor mode, sidebar state, etc.)
+  settings/                 # per-user settings
+  task/                     # checkbox task extraction and tracking
   template/                 # note templates with variable substitution
   userdb/                   # per-user SQLite database manager
   validate/                 # path traversal, input sanitization
   watcher/                  # fsnotify file watcher + startup reconciliation
+  webhook/                  # webhook CRUD, HMAC delivery, SSRF protection
   ws/                       # WebSocket hub (per-user connections, broadcast)
   testutil/                 # shared test helpers
   integration/              # e2e + performance tests
 web/
   src/
-    api/                    # API client with JWT auto-refresh, WebSocket client
+    api/                    # HTTP client with JWT auto-refresh, WebSocket client
     components/             # Sidebar, CommandPalette, NoteCard, CaptureModal,
-                            #   SynthesisModal, EmptyState, Toast, ...
+                            #   SynthesisModal, BulkActionBar, VersionHistory, ...
     pages/                  # Login, Inbox, Project, NoteEditor, Search,
-                            #   Ask, Graph, Timeline, Settings
-    stores/                 # Zustand stores (auth, notes, projects)
+                            #   Ask, Graph, Timeline, Review, Settings
+    stores/                 # Zustand (auth, notes, projects, settings, ui, review)
     lib/                    # markdown rendering, date formatting, sanitization
     styles/                 # CSS variables, global styles, CSS Modules
 migrations/
-  server/                   # server.db SQL migrations
-  user/                     # per-user seam.db SQL migrations
+  server/                   # server.db migrations
+  user/                     # per-user seam.db migrations
 ```
 
 ---
 
 ## Design
 
-Seam's frontend follows the **"Dark Cartography"** aesthetic -- warm, precise, and layered. Inspired by vintage cartography and technical draftsmanship.
+Seam's frontend follows the **"Dark Cartography"** aesthetic -- warm, precise, and layered. Inspired by vintage cartography and technical draftsmanship. Dark theme only, because light mode is for people who enjoy staring at the sun.
 
-- **Dark theme only** -- deep blue-black backgrounds with warm off-white text
-- **Amber accent** (`#c4915c`) -- the golden thread linking ideas. Appears on wikilinks, graph edges, active navigation, and hover states
+- **Amber accent** (`#c4915c`) -- the golden thread linking ideas
 - **Four font families** -- Fraunces (display), Outfit (UI), Lora (content), IBM Plex Mono (code)
-- **CSS custom properties** for all design tokens -- colors, spacing, typography, radii, z-indexes
-- **CSS Modules** per component -- no global class name conflicts
+- **CSS custom properties** for all design tokens
+- **CSS Modules** per component
 
 ---
 
 ## Security
 
-- **Path traversal protection** -- rejects `..`, absolute paths, null bytes in all file operations
-- **User isolation** -- user ID resolved from JWT in middleware, never accepted from request body
-- **SSRF protection** -- URL capture rejects private IPs, localhost, `file://`, with DNS rebinding mitigation
-- **Input validation** -- note titles, project names, tags sanitized for filesystem safety
-- **Request body limits** -- 1MB max on all JSON endpoints, 100MB max on audio uploads
-- **XSS prevention** -- DOMPurify sanitization on all rendered HTML
-- **Rate limiting** -- bcrypt cost 12, max 10 refresh tokens per user, expired token cleanup
-
----
-
-## MCP Agent Memory
-
-Seam exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp`, giving AI agents persistent, structured long-term memory. Agents use standard MCP tools to track sessions, store domain knowledge, and search across their memory and the user's knowledge base.
-
-### Connecting
-
-Any MCP-compatible client (Claude Code, Cursor, etc.) can connect via Streamable HTTP:
-
-```json
-{
-  "mcpServers": {
-    "seam": {
-      "url": "http://localhost:8080/api/mcp",
-      "headers": {
-        "Authorization": "Bearer <jwt_access_token>"
-      }
-    }
-  }
-}
-```
-
-Authentication uses the same JWT tokens as the REST API. Obtain a token via `POST /api/auth/login`.
-
-### Available Tools
-
-**Session Management** -- track agent working sessions with plans, progress, and findings.
-
-| Tool | Description |
-|---|---|
-| `session_start` | Start or resume a named session. Returns a briefing with budgeted context. |
-| `session_plan_set` | Set/update the session plan (markdown). |
-| `session_progress_update` | Log task progress (pending/in_progress/completed/blocked). |
-| `session_context_set` | Set/update session context notes. |
-| `session_end` | End a session with compact findings (max 1500 chars). |
-| `session_list` | List sessions filtered by status. |
-
-**Knowledge Memory** -- persistent domain knowledge that survives across sessions.
-
-| Tool | Description |
-|---|---|
-| `memory_write` | Create or update a knowledge note by category and name. |
-| `memory_read` | Read a knowledge note. |
-| `memory_append` | Append content to an existing note. |
-| `memory_list` | List knowledge notes, optionally filtered by category. |
-| `memory_delete` | Delete a knowledge note. |
-
-**Context Gathering** -- budgeted search across all notes.
-
-| Tool | Description |
-|---|---|
-| `context_gather` | Search notes with a character budget. Returns ranked snippets. |
-
-### Hierarchical Sessions
-
-Sessions form a tree using `/` as a path separator. Child sessions automatically see their parent's plan and completed siblings' findings in their briefing:
-
-```
-refactor-auth                    <- main agent
-refactor-auth/analyze            <- subagent A (sees parent plan)
-refactor-auth/implement          <- subagent B (sees parent plan + A's findings)
-```
-
-### Rate Limiting
-
-MCP tool calls are rate-limited to 60 requests per minute per user with a burst allowance of 20.
-
----
-
-## Documentation
-
-| Document | Description |
-|---|---|
-| [AGENTS.md](./AGENTS.md) | Instructions for AI coding agents |
+- **Path traversal protection** -- rejects `..`, absolute paths, null bytes
+- **User isolation** -- user ID from JWT, never from request body
+- **SSRF protection** -- URL capture and webhooks reject private IPs, localhost, `file://`, with DNS rebinding mitigation
+- **Input validation** -- titles, names, tags sanitized for filesystem safety
+- **Request body limits** -- 1MB JSON, 100MB audio
+- **XSS prevention** -- DOMPurify on all rendered HTML
+- **Rate limiting** -- per-IP on auth, per-user on AI and MCP endpoints
 
 ---
 

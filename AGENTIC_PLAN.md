@@ -24,6 +24,8 @@ The core limitation: Seam is **purely reactive**. The user must ask every questi
 
 **Priority**: Critical -- this is the single biggest gap and the foundation for everything else.
 
+**Absorbs from features.md:** #18 (NL Query Interface), #28 (Conversation-to-Note Extraction, partial), #9 (Agent Playbooks, partial -- multi-step reasoning)
+
 ### 1.1 Assistant Service (`internal/assistant/`)
 
 Create a new package that wraps the existing AI chat with a tool-use loop.
@@ -108,6 +110,8 @@ CREATE TABLE assistant_actions (
 
 **Priority**: High -- without memory, every conversation starts from zero.
 
+**Absorbs from features.md:** #1 (Reflexive Knowledge Distillation, partial), #26 (Session Handoff Protocol), #28 (Conversation-to-Note Extraction, partial)
+
 ### 2.1 User Profile (`internal/assistant/profile.go`)
 
 Structured profile that the assistant can read and update:
@@ -177,6 +181,8 @@ CREATE TABLE user_profile (
 **Goal**: The assistant does things without being asked, on a schedule.
 
 **Priority**: High -- proactivity is what separates an assistant from a search engine.
+
+**Absorbs from features.md:** #14 (Scheduled Agent Tasks)
 
 ### 3.1 Scheduler Service (`internal/scheduler/`)
 
@@ -264,6 +270,8 @@ ALTER TABLE tasks ADD COLUMN completed_at DATETIME;
 **Goal**: Define rules that trigger AI actions when things happen in Seam.
 
 **Priority**: Medium -- builds on the agentic loop and scheduler.
+
+**Absorbs from features.md:** #1 (Reflexive Knowledge Distillation, partial), #9 (Agent Playbooks, partial -- reusable automation templates), #10 (Smart Inbox Triage), #25 (Semantic Link Suggestions)
 
 ### 5.1 Automation Engine (`internal/automations/`)
 
@@ -567,6 +575,27 @@ CREATE TABLE topic_engagement (
 | 10 | Learning + personalization | Medium | Phase 1, Phase 2 |
 
 Phase 1 is the critical path. Nearly everything else depends on the assistant being able to use tools and take actions. Phase 6 (document ingestion) is independent and can be built in parallel.
+
+---
+
+## Relationship to features.md
+
+The following features from `features.md` have been absorbed into this plan:
+
+| features.md # | Feature | Absorbed Into |
+|---|---|---|
+| 1 | Reflexive Knowledge Distillation | Phase 2 + Phase 5 |
+| 9 | Agent Playbooks | Phase 1 + Phase 5 |
+| 10 | Smart Inbox Triage | Phase 5 |
+| 14 | Scheduled Agent Tasks | Phase 3 |
+| 18 | NL Query Interface | Phase 1 |
+| 25 | Semantic Link Suggestions | Phase 5 |
+| 26 | Session Handoff Protocol | Phase 2 |
+| 28 | Conversation-to-Note Extraction | Phase 1 + Phase 2 |
+
+Features with partial overlap remain in `features.md` with cross-references: #2 (Semantic Deduplication), #20 (Plugin/Extension System), #22 (Context Budget Optimizer), #30 (Agent Confidence Scoring).
+
+All other `features.md` items are independent knowledge system improvements and remain there.
 
 ---
 

@@ -1,28 +1,26 @@
 # Feature Ideas
 
-20 features to make Seam a better knowledge system -- prioritized from an agent's perspective.
+Features to make Seam a better knowledge system -- prioritized from an agent's perspective.
+
+Features related to the smart personal AI assistant initiative have been moved to `AGENTIC_PLAN.md`. This file covers knowledge system improvements that are independent of or complementary to the agentic assistant work.
 
 ## Status Key
 
 - [ ] Not started
 - [x] Complete
 - [~] In progress
+- [->] Moved to AGENTIC_PLAN.md
 
 ## Changelog
 
+- **2026-03-15**: Reconciled with AGENTIC_PLAN.md. Moved #1, #9, #10, #14, #18, #25, #26, #28 to agentic plan. Added cross-references on #2, #20, #22, #30.
 - **2026-03-15**: Implemented #3 (Temporal RAG), #4 (Task Tracking), #7 (Webhooks). Added features #21-#30.
 
 ---
 
 ## 1. Reflexive Knowledge Distillation
 
-- [ ] **Status: Not started**
-- **Effort:** Large
-- **Impact:** High
-
-Agents accumulate session findings but they stay flat text. Add a background process that periodically reviews completed session findings, extracts recurring patterns, and auto-promotes them into structured knowledge notes with cross-references. This turns throwaway session logs into a growing, compounding knowledge base without manual curation.
-
-**Why it matters for agents:** Every agent session currently writes findings that get buried. Distillation means future sessions inherit progressively richer context from the briefing system, making each agent invocation smarter than the last.
+- [->] **Moved to AGENTIC_PLAN.md** -- Phase 2 (Episodic Memory) + Phase 5 (Event-Driven Automations)
 
 ---
 
@@ -31,6 +29,7 @@ Agents accumulate session findings but they stay flat text. Add a background pro
 - [ ] **Status: Not started**
 - **Effort:** Medium
 - **Impact:** High
+- **See also:** AGENTIC_PLAN.md Phase 10.3 (Smart Suggestions) -- dedup suggestions are one category, but the full dedup + merge workflow is broader and stands alone.
 
 Use embedding similarity to detect near-duplicate notes and present merge suggestions in the review queue. Show a diff-style view and let users (or agents) choose which content to keep, merge, or discard.
 
@@ -118,25 +117,13 @@ Extend the chat system to follow wikilinks from retrieved chunks and pull in lin
 
 ## 9. Agent Playbooks (Reusable Session Templates)
 
-- [ ] **Status: Not started**
-- **Effort:** Medium
-- **Impact:** High
-
-Define reusable session blueprints: a named sequence of steps (tools to call, notes to read, knowledge to gather) that an agent can instantiate. Stored as special notes with `type:playbook` tag. MCP tools: `playbook_list`, `playbook_get`, `playbook_instantiate`.
-
-**Why it matters for agents:** Agents repeat common workflows (weekly review, project onboarding, inbox triage). Playbooks codify these into repeatable, improvable recipes instead of relying on prompt engineering each time.
+- [->] **Moved to AGENTIC_PLAN.md** -- Phase 1 (Multi-Step Reasoning) + Phase 5 (Event-Driven Automations)
 
 ---
 
 ## 10. Smart Inbox Triage
 
-- [ ] **Status: Not started**
-- **Effort:** Medium
-- **Impact:** High
-
-Auto-classify new inbox notes: suggest project placement, tags, and related notes. Run as a background AI task when notes land in inbox. Present suggestions in the review queue with one-click accept.
-
-**Why it matters for agents:** The inbox is the primary capture point (URL capture, voice, quick notes). Without triage, it becomes a dumping ground. Automated classification keeps the knowledge base organized with minimal user effort.
+- [->] **Moved to AGENTIC_PLAN.md** -- Phase 5.2 (Built-in Automations)
 
 ---
 
@@ -178,13 +165,7 @@ Add a non-destructive annotation system: comments anchored to specific text rang
 
 ## 14. Scheduled Agent Tasks (Cron-style)
 
-- [ ] **Status: Not started**
-- **Effort:** Medium
-- **Impact:** High
-
-Let users schedule recurring agent operations: "every Monday, synthesize notes from last week," "daily, triage inbox," "every Friday, generate project health report." Stored as cron entries in the user DB, executed by the task queue.
-
-**Why it matters for agents:** Knowledge maintenance is a continuous process. Scheduled tasks turn Seam from a passive store into an active knowledge partner that maintains itself.
+- [->] **Moved to AGENTIC_PLAN.md** -- Phase 3 (Scheduled Triggers and Daily Briefing)
 
 ---
 
@@ -226,13 +207,7 @@ Allow users to publish specific notes or projects to a shared namespace that oth
 
 ## 18. Natural Language Query Interface for Structured Data
 
-- [ ] **Status: Not started**
-- **Effort:** Medium
-- **Impact:** Medium
-
-Let users and agents query structured aspects of the knowledge base in natural language: "how many notes did I create last week?", "which projects have no activity in 30 days?", "what are my most-linked notes?". Translate to SQL/search queries behind the scenes.
-
-**Why it matters for agents:** Agents can already search content but can't easily answer meta-questions about the knowledge base itself. NL-to-query bridges the gap between unstructured knowledge and structured metadata.
+- [->] **Moved to AGENTIC_PLAN.md** -- Phase 1 (Agentic Loop with Tool Use) -- the assistant with tool access *is* the NL query interface
 
 ---
 
@@ -253,6 +228,7 @@ Track which notes a user has read and when. Surface notes for re-reading using s
 - [ ] **Status: Not started**
 - **Effort:** Large
 - **Impact:** High
+- **See also:** AGENTIC_PLAN.md Phase 7 (External Integrations) -- the integration framework covers built-in connectors, but a general plugin/extension system for user-defined tools is broader.
 
 Allow users to define custom MCP tools as small Go plugins or scripts (shell, Python) that the server loads at startup. Each plugin declares its tool schema, and the MCP server auto-registers it. Enables domain-specific integrations without forking the core.
 
@@ -279,6 +255,7 @@ Add hierarchical namespaces to agent memory (e.g., `project/backend/conventions`
 - [ ] **Status: Not started**
 - **Effort:** Medium
 - **Impact:** High
+- **See also:** AGENTIC_PLAN.md Phase 2 (Long-Term Memory) -- the assistant's memory retrieval uses budget-aware context selection, but a general-purpose MCP tool for any agent is broader.
 
 Add a `context_optimize` MCP tool that, given a token budget and a goal, returns the optimal subset of notes/memory/session context that maximizes relevance while fitting within the budget. Uses embedding similarity + recency + link proximity to rank and pack content.
 
@@ -312,25 +289,13 @@ Extend the existing template system with dynamic placeholders: `{{date}}`, `{{pr
 
 ## 25. Semantic Link Suggestions
 
-- [ ] **Status: Not started**
-- **Effort:** Medium
-- **Impact:** High
-
-After a note is saved, run a background job that compares its embedding against all other notes and suggests wikilinks the author might want to add. Surface suggestions as annotations or in a sidebar. Expose via MCP as `links_suggest`.
-
-**Why it matters for agents:** The knowledge graph's value comes from connections. Agents (and users) often miss relevant links. Automated suggestions strengthen the graph, improve RAG retrieval, and surface unexpected connections.
+- [->] **Moved to AGENTIC_PLAN.md** -- Phase 5.2 (Built-in Automations) -- already partially implemented as the `autolink` AI task type
 
 ---
 
 ## 26. Session Handoff Protocol
 
-- [ ] **Status: Not started**
-- **Effort:** Small
-- **Impact:** High
-
-When an agent session ends, generate a structured handoff document: what was accomplished, what's pending, what context the next session needs. Store as a special memory entry. The next `session_start` briefing automatically includes the most recent handoff.
-
-**Why it matters for agents:** Agent sessions are stateless between invocations. Handoff documents create continuity -- the next session picks up exactly where the last left off, without the user having to re-explain context. Critical for multi-session workflows.
+- [->] **Moved to AGENTIC_PLAN.md** -- Phase 2 (Episodic Memory + Conversation Summarization)
 
 ---
 
@@ -348,13 +313,7 @@ Analyze the knowledge graph for structural gaps: topics referenced but never doc
 
 ## 28. Conversation-to-Note Extraction
 
-- [ ] **Status: Not started**
-- **Effort:** Medium
-- **Impact:** High
-
-After a chat conversation, offer to extract key insights, decisions, and action items into new notes or append to existing ones. AI identifies the valuable parts of the conversation and structures them as proper knowledge artifacts.
-
-**Why it matters for agents:** Chat conversations contain valuable knowledge that currently vanishes when the conversation ends. Extraction ensures that insights from agent interactions become permanent, searchable knowledge.
+- [->] **Moved to AGENTIC_PLAN.md** -- Phase 1 (Tool Use) + Phase 2 (Episodic Memory)
 
 ---
 
@@ -375,6 +334,7 @@ Route different AI tasks to different Ollama models based on task type: fast/sma
 - [ ] **Status: Not started**
 - **Effort:** Small
 - **Impact:** Medium
+- **See also:** AGENTIC_PLAN.md Phase 10.1 (Feedback Loop) -- confidence scoring feeds into the feedback system, but the scoring mechanism itself is a standalone knowledge system feature.
 
 Add confidence metadata to agent outputs: when an agent writes a memory entry, creates a note, or provides a search result, include a confidence score (0-1) based on source quality, embedding similarity, and recency. Low-confidence items get flagged for human review.
 
@@ -384,9 +344,10 @@ Add confidence metadata to agent outputs: when an agent writes a memory entry, c
 
 ## Priority Matrix
 
+Features remaining in this file (excluding completed and items moved to `AGENTIC_PLAN.md`):
+
 | # | Feature | Effort | Impact | Agent Value | Status |
 |---|---------|--------|--------|-------------|--------|
-| 1 | Reflexive Knowledge Distillation | Large | High | Critical | Not started |
 | 2 | Semantic Deduplication | Medium | High | High | Not started |
 | 3 | Temporal RAG Windows | Medium | High | High | **Complete** |
 | 4 | Structured Task Tracking | Medium | High | High | **Complete** |
@@ -394,38 +355,33 @@ Add confidence metadata to agent outputs: when an agent writes a memory entry, c
 | 6 | CRDT Concurrent Editing | Large | Medium | Medium | Not started |
 | 7 | Webhooks & Event Subscriptions | Medium | Medium | High | **Complete** |
 | 8 | Multi-Hop RAG | Large | High | Critical | Not started |
-| 9 | Agent Playbooks | Medium | High | Critical | Not started |
-| 10 | Smart Inbox Triage | Medium | High | High | Not started |
 | 11 | Note Maturity Scoring | Small | Medium | High | Not started |
 | 12 | Project Health Dashboard | Medium | Medium | Medium | Not started |
 | 13 | Annotation Layer | Medium | Medium | Medium | Not started |
-| 14 | Scheduled Agent Tasks | Medium | High | Critical | Not started |
 | 15 | Provenance Tracking | Medium | Medium | High | Not started |
 | 16 | Diff-Aware Versioning | Medium | Medium | High | Not started |
 | 17 | Cross-User Sharing | Large | Medium | Medium | Not started |
-| 18 | NL Query Interface | Medium | Medium | Medium | Not started |
 | 19 | Reading List & Spaced Repetition | Medium | Medium | Medium | Not started |
 | 20 | Plugin/Extension System | Large | High | Critical | Not started |
 | 21 | Agent Memory Namespaces | Small | High | High | Not started |
 | 22 | Context Budget Optimizer | Medium | High | Critical | Not started |
 | 23 | Inline Code Block Execution | Medium | Medium | Medium | Not started |
 | 24 | Dynamic Note Templates | Small | Medium | Medium | Not started |
-| 25 | Semantic Link Suggestions | Medium | High | High | Not started |
-| 26 | Session Handoff Protocol | Small | High | Critical | Not started |
 | 27 | Knowledge Gap Detection | Large | High | High | Not started |
-| 28 | Conversation-to-Note Extraction | Medium | High | High | Not started |
 | 29 | Multi-Model Routing | Medium | Medium | Medium | Not started |
 | 30 | Agent Confidence Scoring | Small | Medium | Medium | Not started |
 
+Moved to AGENTIC_PLAN.md: #1, #9, #10, #14, #18, #25, #26, #28
+
 ### Recommended Next Build Order (highest agent ROI first)
 
-1. **Session Handoff Protocol** (#26) -- small effort, massive continuity improvement
-2. **Agent Memory Namespaces** (#21) -- small effort, organizes growing memory
-3. **Note Maturity Scoring** (#11) -- small effort, enables gardening
-4. **Context Budget Optimizer** (#22) -- every agent interaction gets smarter
-5. **Semantic Link Suggestions** (#25) -- strengthens the knowledge graph passively
-6. **Smart Inbox Triage** (#10) -- automates the most common capture workflow
-7. **Conversation-to-Note Extraction** (#28) -- captures transient knowledge
-8. **Agent Playbooks** (#9) -- codifies repeatable agent patterns
-9. **Scheduled Agent Tasks** (#14) -- makes the system self-maintaining
-10. **Reflexive Knowledge Distillation** (#1) -- the compounding flywheel
+1. **Agent Memory Namespaces** (#21) -- small effort, organizes growing memory
+2. **Note Maturity Scoring** (#11) -- small effort, enables gardening
+3. **Context Budget Optimizer** (#22) -- every agent interaction gets smarter
+4. **Semantic Deduplication** (#2) -- keeps knowledge graph clean
+5. **Multi-Hop RAG** (#8) -- captures distributed knowledge across linked notes
+6. **Knowledge Gap Detection** (#27) -- guides high-value knowledge creation
+7. **Provenance Tracking** (#15) -- enables trust-aware retrieval
+8. **Plugin/Extension System** (#20) -- makes Seam extensible for any workflow
+9. **Agent Confidence Scoring** (#30) -- calibrates trust in agent outputs
+10. **Diff-Aware Versioning** (#16) -- safety net for agent edits

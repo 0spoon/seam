@@ -23,18 +23,18 @@ type ProjectSuggestion struct {
 
 // Suggester uses an LLM to suggest tags and projects for notes.
 type Suggester struct {
-	ollama *OllamaClient
+	chat   ChatCompleter
 	model  string
 	logger *slog.Logger
 }
 
 // NewSuggester creates a new Suggester.
-func NewSuggester(ollama *OllamaClient, model string, logger *slog.Logger) *Suggester {
+func NewSuggester(chat ChatCompleter, model string, logger *slog.Logger) *Suggester {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Suggester{
-		ollama: ollama,
+		chat:   chat,
 		model:  model,
 		logger: logger,
 	}
@@ -43,7 +43,7 @@ func NewSuggester(ollama *OllamaClient, model string, logger *slog.Logger) *Sugg
 // SuggestTags asks the LLM which of the existing tags apply to the given note.
 // Returns empty suggestions (not an error) if the LLM is unavailable.
 func (s *Suggester) SuggestTags(ctx context.Context, noteTitle, noteBody string, existingTags []string) ([]TagSuggestion, error) {
-	if s.ollama == nil {
+	if s.chat == nil {
 		return []TagSuggestion{}, nil
 	}
 
@@ -78,7 +78,7 @@ JSON:`, strings.Join(existingTags, ", "), noteTitle, body)
 		{Role: "user", Content: prompt},
 	}
 
-	resp, err := s.ollama.ChatCompletion(ctx, s.model, messages)
+	resp, err := s.chat.ChatCompletion(ctx, s.model, messages)
 	if err != nil {
 		s.logger.Warn("ai.Suggester.SuggestTags: LLM call failed, returning empty", "error", err)
 		return []TagSuggestion{}, nil
@@ -96,7 +96,7 @@ JSON:`, strings.Join(existingTags, ", "), noteTitle, body)
 // SuggestProject asks the LLM which project the note fits best.
 // Returns empty suggestions (not an error) if the LLM is unavailable.
 func (s *Suggester) SuggestProject(ctx context.Context, noteTitle, noteBody string, projects []ProjectInfo) ([]ProjectSuggestion, error) {
-	if s.ollama == nil {
+	if s.chat == nil {
 		return []ProjectSuggestion{}, nil
 	}
 
@@ -142,7 +142,7 @@ JSON:`, projectList.String(), noteTitle, body)
 		{Role: "user", Content: prompt},
 	}
 
-	resp, err := s.ollama.ChatCompletion(ctx, s.model, messages)
+	resp, err := s.chat.ChatCompletion(ctx, s.model, messages)
 	if err != nil {
 		s.logger.Warn("ai.Suggester.SuggestProject: LLM call failed, returning empty", "error", err)
 		return []ProjectSuggestion{}, nil

@@ -231,12 +231,35 @@ func run() error {
 	chatHistorySvc := chat.NewService(chatHistoryStore, userDBMgr, logger)
 	chatHistoryHandler := chat.NewHandler(chatHistorySvc, logger)
 
-	// Create AI components (Ollama, ChromaDB, embedder, chat, synthesizer, linker, writer).
+	// Create AI components.
+	// Ollama is always created for embeddings (local vector generation).
 	ollamaClient := ai.NewOllamaClient(
 		cfg.OllamaBaseURL,
 		cfg.AI.EmbeddingTimeout.Duration,
 		cfg.AI.ChatTimeout.Duration,
 	)
+
+	// Select the ChatCompleter based on the configured LLM provider.
+	// Embeddings always use the local Ollama instance regardless of provider.
+	var chatCompleter ai.ChatCompleter
+	switch cfg.LLM.Provider {
+	case "openai":
+		chatCompleter = ai.NewOpenAIClient(
+			cfg.LLM.OpenAI.APIKey,
+			cfg.LLM.OpenAI.BaseURL,
+			cfg.AI.ChatTimeout.Duration,
+		)
+		logger.Info("LLM provider: OpenAI", "base_url", cfg.LLM.OpenAI.BaseURL)
+	case "anthropic":
+		chatCompleter = ai.NewAnthropicClient(
+			cfg.LLM.Anthropic.APIKey,
+			cfg.AI.ChatTimeout.Duration,
+		)
+		logger.Info("LLM provider: Anthropic")
+	default: // "ollama"
+		chatCompleter = ollamaClient
+		logger.Info("LLM provider: Ollama (local)")
+	}
 
 	var aiHandler *ai.Handler
 	var aiQueue *ai.Queue
@@ -256,9 +279,9 @@ func run() error {
 	if cfg.ChromaDBURL != "" {
 		chromaClient = ai.NewChromaClient(cfg.ChromaDBURL)
 		embedder = ai.NewEmbedder(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
-		chatSvc = ai.NewChatService(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
-		synthSvc = ai.NewSynthesizer(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
-		linker := ai.NewAutoLinker(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Background, hub, logger)
+		chatSvc = ai.NewChatService(ollamaClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
+		synthSvc = ai.NewSynthesizer(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
+		linker := ai.NewAutoLinker(ollamaClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Background, hub, logger)
 
 		// Register task handlers.
 		aiQueue.RegisterHandler(ai.TaskTypeEmbed, embedder.HandleEmbedTask)
@@ -268,7 +291,7 @@ func run() error {
 		aiQueue.RegisterHandler(ai.TaskTypeAutolink, linker.HandleAutolinkTask)
 
 		// Create AI writer (uses chat model for writing assist).
-		aiWriter := ai.NewWriter(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
+		aiWriter := ai.NewWriter(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
 		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
@@ -292,22 +315,22 @@ func run() error {
 			}
 		})
 
-		// Enable semantic search.
+		// Enable semantic search (always uses Ollama for embeddings).
 		semanticSearcher := search.NewSemanticSearcher(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
 		searchSvc.SetSemanticSearcher(semanticSearcher)
 
 		// Create AI suggester for tag/project suggestions.
-		suggester := ai.NewSuggester(ollamaClient, cfg.Models.Chat, logger)
+		suggester := ai.NewSuggester(chatCompleter, cfg.Models.Chat, logger)
 
 		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthSvc, linker, embedder, aiWriter, suggester, userDBMgr, logger)
 		logger.Info("AI features enabled", "ollama_url", cfg.OllamaBaseURL, "chromadb_url", cfg.ChromaDBURL)
 	} else {
-		// Even without ChromaDB, writer and suggester can work with just Ollama.
-		aiWriter := ai.NewWriter(ollamaClient, userDBMgr, cfg.Models.Chat, logger)
+		// Even without ChromaDB, writer and suggester can work with the chat provider.
+		aiWriter := ai.NewWriter(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
 		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
-		suggester := ai.NewSuggester(ollamaClient, cfg.Models.Chat, logger)
+		suggester := ai.NewSuggester(chatCompleter, cfg.Models.Chat, logger)
 		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, aiWriter, suggester, userDBMgr, logger)
 		logger.Info("AI features: ChromaDB not configured; only writing assist and suggestions available")
 	}

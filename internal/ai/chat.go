@@ -24,7 +24,8 @@ const (
 
 // ChatService handles RAG-powered chat using note context.
 type ChatService struct {
-	ollama          *OllamaClient
+	embedder        EmbeddingGenerator
+	chat            ChatCompleter
 	chroma          *ChromaClient
 	dbManager       userdb.Manager
 	embedModel      string
@@ -36,12 +37,13 @@ type ChatService struct {
 
 // NewChatService creates a new ChatService. Optional configuration functions
 // can be passed to set retrieval limit and body truncation length.
-func NewChatService(ollama *OllamaClient, chroma *ChromaClient, dbManager userdb.Manager, embedModel, chatModel string, logger *slog.Logger, opts ...func(*ChatService)) *ChatService {
+func NewChatService(embedder EmbeddingGenerator, chat ChatCompleter, chroma *ChromaClient, dbManager userdb.Manager, embedModel, chatModel string, logger *slog.Logger, opts ...func(*ChatService)) *ChatService {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	cs := &ChatService{
-		ollama:          ollama,
+		embedder:        embedder,
+		chat:            chat,
 		chroma:          chroma,
 		dbManager:       dbManager,
 		embedModel:      embedModel,
@@ -118,7 +120,7 @@ func (c *ChatService) Ask(ctx context.Context, userID, query string, history []C
 
 	messages := BuildChatMessages(query, contexts, history)
 
-	resp, err := c.ollama.ChatCompletion(ctx, c.chatModel, messages)
+	resp, err := c.chat.ChatCompletion(ctx, c.chatModel, messages)
 	if err != nil {
 		return nil, fmt.Errorf("ai.ChatService.Ask: chat completion: %w", err)
 	}
@@ -152,7 +154,7 @@ func (c *ChatService) AskStream(ctx context.Context, userID, query string, histo
 
 	messages := BuildChatMessages(query, contexts, history)
 
-	ollamaTokenCh, ollamaErrCh := c.ollama.ChatCompletionStream(ctx, c.chatModel, messages)
+	ollamaTokenCh, ollamaErrCh := c.chat.ChatCompletionStream(ctx, c.chatModel, messages)
 
 	go func() {
 		defer close(tokenCh)
@@ -178,7 +180,7 @@ func (c *ChatService) AskStream(ctx context.Context, userID, query string, histo
 // retrieveContext embeds the query, retrieves relevant chunks from ChromaDB,
 // and fetches the note content from the user's database.
 func (c *ChatService) retrieveContext(ctx context.Context, userID, query string) ([]noteSnippet, []Citation, error) {
-	queryEmbedding, err := c.ollama.GenerateEmbedding(ctx, c.embedModel, query)
+	queryEmbedding, err := c.embedder.GenerateEmbedding(ctx, c.embedModel, query)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ai.ChatService.retrieveContext: embed query: %w", err)
 	}

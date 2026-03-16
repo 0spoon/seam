@@ -23,6 +23,8 @@ func clearEnv(t *testing.T) {
 	for _, key := range []string{
 		"SEAM_LISTEN", "SEAM_DATA_DIR", "SEAM_JWT_SECRET",
 		"SEAM_OLLAMA_URL", "SEAM_CHROMADB_URL",
+		"SEAM_LLM_PROVIDER", "SEAM_OPENAI_API_KEY",
+		"SEAM_OPENAI_BASE_URL", "SEAM_ANTHROPIC_API_KEY",
 	} {
 		t.Setenv(key, "")
 	}
@@ -258,4 +260,146 @@ auth:
 	path := writeConfig(t, config)
 	_, err := Load(path)
 	require.Error(t, err)
+}
+
+func TestLoad_LLMDefaultsToOllama(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+`
+	path := writeConfig(t, config)
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "ollama", cfg.LLM.Provider)
+}
+
+func TestLoad_LLMOpenAI(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+ollama_base_url: "http://localhost:11434"
+models:
+  embeddings: "qwen3-embedding:8b"
+  background: "gpt-4o"
+  chat: "gpt-4o"
+llm:
+  provider: "openai"
+  openai:
+    api_key: "sk-test-key"
+    base_url: "https://api.openai.com/v1/"
+`
+	path := writeConfig(t, config)
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "openai", cfg.LLM.Provider)
+	require.Equal(t, "sk-test-key", cfg.LLM.OpenAI.APIKey)
+	// Trailing slash should be normalized.
+	require.Equal(t, "https://api.openai.com/v1", cfg.LLM.OpenAI.BaseURL)
+}
+
+func TestLoad_LLMOpenAI_MissingKey(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+llm:
+  provider: "openai"
+`
+	path := writeConfig(t, config)
+	_, err := Load(path)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm.openai.api_key is required")
+}
+
+func TestLoad_LLMAnthropic(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+ollama_base_url: "http://localhost:11434"
+models:
+  embeddings: "qwen3-embedding:8b"
+  background: "claude-sonnet-4-20250514"
+  chat: "claude-sonnet-4-20250514"
+llm:
+  provider: "anthropic"
+  anthropic:
+    api_key: "sk-ant-test"
+`
+	path := writeConfig(t, config)
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "anthropic", cfg.LLM.Provider)
+	require.Equal(t, "sk-ant-test", cfg.LLM.Anthropic.APIKey)
+}
+
+func TestLoad_LLMAnthropic_MissingKey(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+llm:
+  provider: "anthropic"
+`
+	path := writeConfig(t, config)
+	_, err := Load(path)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm.anthropic.api_key is required")
+}
+
+func TestLoad_LLMInvalidProvider(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+llm:
+  provider: "gemini"
+`
+	path := writeConfig(t, config)
+	_, err := Load(path)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "llm.provider must be")
+}
+
+func TestLoad_LLMEnvOverrides(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+ollama_base_url: "http://localhost:11434"
+models:
+  embeddings: "qwen3-embedding:8b"
+  background: "gpt-4o"
+  chat: "gpt-4o"
+`
+	path := writeConfig(t, config)
+
+	t.Setenv("SEAM_LLM_PROVIDER", "openai")
+	t.Setenv("SEAM_OPENAI_API_KEY", "sk-from-env")
+	t.Setenv("SEAM_OPENAI_BASE_URL", "https://custom.endpoint.com/v1")
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "openai", cfg.LLM.Provider)
+	require.Equal(t, "sk-from-env", cfg.LLM.OpenAI.APIKey)
+	require.Equal(t, "https://custom.endpoint.com/v1", cfg.LLM.OpenAI.BaseURL)
+}
+
+func TestLoad_LLMAnthropicEnvOverride(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+`
+	path := writeConfig(t, config)
+
+	t.Setenv("SEAM_LLM_PROVIDER", "anthropic")
+	t.Setenv("SEAM_ANTHROPIC_API_KEY", "sk-ant-from-env")
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "anthropic", cfg.LLM.Provider)
+	require.Equal(t, "sk-ant-from-env", cfg.LLM.Anthropic.APIKey)
 }

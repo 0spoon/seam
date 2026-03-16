@@ -72,7 +72,7 @@ func TestAutoLinker_SuggestLinks(t *testing.T) {
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"note3", "Testing", "test.md", "Testing strategies", "h3", now, now)
 
-	linker := NewAutoLinker(ollama, chroma, mockMgr, "embed-model", "chat-model", nil, nil)
+	linker := NewAutoLinker(ollama, ollama, chroma, mockMgr, "embed-model", "chat-model", nil, nil)
 	suggestions, err := linker.SuggestLinks(ctx, "user1", "note1")
 	require.NoError(t, err)
 	require.Len(t, suggestions, 1)
@@ -120,7 +120,7 @@ func TestAutoLinker_SuggestLinks_NoRelated(t *testing.T) {
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"note1", "Lonely Note", "lonely.md", "Just a lonely note", "h1", now, now)
 
-	linker := NewAutoLinker(ollama, chroma, mockMgr, "embed", "chat", nil, nil)
+	linker := NewAutoLinker(ollama, ollama, chroma, mockMgr, "embed", "chat", nil, nil)
 	suggestions, err := linker.SuggestLinks(ctx, "user1", "note1")
 	require.NoError(t, err)
 	require.Nil(t, suggestions)
@@ -171,7 +171,7 @@ func TestAutoLinker_HandleAutolinkTask(t *testing.T) {
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"note1", "Test Note", "test.md", "content", "h", now, now)
 
-	linker := NewAutoLinker(ollama, chroma, mockMgr, "embed", "chat", nil, nil)
+	linker := NewAutoLinker(ollama, ollama, chroma, mockMgr, "embed", "chat", nil, nil)
 	task := &Task{
 		ID:      "task1",
 		UserID:  "user1",

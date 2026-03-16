@@ -116,7 +116,7 @@ func TestChatService_Ask(t *testing.T) {
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"note1", "API Design", "api-design.md", "Caching is important for API performance.", "h1", now, now)
 
-	chat := NewChatService(ollama, chroma, mockMgr, "embed-model", "chat-model", nil)
+	chat := NewChatService(ollama, ollama, chroma, mockMgr, "embed-model", "chat-model", nil)
 	result, err := chat.Ask(ctx, "user1", "Tell me about caching", nil)
 	require.NoError(t, err)
 	require.Contains(t, result.Response, "caching")
@@ -161,7 +161,7 @@ func TestChatService_HandleChatTask(t *testing.T) {
 	ollama := NewOllamaClient(ollamaServer.URL, 30*time.Second, 120*time.Second)
 	chroma := NewChromaClient(chromaServer.URL)
 	mockMgr := newMockDBManager()
-	chat := NewChatService(ollama, chroma, mockMgr, "embed", "chat", nil)
+	chat := NewChatService(ollama, ollama, chroma, mockMgr, "embed", "chat", nil)
 
 	task := &Task{
 		ID:      "task1",

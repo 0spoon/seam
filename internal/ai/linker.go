@@ -24,7 +24,8 @@ type LinkSuggestion struct {
 
 // AutoLinker generates link suggestions between semantically related notes.
 type AutoLinker struct {
-	ollama     *OllamaClient
+	embedder   EmbeddingGenerator
+	chat       ChatCompleter
 	chroma     *ChromaClient
 	dbManager  userdb.Manager
 	hub        *ws.Hub
@@ -34,12 +35,13 @@ type AutoLinker struct {
 }
 
 // NewAutoLinker creates a new AutoLinker.
-func NewAutoLinker(ollama *OllamaClient, chroma *ChromaClient, dbManager userdb.Manager, embedModel, chatModel string, hub *ws.Hub, logger *slog.Logger) *AutoLinker {
+func NewAutoLinker(embedder EmbeddingGenerator, chat ChatCompleter, chroma *ChromaClient, dbManager userdb.Manager, embedModel, chatModel string, hub *ws.Hub, logger *slog.Logger) *AutoLinker {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &AutoLinker{
-		ollama:     ollama,
+		embedder:   embedder,
+		chat:       chat,
 		chroma:     chroma,
 		dbManager:  dbManager,
 		hub:        hub,
@@ -78,7 +80,7 @@ func (l *AutoLinker) SuggestLinks(ctx context.Context, userID, noteID string) ([
 	if runes := []rune(text); len(runes) > 3000 {
 		text = string(runes[:3000])
 	}
-	embedding, err := l.ollama.GenerateEmbedding(ctx, l.embedModel, text)
+	embedding, err := l.embedder.GenerateEmbedding(ctx, l.embedModel, text)
 	if err != nil {
 		return nil, fmt.Errorf("ai.AutoLinker.SuggestLinks: embed source: %w", err)
 	}
@@ -188,7 +190,7 @@ Only output the JSON array, no other text.`, sourceTitle, sourceBody, strings.Jo
 		{Role: "user", Content: prompt},
 	}
 
-	resp, err := l.ollama.ChatCompletion(ctx, l.chatModel, messages)
+	resp, err := l.chat.ChatCompletion(ctx, l.chatModel, messages)
 	if err != nil {
 		return nil, fmt.Errorf("ai.AutoLinker.askForSuggestions: %w", err)
 	}

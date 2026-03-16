@@ -20,9 +20,9 @@ const (
 const defaultReindexLimit = 10000
 
 // Embedder manages the embedding pipeline: chunking notes, generating
-// embeddings via Ollama, and storing them in ChromaDB.
+// embeddings via a local embedding model, and storing them in ChromaDB.
 type Embedder struct {
-	ollama       *OllamaClient
+	embedder     EmbeddingGenerator
 	chroma       *ChromaClient
 	dbManager    userdb.Manager
 	model        string
@@ -33,12 +33,12 @@ type Embedder struct {
 
 // NewEmbedder creates a new Embedder. Optional chunkSize and chunkOverlap can
 // be provided; zero values use defaults (2048 and 200 respectively).
-func NewEmbedder(ollama *OllamaClient, chroma *ChromaClient, dbManager userdb.Manager, model string, logger *slog.Logger, opts ...func(*Embedder)) *Embedder {
+func NewEmbedder(embedder EmbeddingGenerator, chroma *ChromaClient, dbManager userdb.Manager, model string, logger *slog.Logger, opts ...func(*Embedder)) *Embedder {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	e := &Embedder{
-		ollama:       ollama,
+		embedder:     embedder,
 		chroma:       chroma,
 		dbManager:    dbManager,
 		model:        model,
@@ -107,7 +107,7 @@ func (e *Embedder) EmbedNote(ctx context.Context, userID, noteID, title, body st
 			return fmt.Errorf("ai.Embedder.EmbedNote: context cancelled before chunk %d: %w", i, err)
 		}
 		docID := fmt.Sprintf("%s_chunk_%d", noteID, i)
-		embedding, err := e.ollama.GenerateEmbedding(ctx, e.model, chunk)
+		embedding, err := e.embedder.GenerateEmbedding(ctx, e.model, chunk)
 		if err != nil {
 			return fmt.Errorf("ai.Embedder.EmbedNote: embed chunk %d: %w", i, err)
 		}
@@ -276,7 +276,7 @@ func (e *Embedder) FindRelated(ctx context.Context, noteID, userID string, nResu
 		text = string(runes[:3000])
 	}
 
-	queryEmbedding, err := e.ollama.GenerateEmbedding(ctx, e.model, text)
+	queryEmbedding, err := e.embedder.GenerateEmbedding(ctx, e.model, text)
 	if err != nil {
 		return nil, fmt.Errorf("ai.Embedder.FindRelated: generate embedding: %w", err)
 	}

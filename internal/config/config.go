@@ -24,6 +24,7 @@ type Config struct {
 	LogLevel      string        `yaml:"log_level"`    // "debug", "info", "warn", "error"; default "info"
 	CORSOrigins   []string      `yaml:"cors_origins"` // allowed CORS origins; default localhost
 	Models        ModelsConfig  `yaml:"models"`
+	LLM           LLMConfig     `yaml:"llm"`
 	Whisper       WhisperConfig `yaml:"whisper"`
 	Auth          AuthConfig    `yaml:"auth"`
 	AI            AIConfig      `yaml:"ai"`
@@ -37,6 +38,36 @@ type ModelsConfig struct {
 	Embeddings string `yaml:"embeddings"`
 	Background string `yaml:"background"`
 	Chat       string `yaml:"chat"`
+}
+
+// LLMConfig specifies which LLM provider to use for chat completions.
+// Embeddings always use the local Ollama instance regardless of this setting.
+type LLMConfig struct {
+	// Provider selects the LLM backend: "ollama" (default), "openai", or "anthropic".
+	Provider string `yaml:"provider"`
+
+	// OpenAI settings (used when provider is "openai").
+	OpenAI OpenAIConfig `yaml:"openai"`
+
+	// Anthropic settings (used when provider is "anthropic").
+	Anthropic AnthropicConfig `yaml:"anthropic"`
+}
+
+// OpenAIConfig holds OpenAI API settings.
+type OpenAIConfig struct {
+	// APIKey is the OpenAI API key. env: SEAM_OPENAI_API_KEY
+	APIKey string `yaml:"api_key"`
+
+	// BaseURL overrides the default API endpoint. Useful for Azure OpenAI
+	// or OpenAI-compatible services (e.g., Together, Groq).
+	// Defaults to "https://api.openai.com/v1" when empty.
+	BaseURL string `yaml:"base_url"`
+}
+
+// AnthropicConfig holds Anthropic API settings.
+type AnthropicConfig struct {
+	// APIKey is the Anthropic API key. env: SEAM_ANTHROPIC_API_KEY
+	APIKey string `yaml:"api_key"`
 }
 
 // WhisperConfig specifies local whisper.cpp transcription settings.
@@ -142,6 +173,18 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SEAM_CHROMADB_URL"); v != "" {
 		cfg.ChromaDBURL = v
 	}
+	if v := os.Getenv("SEAM_LLM_PROVIDER"); v != "" {
+		cfg.LLM.Provider = v
+	}
+	if v := os.Getenv("SEAM_OPENAI_API_KEY"); v != "" {
+		cfg.LLM.OpenAI.APIKey = v
+	}
+	if v := os.Getenv("SEAM_OPENAI_BASE_URL"); v != "" {
+		cfg.LLM.OpenAI.BaseURL = v
+	}
+	if v := os.Getenv("SEAM_ANTHROPIC_API_KEY"); v != "" {
+		cfg.LLM.Anthropic.APIKey = v
+	}
 	if v := os.Getenv("SEAM_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
 	}
@@ -157,6 +200,9 @@ func applyDefaults(cfg *Config) {
 	}
 	// No default for OllamaBaseURL: when empty, AI features are disabled
 	// and model names are not required.
+	if cfg.LLM.Provider == "" {
+		cfg.LLM.Provider = "ollama"
+	}
 	if cfg.Auth.AccessTokenTTL.Duration == 0 {
 		cfg.Auth.AccessTokenTTL.Duration = 15 * time.Minute
 	}
@@ -209,6 +255,7 @@ func normalizePaths(cfg *Config) {
 	cfg.DataDir = strings.TrimRight(cfg.DataDir, "/")
 	cfg.OllamaBaseURL = strings.TrimRight(cfg.OllamaBaseURL, "/")
 	cfg.ChromaDBURL = strings.TrimRight(cfg.ChromaDBURL, "/")
+	cfg.LLM.OpenAI.BaseURL = strings.TrimRight(cfg.LLM.OpenAI.BaseURL, "/")
 }
 
 // validate checks that all required fields are present and warns about
@@ -240,6 +287,26 @@ func validate(cfg *Config) error {
 			errs = append(errs, errors.New("models.chat is required when ollama_base_url is set"))
 		}
 	}
+	// Validate LLM provider and required credentials.
+	switch cfg.LLM.Provider {
+	case "ollama":
+		// No extra config needed; uses OllamaBaseURL.
+	case "openai":
+		if cfg.LLM.OpenAI.APIKey == "" {
+			errs = append(errs, errors.New("llm.openai.api_key is required when llm.provider is \"openai\" (set in config or SEAM_OPENAI_API_KEY env var)"))
+		}
+	case "anthropic":
+		if cfg.LLM.Anthropic.APIKey == "" {
+			errs = append(errs, errors.New("llm.anthropic.api_key is required when llm.provider is \"anthropic\" (set in config or SEAM_ANTHROPIC_API_KEY env var)"))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("llm.provider must be \"ollama\", \"openai\", or \"anthropic\" (got %q)", cfg.LLM.Provider))
+	}
+	// External providers still need Ollama for embeddings.
+	if cfg.LLM.Provider != "ollama" && cfg.OllamaBaseURL == "" {
+		slog.Warn("ollama_base_url not configured; embeddings will not be available even with an external LLM provider")
+	}
+
 	if cfg.Auth.BcryptCost < 4 || cfg.Auth.BcryptCost > 14 {
 		errs = append(errs, fmt.Errorf("auth.bcrypt_cost must be between 4 and 14 (got %d)", cfg.Auth.BcryptCost))
 	}

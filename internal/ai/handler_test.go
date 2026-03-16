@@ -70,9 +70,9 @@ func setupTestHandler(t *testing.T) (*Handler, *mockDBManager) {
 		"note1", "Test Note", "proj1", "test.md", "This is test content about caching", "h1", now, now)
 
 	embedder := NewEmbedder(ollama, chroma, mockMgr, "embed-model", nil)
-	chatSvc := NewChatService(ollama, chroma, mockMgr, "embed-model", "chat-model", nil)
+	chatSvc := NewChatService(ollama, ollama, chroma, mockMgr, "embed-model", "chat-model", nil)
 	synth := NewSynthesizer(ollama, mockMgr, "chat-model", nil)
-	linker := NewAutoLinker(ollama, chroma, mockMgr, "embed-model", "chat-model", nil, nil)
+	linker := NewAutoLinker(ollama, ollama, chroma, mockMgr, "embed-model", "chat-model", nil, nil)
 
 	handler := NewHandler(nil, chatSvc, synth, linker, embedder, nil, nil, mockMgr, nil)
 	return handler, mockMgr

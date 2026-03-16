@@ -46,7 +46,7 @@ type NoteBodyUpdater interface {
 // Writer provides AI writing assistance: expand, summarize, extract action items.
 type Writer struct {
 	mu          sync.RWMutex
-	ollama      *OllamaClient
+	chat        ChatCompleter
 	bodyLoader  NoteBodyLoader
 	bodyUpdater NoteBodyUpdater
 	dbManager   userdb.Manager
@@ -55,12 +55,12 @@ type Writer struct {
 }
 
 // NewWriter creates a new Writer.
-func NewWriter(ollama *OllamaClient, dbManager userdb.Manager, model string, logger *slog.Logger) *Writer {
+func NewWriter(chat ChatCompleter, dbManager userdb.Manager, model string, logger *slog.Logger) *Writer {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Writer{
-		ollama:    ollama,
+		chat:      chat,
 		dbManager: dbManager,
 		model:     model,
 		logger:    logger,
@@ -141,7 +141,7 @@ func (w *Writer) Assist(ctx context.Context, userID, noteID, action, selection s
 		{Role: "user", Content: prompt},
 	}
 
-	resp, err := w.ollama.ChatCompletion(ctx, w.model, messages)
+	resp, err := w.chat.ChatCompletion(ctx, w.model, messages)
 	if err != nil {
 		return "", fmt.Errorf("ai.Writer.Assist: %w", err)
 	}
@@ -212,7 +212,7 @@ func (w *Writer) HandleSummarizeTranscriptTask(ctx context.Context, task *Task) 
 		{Role: "user", Content: fmt.Sprintf("Summarize this transcription:\n\n%s", body)},
 	}
 
-	resp, err := w.ollama.ChatCompletion(ctx, w.model, messages)
+	resp, err := w.chat.ChatCompletion(ctx, w.model, messages)
 	if err != nil {
 		return nil, fmt.Errorf("ai.Writer.HandleSummarizeTranscriptTask: %w", err)
 	}

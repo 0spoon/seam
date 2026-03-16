@@ -23,10 +23,30 @@ ollama_base_url: "http://localhost:11434"
 chromadb_url: "http://localhost:8000"
 
 # AI model names used by Seam.
+# Embedding model always runs on local Ollama regardless of LLM provider.
+# Chat and background models use the configured LLM provider.
 models:
   embeddings: "qwen3-embedding:8b"
   background: "qwen3:32b"
   chat: "qwen3:32b"
+
+# LLM provider for chat completions (writing assist, synthesis, suggestions, etc.).
+# Embeddings always use local Ollama + ChromaDB regardless of this setting.
+# Options: "ollama" (default), "openai", "anthropic"
+# env: SEAM_LLM_PROVIDER
+llm:
+  provider: "ollama"
+
+  # OpenAI settings (used when provider is "openai").
+  # Also works with Azure OpenAI and OpenAI-compatible APIs (Together, Groq, etc.).
+  openai:
+    api_key: ""             # env: SEAM_OPENAI_API_KEY
+    base_url: ""            # optional; env: SEAM_OPENAI_BASE_URL
+                            # defaults to https://api.openai.com/v1
+
+  # Anthropic settings (used when provider is "anthropic").
+  anthropic:
+    api_key: ""             # env: SEAM_ANTHROPIC_API_KEY
 
 # Whisper.cpp settings for voice transcription. Optional; required for voice capture.
 # Install: brew install whisper-cpp

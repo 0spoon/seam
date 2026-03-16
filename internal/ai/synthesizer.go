@@ -15,7 +15,7 @@ const defaultNoteLimit = 50
 
 // Synthesizer generates summaries and synthesis across notes.
 type Synthesizer struct {
-	ollama    *OllamaClient
+	chat      ChatCompleter
 	dbManager userdb.Manager
 	chatModel string
 	logger    *slog.Logger
@@ -24,12 +24,12 @@ type Synthesizer struct {
 
 // NewSynthesizer creates a new Synthesizer. Optional noteLimit can be set;
 // zero uses the default (50).
-func NewSynthesizer(ollama *OllamaClient, dbManager userdb.Manager, chatModel string, logger *slog.Logger, opts ...func(*Synthesizer)) *Synthesizer {
+func NewSynthesizer(chat ChatCompleter, dbManager userdb.Manager, chatModel string, logger *slog.Logger, opts ...func(*Synthesizer)) *Synthesizer {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	s := &Synthesizer{
-		ollama:    ollama,
+		chat:      chat,
 		dbManager: dbManager,
 		chatModel: chatModel,
 		logger:    logger,
@@ -138,7 +138,7 @@ func (s *Synthesizer) Synthesize(ctx context.Context, userID string, payload Syn
 
 	messages := BuildSynthesisMessages(payload.Prompt, rows)
 
-	resp, err := s.ollama.ChatCompletion(ctx, s.chatModel, messages)
+	resp, err := s.chat.ChatCompletion(ctx, s.chatModel, messages)
 	if err != nil {
 		return nil, fmt.Errorf("ai.Synthesizer.Synthesize: chat completion: %w", err)
 	}
@@ -168,7 +168,7 @@ func (s *Synthesizer) SynthesizeStream(ctx context.Context, userID string, paylo
 		}
 
 		messages := BuildSynthesisMessages(payload.Prompt, rows)
-		ollamaTokenCh, ollamaErrCh := s.ollama.ChatCompletionStream(ctx, s.chatModel, messages)
+		ollamaTokenCh, ollamaErrCh := s.chat.ChatCompletionStream(ctx, s.chatModel, messages)
 
 		for token := range ollamaTokenCh {
 			select {

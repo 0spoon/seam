@@ -22,7 +22,7 @@ type SemanticResult struct {
 
 // SemanticSearcher performs semantic search using embeddings.
 type SemanticSearcher struct {
-	ollama    *ai.OllamaClient
+	embedder  ai.EmbeddingGenerator
 	chroma    *ai.ChromaClient
 	dbManager userdb.Manager
 	model     string
@@ -30,12 +30,12 @@ type SemanticSearcher struct {
 }
 
 // NewSemanticSearcher creates a new SemanticSearcher.
-func NewSemanticSearcher(ollama *ai.OllamaClient, chroma *ai.ChromaClient, dbManager userdb.Manager, model string, logger *slog.Logger) *SemanticSearcher {
+func NewSemanticSearcher(embedder ai.EmbeddingGenerator, chroma *ai.ChromaClient, dbManager userdb.Manager, model string, logger *slog.Logger) *SemanticSearcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &SemanticSearcher{
-		ollama:    ollama,
+		embedder:  embedder,
 		chroma:    chroma,
 		dbManager: dbManager,
 		model:     model,
@@ -51,7 +51,7 @@ func (s *SemanticSearcher) Search(ctx context.Context, userID, query string, lim
 	}
 
 	// Generate embedding for the query.
-	queryEmbedding, err := s.ollama.GenerateEmbedding(ctx, s.model, query)
+	queryEmbedding, err := s.embedder.GenerateEmbedding(ctx, s.model, query)
 	if err != nil {
 		return nil, fmt.Errorf("search.SemanticSearcher.Search: embed query: %w", err)
 	}
@@ -147,7 +147,7 @@ func (s *SemanticSearcher) SearchScoped(ctx context.Context, userID, query strin
 		limit = 10
 	}
 
-	queryEmbedding, err := s.ollama.GenerateEmbedding(ctx, s.model, query)
+	queryEmbedding, err := s.embedder.GenerateEmbedding(ctx, s.model, query)
 	if err != nil {
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchScoped: embed query: %w", err)
 	}
@@ -340,7 +340,7 @@ func (s *SemanticSearcher) SearchWithRecency(ctx context.Context, userID, query 
 		limit = 10
 	}
 
-	queryEmbedding, err := s.ollama.GenerateEmbedding(ctx, s.model, query)
+	queryEmbedding, err := s.embedder.GenerateEmbedding(ctx, s.model, query)
 	if err != nil {
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchWithRecency: embed query: %w", err)
 	}
@@ -440,7 +440,7 @@ func (s *SemanticSearcher) SearchScopedWithRecency(ctx context.Context, userID, 
 		limit = 10
 	}
 
-	queryEmbedding, err := s.ollama.GenerateEmbedding(ctx, s.model, query)
+	queryEmbedding, err := s.embedder.GenerateEmbedding(ctx, s.model, query)
 	if err != nil {
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchScopedWithRecency: embed query: %w", err)
 	}

@@ -189,8 +189,12 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, model string, m
 
 			var chunk openaiStreamDelta
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				truncated := data
+				if runes := []rune(data); len(runes) > 200 {
+					truncated = string(runes[:200])
+				}
 				slog.Warn("ai.OpenAIClient.ChatCompletionStream: malformed JSON chunk",
-					"error", err, "data", data[:min(len(data), 200)])
+					"error", err, "data", truncated)
 				continue
 			}
 			if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
@@ -223,17 +227,20 @@ func (c *OpenAIClient) checkResponse(resp *http.Response) error {
 		Error *openaiError `json:"error"`
 	}
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil {
+		// Log the full error for debugging; return sanitized sentinel errors.
+		slog.Debug("ai.OpenAIClient: API error",
+			"status", resp.StatusCode, "message", errResp.Error.Message)
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
-			return fmt.Errorf("authentication failed: %s", errResp.Error.Message)
+			return fmt.Errorf("%w: invalid API key", ErrAuthFailed)
 		case http.StatusNotFound:
 			return fmt.Errorf("%w: %s", ErrModelNotFound, errResp.Error.Message)
 		case http.StatusTooManyRequests:
-			return fmt.Errorf("rate limited: %s", errResp.Error.Message)
+			return fmt.Errorf("%w: try again later", ErrRateLimited)
 		default:
-			return fmt.Errorf("API error (status %d): %s", resp.StatusCode, errResp.Error.Message)
+			return fmt.Errorf("API error (status %d)", resp.StatusCode)
 		}
 	}
 
-	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	return fmt.Errorf("unexpected status %d", resp.StatusCode)
 }

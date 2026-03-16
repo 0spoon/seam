@@ -198,7 +198,9 @@ func (h *Handler) ask(w http.ResponseWriter, r *http.Request) {
 	result, err := h.chatSvc.Ask(r.Context(), userID, req.Query, req.History)
 	if err != nil {
 		h.logger.Error("ai.Handler.ask: chat failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "chat request failed")
+		if !writeProviderError(w, err) {
+			writeError(w, http.StatusInternalServerError, "chat request failed")
+		}
 		return
 	}
 
@@ -240,7 +242,9 @@ func (h *Handler) synthesize(w http.ResponseWriter, r *http.Request) {
 	result, err := h.synthesizer.Synthesize(r.Context(), userID, payload)
 	if err != nil {
 		h.logger.Error("ai.Handler.synthesize: synthesis failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "synthesis failed")
+		if !writeProviderError(w, err) {
+			writeError(w, http.StatusInternalServerError, "synthesis failed")
+		}
 		return
 	}
 
@@ -473,7 +477,9 @@ func (h *Handler) assist(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("ai.Handler.assist: failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "writing assist failed")
+		if !writeProviderError(w, err) {
+			writeError(w, http.StatusInternalServerError, "writing assist failed")
+		}
 		return
 	}
 
@@ -557,7 +563,9 @@ func (h *Handler) suggestTags(w http.ResponseWriter, r *http.Request) {
 	tags, err := h.suggester.SuggestTags(r.Context(), noteTitle, noteBody, existingTags)
 	if err != nil {
 		h.logger.Error("ai.Handler.suggestTags: suggest failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "tag suggestion failed")
+		if !writeProviderError(w, err) {
+			writeError(w, http.StatusInternalServerError, "tag suggestion failed")
+		}
 		return
 	}
 
@@ -641,7 +649,9 @@ func (h *Handler) suggestProject(w http.ResponseWriter, r *http.Request) {
 	suggestions, err := h.suggester.SuggestProject(r.Context(), noteTitle, noteBody, projects)
 	if err != nil {
 		h.logger.Error("ai.Handler.suggestProject: suggest failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "project suggestion failed")
+		if !writeProviderError(w, err) {
+			writeError(w, http.StatusInternalServerError, "project suggestion failed")
+		}
 		return
 	}
 
@@ -660,4 +670,23 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// writeProviderError maps provider-specific sentinel errors to appropriate
+// HTTP status codes and sanitized messages. Returns true if the error was
+// handled; false if the caller should use a generic 500 response.
+func writeProviderError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, ErrRateLimited):
+		writeError(w, http.StatusTooManyRequests, "LLM provider rate limit exceeded, try again later")
+		return true
+	case errors.Is(err, ErrAuthFailed):
+		writeError(w, http.StatusBadGateway, "LLM provider authentication failed; check server configuration")
+		return true
+	case errors.Is(err, ErrModelNotFound):
+		writeError(w, http.StatusBadGateway, "configured model not found at LLM provider")
+		return true
+	default:
+		return false
+	}
 }

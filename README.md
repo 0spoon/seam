@@ -276,13 +276,8 @@ git clone https://github.com/katata/seam.git
 cd seam
 make build                          # builds bin/seamd (server) + bin/seam (TUI)
 
-# 2. Configure
-cp seam-server.yaml.example seam-server.yaml
-# Edit seam-server.yaml:
-#   - Set jwt_secret (run: openssl rand -hex 32)
-#   - Set data_dir to where you want notes stored
-#   - Set ollama_base_url if not localhost
-#   - Optionally set llm.provider to "openai" or "anthropic"
+# 2. Configure (interactive -- generates JWT secret, asks for data dir, LLM provider)
+make init
 
 # 3. Pull models (if using Ollama)
 ollama pull qwen3:32b
@@ -502,6 +497,7 @@ Events: `note.changed`, `task.progress`, `task.complete`, `task.failed`, `chat.s
 ## Development
 
 ```bash
+make init                 # interactive config setup (JWT, data dir, LLM provider)
 make build                # build seamd + seam to ./bin/
 make run                  # build and run the server
 make dev-web              # React dev server (Vite on :5173, proxies /api to :8080)

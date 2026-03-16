@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,7 +32,11 @@ type AnthropicClient struct {
 }
 
 // NewAnthropicClient creates a new Anthropic API client.
-func NewAnthropicClient(apiKey string, chatTimeout time.Duration) *AnthropicClient {
+// If maxTokens is 0, it defaults to 4096.
+func NewAnthropicClient(apiKey string, chatTimeout time.Duration, maxTokens int) *AnthropicClient {
+	if maxTokens <= 0 {
+		maxTokens = defaultMaxTokens
+	}
 	return &AnthropicClient{
 		baseURL: anthropicBaseURL,
 		apiKey:  apiKey,
@@ -39,7 +44,7 @@ func NewAnthropicClient(apiKey string, chatTimeout time.Duration) *AnthropicClie
 			Timeout: 10 * time.Minute,
 		},
 		chatTimeout: chatTimeout,
-		maxTokens:   defaultMaxTokens,
+		maxTokens:   maxTokens,
 	}
 }
 
@@ -107,6 +112,9 @@ func convertMessages(messages []ChatMessage) (string, []anthropicMessage) {
 	return system, converted
 }
 
+// ErrEmptyMessages is returned when no user/assistant messages are provided.
+var ErrEmptyMessages = errors.New("at least one user or assistant message is required")
+
 // ChatCompletion sends messages to the Anthropic Messages endpoint and
 // returns a complete response.
 func (c *AnthropicClient) ChatCompletion(ctx context.Context, model string, messages []ChatMessage) (*ChatResponse, error) {
@@ -114,6 +122,9 @@ func (c *AnthropicClient) ChatCompletion(ctx context.Context, model string, mess
 	defer cancel()
 
 	system, converted := convertMessages(messages)
+	if len(converted) == 0 {
+		return nil, fmt.Errorf("ai.AnthropicClient.ChatCompletion: %w", ErrEmptyMessages)
+	}
 
 	reqBody := anthropicRequest{
 		Model:     model,
@@ -187,6 +198,10 @@ func (c *AnthropicClient) ChatCompletionStream(ctx context.Context, model string
 		defer cancel()
 
 		system, converted := convertMessages(messages)
+		if len(converted) == 0 {
+			errCh <- fmt.Errorf("ai.AnthropicClient.ChatCompletionStream: %w", ErrEmptyMessages)
+			return
+		}
 
 		reqBody := anthropicRequest{
 			Model:     model,
@@ -250,8 +265,12 @@ func (c *AnthropicClient) ChatCompletionStream(ctx context.Context, model string
 					} `json:"delta"`
 				}
 				if err := json.Unmarshal([]byte(data), &delta); err != nil {
+					truncated := data
+					if runes := []rune(data); len(runes) > 200 {
+						truncated = string(runes[:200])
+					}
 					slog.Warn("ai.AnthropicClient.ChatCompletionStream: malformed delta",
-						"error", err, "data", data[:min(len(data), 200)])
+						"error", err, "data", truncated)
 					continue
 				}
 				if delta.Delta.Type == "text_delta" && delta.Delta.Text != "" {
@@ -298,17 +317,20 @@ func (c *AnthropicClient) checkResponse(resp *http.Response) error {
 	// Try to parse structured error.
 	var errResp anthropicErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil {
+		// Log the full error for debugging; return sanitized sentinel errors.
+		slog.Debug("ai.AnthropicClient: API error",
+			"status", resp.StatusCode, "message", errResp.Error.Message)
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
-			return fmt.Errorf("authentication failed: %s", errResp.Error.Message)
+			return fmt.Errorf("%w: invalid API key", ErrAuthFailed)
 		case http.StatusNotFound:
 			return fmt.Errorf("%w: %s", ErrModelNotFound, errResp.Error.Message)
 		case http.StatusTooManyRequests:
-			return fmt.Errorf("rate limited: %s", errResp.Error.Message)
+			return fmt.Errorf("%w: try again later", ErrRateLimited)
 		default:
-			return fmt.Errorf("API error (status %d): %s", resp.StatusCode, errResp.Error.Message)
+			return fmt.Errorf("API error (status %d)", resp.StatusCode)
 		}
 	}
 
-	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	return fmt.Errorf("unexpected status %d", resp.StatusCode)
 }

@@ -1351,26 +1351,29 @@ Changes span: `internal/ai/provider.go`, `internal/ai/openai.go`, `internal/ai/a
 `internal/search/semantic.go`, `internal/config/config.go`, `cmd/seamd/main.go`,
 `seam-server.yaml.example`, and associated test files.
 
+**[Fix pass 2026-03-15]** All 10 issues fixed. Build and tests pass (`make build && go test ./...`).
+
 ### HIGH
 
 #### LLM-H1. API key stored in plaintext in YAML config file
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `internal/config/config.go:59,70`
 **Description:** OpenAI and Anthropic API keys are stored in plaintext in the YAML config
 file on disk. While env var overrides (`SEAM_OPENAI_API_KEY`, `SEAM_ANTHROPIC_API_KEY`)
 are supported and preferred, the `api_key` YAML fields have no documentation warning
 against committing them to version control. A user who sets the key in YAML and commits
 their config file leaks their API key.
-**Fix:** Add a comment in `seam-server.yaml.example` warning against committing API keys.
-Prefer env vars for secrets. Consider validating that the config file has restrictive
-permissions (e.g., not world-readable) when API keys are set in YAML.
+**Fix:** Added security warning comments in `seam-server.yaml.example` near each `api_key`
+field. Added `warnIfInsecureConfigFile` function in `config.go` that logs a warning when
+the YAML file contains API keys and has group-readable or world-readable permissions
+(mode includes o+r or g+r), advising `chmod 600` or env var usage.
 
 ---
 
 #### LLM-H2. `checkResponse` in OpenAI/Anthropic clients leaks API error messages to callers
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `internal/ai/openai.go:228,234`, `internal/ai/anthropic.go:303,309`
 **Description:** Error messages from the OpenAI and Anthropic APIs (e.g., rate limit
 details, model names, account info) are propagated verbatim into error strings via
@@ -1379,9 +1382,11 @@ the AI services and may reach HTTP handlers that return them to clients. Previou
 SCAN2-M13 fixed this for Ollama errors in `ai/handler.go`, but the new external provider
 errors follow the same pattern. The handler's error-to-status mapping uses
 `strings.Contains(err.Error(), ...)` which may not catch external provider error formats.
-**Fix:** Define provider-agnostic sentinel errors (e.g., `ErrRateLimited`,
-`ErrAuthFailed`) and wrap them in `checkResponse`. Handlers should use `errors.Is()` and
-return sanitized messages.
+**Fix:** Added `ErrRateLimited` and `ErrAuthFailed` sentinels in `provider.go`. Both
+`checkResponse` implementations now log the full API error at Debug level and return
+sanitized sentinels. Added `writeProviderError` helper in `handler.go` that maps
+sentinels to HTTP status codes (429 for rate limit, 502 for auth/model errors). Applied
+to all handler error paths (`ask`, `synthesize`, `assist`, `suggestTags`, `suggestProject`).
 
 ---
 
@@ -1389,21 +1394,22 @@ return sanitized messages.
 
 #### LLM-M1. Anthropic `convertMessages` produces empty `messages` if only system messages provided
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `internal/ai/anthropic.go:91-108`
 **Description:** If a caller passes only system-role messages (no user/assistant messages),
 `convertMessages` returns an empty `converted` slice. Anthropic's API requires at least
 one message with role "user". This would produce a 400 from the API. Currently all call
 sites in the codebase always include at least one user message, but the function has no
 guard against this edge case.
-**Fix:** Add a validation check after `convertMessages` that returns a clear error if
-`converted` is empty, rather than letting the API return an opaque error.
+**Fix:** Added `ErrEmptyMessages` sentinel. Both `ChatCompletion` and
+`ChatCompletionStream` check `len(converted) == 0` after `convertMessages` and return
+a clear error instead of sending an invalid request to the API.
 
 ---
 
 #### LLM-M2. External provider model validation not enforced at startup
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `internal/config/config.go:279-289`
 **Description:** When `ollama_base_url` is set, the config validates that `models.chat`,
 `models.background`, and `models.embeddings` are all non-empty. When an external LLM
@@ -1412,15 +1418,16 @@ are still required for the provider to work, but the validation only fires when
 `ollama_base_url` is set. A user could configure `llm.provider: "openai"` with an API
 key but leave `models.chat` empty, and the config would validate successfully. At
 runtime, the empty model name would be sent to the API, producing an obscure error.
-**Fix:** When `llm.provider` is not `"ollama"`, validate that `models.chat` and
-`models.background` are non-empty. `models.embeddings` should be validated when
-`ollama_base_url` is set regardless of provider (since embeddings always use Ollama).
+**Fix:** Separated model validation: `models.embeddings` is validated when
+`ollama_base_url` is set (embeddings are always local). `models.chat` and
+`models.background` are validated when any LLM provider is active (either
+`ollama_base_url` is set or `llm.provider` is not `"ollama"`).
 
 ---
 
 #### LLM-M3. `OllamaClient` created with empty base URL when only external provider is configured
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `cmd/seamd/main.go:236-240`
 **Description:** `ollamaClient` is always created, even when `cfg.OllamaBaseURL` is empty.
 When an external LLM provider is configured without a local Ollama instance (e.g., user
@@ -1429,22 +1436,24 @@ an empty base URL. This client is passed as the `EmbeddingGenerator` to services
 `ChatService` and `AutoLinker`. If any code path calls `GenerateEmbedding`, the HTTP
 request goes to `"/api/embed"` (no host), which fails with a confusing network error
 instead of a clear "Ollama not configured" message.
-**Fix:** When `cfg.OllamaBaseURL` is empty, set `ollamaClient` to nil. Services that
-accept `EmbeddingGenerator` should nil-check before calling, or skip embedding-dependent
-features gracefully (the handler already checks for nil services at the HTTP level).
+**Fix:** `ollamaClient` is now only created when `cfg.OllamaBaseURL` is non-empty. The
+ChromaDB wiring block guards on both `cfg.ChromaDBURL != ""` and `ollamaClient != nil`.
+The else branch guards on `chatCompleter != nil` for writer/suggester setup. When neither
+Ollama nor an external provider is configured, a no-op handler is created.
 
 ---
 
 #### LLM-M4. Anthropic `maxTokens` not configurable
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `internal/ai/anthropic.go:21,42`
 **Description:** `defaultMaxTokens = 4096` is hardcoded and cannot be changed via config.
 For models like Claude with 8192-token output, or for tasks like synthesis that may need
 longer output, 4096 can silently truncate responses. The user has no way to increase this
 without modifying source code.
-**Fix:** Add `max_tokens` field to `AnthropicConfig` in config.go, or add it as a
-parameter to `NewAnthropicClient`. Default to 4096 when not set.
+**Fix:** Added `MaxTokens int` field to `AnthropicConfig`. `NewAnthropicClient` now
+accepts `maxTokens` parameter; defaults to 4096 when zero. Added `max_tokens` to
+`seam-server.yaml.example` with documentation.
 
 ---
 
@@ -1452,18 +1461,18 @@ parameter to `NewAnthropicClient`. Default to 4096 when not set.
 
 #### LLM-L1. OpenAI streaming log truncation uses byte-position slicing
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `internal/ai/openai.go:193`
 **Description:** `data[:min(len(data), 200)]` slices by byte position, which can split
 multi-byte UTF-8 characters in the log output. This is the same class of issue fixed in
 SCAN2-L5 for the existing Ollama and AI service code.
-**Fix:** Use rune-safe truncation: `string([]rune(data)[:min(len([]rune(data)), 200)])`.
+**Fix:** Replaced with rune-safe truncation using `[]rune` conversion.
 
 ---
 
 #### LLM-L2. Anthropic streaming log truncation uses byte-position slicing
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `internal/ai/anthropic.go:254`
 **Description:** Same issue as LLM-L1. `data[:min(len(data), 200)]` in the Anthropic
 streaming path slices by byte position.
@@ -1473,35 +1482,37 @@ streaming path slices by byte position.
 
 #### LLM-L3. `seam-server.yaml.example` does not warn about API key security
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `seam-server.yaml.example:60-62,66`
 **Description:** The `api_key` fields in the example config have no security warning.
 Users may copy-paste the example, fill in their API key, and commit the file to version
 control.
-**Fix:** Add comments like `# WARNING: Prefer env vars for API keys. Do not commit secrets
-to version control.` near each `api_key` field.
+**Fix:** Added `# WARNING: Prefer env var ... Do not commit API keys to version control.`
+comments above each `api_key` field in the example config.
 
 ---
 
 #### LLM-L4. `SynthesizeStream` doc comment still says "Ollama"
 
-**Status:** OPEN
+**Status:** FIXED (2026-03-15)
 **File:** `internal/ai/synthesizer.go:150`
 **Description:** The doc comment reads "yielding tokens as they arrive from Ollama" but
 the implementation now uses the `ChatCompleter` interface, which could be any provider.
 Stale documentation.
-**Fix:** Change to "yielding tokens as they arrive from the LLM provider" or similar.
+**Fix:** Changed doc comment to "yielding tokens as they arrive from the LLM provider".
+Also renamed internal variable names `ollamaTokenCh`/`ollamaErrCh` to
+`llmTokenCh`/`llmErrCh` in `synthesizer.go` and `chat.go`.
 
 ---
 
 ### Summary: LLM Provider Review
 
-| Severity | Count | Status |
-|----------|-------|--------|
-| High | 2 | Open |
-| Medium | 4 | Open |
-| Low | 4 | Open |
-| **Total** | **10** | **Open** |
+| Severity | Count | Fixed | Status |
+|----------|-------|-------|--------|
+| High | 2 | 2 | All resolved |
+| Medium | 4 | 4 | All resolved |
+| Low | 4 | 4 | All resolved |
+| **Total** | **10** | **10** | **All resolved** |
 
 ### Updated Grand Total
 
@@ -1514,5 +1525,5 @@ Stale documentation.
 | First full scan | 13 | 13 | 0 |
 | Second full scan | 39 | 39 | 0 |
 | Third full scan | 17 | 17 | 0 |
-| LLM provider review | 10 | 0 | 10 |
-| **All** | **133** | **123** | **10** |
+| LLM provider review | 10 | 10 | 0 |
+| **All** | **133** | **133** | **0** |

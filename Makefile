@@ -1,4 +1,4 @@
-.PHONY: build run test test-integration test-web lint fmt clean dev-web
+.PHONY: build run test test-integration test-web lint fmt clean dev-web init
 
 build:
 	@mkdir -p bin
@@ -26,6 +26,9 @@ fmt:
 
 dev-web:
 	cd web && npm run dev
+
+init:
+	@bash scripts/init.sh
 
 clean:
 	rm -rf bin

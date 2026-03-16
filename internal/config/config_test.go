@@ -392,6 +392,9 @@ func TestLoad_LLMAnthropicEnvOverride(t *testing.T) {
 	config := `
 data_dir: "/d"
 jwt_secret: "test-secret-key-that-is-32-chars!"
+models:
+  chat: "claude-sonnet-4-20250514"
+  background: "claude-sonnet-4-20250514"
 `
 	path := writeConfig(t, config)
 

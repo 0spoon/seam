@@ -68,6 +68,10 @@ type OpenAIConfig struct {
 type AnthropicConfig struct {
 	// APIKey is the Anthropic API key. env: SEAM_ANTHROPIC_API_KEY
 	APIKey string `yaml:"api_key"`
+
+	// MaxTokens is the maximum number of output tokens per request.
+	// Anthropic requires this field. Defaults to 4096 when zero.
+	MaxTokens int `yaml:"max_tokens"`
 }
 
 // WhisperConfig specifies local whisper.cpp transcription settings.
@@ -142,6 +146,8 @@ func Load(path string) (*Config, error) {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("config.Load: parse yaml: %w", err)
 		}
+		// Warn if YAML file contains API keys and has overly permissive permissions.
+		warnIfInsecureConfigFile(path, cfg)
 	}
 
 	applyEnvOverrides(cfg)
@@ -258,6 +264,26 @@ func normalizePaths(cfg *Config) {
 	cfg.LLM.OpenAI.BaseURL = strings.TrimRight(cfg.LLM.OpenAI.BaseURL, "/")
 }
 
+// warnIfInsecureConfigFile logs a warning if the YAML config file contains
+// API keys and has world-readable permissions (mode includes o+r).
+func warnIfInsecureConfigFile(path string, cfg *Config) {
+	hasSecrets := cfg.LLM.OpenAI.APIKey != "" || cfg.LLM.Anthropic.APIKey != ""
+	if !hasSecrets {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	mode := info.Mode().Perm()
+	// Warn if group-readable or world-readable.
+	if mode&0o044 != 0 {
+		slog.Warn("config file contains API keys but has permissive file permissions; "+
+			"consider restricting to owner-only (chmod 600) or using environment variables instead",
+			"path", path, "mode", fmt.Sprintf("%04o", mode))
+	}
+}
+
 // validate checks that all required fields are present and warns about
 // optional fields that will be needed for later phases.
 func validate(cfg *Config) error {
@@ -274,17 +300,21 @@ func validate(cfg *Config) error {
 	} else if len(cfg.JWTSecret) < 32 {
 		errs = append(errs, errors.New("jwt_secret must be at least 32 characters"))
 	}
-	// Only validate AI model names when Ollama is configured. This allows
-	// Seam to run as a basic note-taking system without AI dependencies.
+	// Validate AI model names. Embeddings require Ollama; chat/background
+	// require either Ollama or an external provider.
 	if cfg.OllamaBaseURL != "" {
 		if cfg.Models.Embeddings == "" {
 			errs = append(errs, errors.New("models.embeddings is required when ollama_base_url is set"))
 		}
-		if cfg.Models.Background == "" {
-			errs = append(errs, errors.New("models.background is required when ollama_base_url is set"))
-		}
+	}
+	// Chat and background models are needed whenever any LLM provider is active.
+	hasLLMProvider := cfg.OllamaBaseURL != "" || cfg.LLM.Provider != "ollama"
+	if hasLLMProvider {
 		if cfg.Models.Chat == "" {
-			errs = append(errs, errors.New("models.chat is required when ollama_base_url is set"))
+			errs = append(errs, errors.New("models.chat is required when an LLM provider is configured"))
+		}
+		if cfg.Models.Background == "" {
+			errs = append(errs, errors.New("models.background is required when an LLM provider is configured"))
 		}
 	}
 	// Validate LLM provider and required credentials.

@@ -154,12 +154,12 @@ func (c *ChatService) AskStream(ctx context.Context, userID, query string, histo
 
 	messages := BuildChatMessages(query, contexts, history)
 
-	ollamaTokenCh, ollamaErrCh := c.chat.ChatCompletionStream(ctx, c.chatModel, messages)
+	llmTokenCh, llmErrCh := c.chat.ChatCompletionStream(ctx, c.chatModel, messages)
 
 	go func() {
 		defer close(tokenCh)
 		defer close(errCh)
-		for token := range ollamaTokenCh {
+		for token := range llmTokenCh {
 			select {
 			case tokenCh <- token:
 			case <-ctx.Done():
@@ -167,7 +167,7 @@ func (c *ChatService) AskStream(ctx context.Context, userID, query string, histo
 				return
 			}
 		}
-		for err := range ollamaErrCh {
+		for err := range llmErrCh {
 			if err != nil {
 				errCh <- err
 			}

@@ -40,13 +40,18 @@ llm:
   # OpenAI settings (used when provider is "openai").
   # Also works with Azure OpenAI and OpenAI-compatible APIs (Together, Groq, etc.).
   openai:
+    # WARNING: Prefer SEAM_OPENAI_API_KEY env var over setting this in a file.
+    # Do not commit API keys to version control.
     api_key: ""             # env: SEAM_OPENAI_API_KEY
     base_url: ""            # optional; env: SEAM_OPENAI_BASE_URL
                             # defaults to https://api.openai.com/v1
 
   # Anthropic settings (used when provider is "anthropic").
   anthropic:
+    # WARNING: Prefer SEAM_ANTHROPIC_API_KEY env var over setting this in a file.
+    # Do not commit API keys to version control.
     api_key: ""             # env: SEAM_ANTHROPIC_API_KEY
+    max_tokens: 4096        # max output tokens per request (Anthropic requires this)
 
 # Whisper.cpp settings for voice transcription. Optional; required for voice capture.
 # Install: brew install whisper-cpp

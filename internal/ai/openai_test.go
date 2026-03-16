@@ -89,7 +89,7 @@ func TestOpenAIClient_ChatCompletion_AuthError(t *testing.T) {
 		{Role: "user", Content: "hello"},
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "authentication failed")
+	require.ErrorIs(t, err, ErrAuthFailed)
 }
 
 func TestOpenAIClient_ChatCompletion_ModelNotFound(t *testing.T) {
@@ -129,7 +129,7 @@ func TestOpenAIClient_ChatCompletion_RateLimit(t *testing.T) {
 		{Role: "user", Content: "hello"},
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "rate limited")
+	require.ErrorIs(t, err, ErrRateLimited)
 }
 
 func TestOpenAIClient_ChatCompletionStream(t *testing.T) {
@@ -200,7 +200,7 @@ func TestOpenAIClient_ChatCompletionStream_Error(t *testing.T) {
 		}
 	}
 	require.Error(t, gotErr)
-	require.Contains(t, gotErr.Error(), "internal server error")
+	require.Contains(t, gotErr.Error(), "API error")
 }
 
 func TestOpenAIClient_DefaultBaseURL(t *testing.T) {

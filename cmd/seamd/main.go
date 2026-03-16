@@ -232,12 +232,15 @@ func run() error {
 	chatHistoryHandler := chat.NewHandler(chatHistorySvc, logger)
 
 	// Create AI components.
-	// Ollama is always created for embeddings (local vector generation).
-	ollamaClient := ai.NewOllamaClient(
-		cfg.OllamaBaseURL,
-		cfg.AI.EmbeddingTimeout.Duration,
-		cfg.AI.ChatTimeout.Duration,
-	)
+	// Ollama is created for embeddings when configured (local vector generation).
+	var ollamaClient *ai.OllamaClient
+	if cfg.OllamaBaseURL != "" {
+		ollamaClient = ai.NewOllamaClient(
+			cfg.OllamaBaseURL,
+			cfg.AI.EmbeddingTimeout.Duration,
+			cfg.AI.ChatTimeout.Duration,
+		)
+	}
 
 	// Select the ChatCompleter based on the configured LLM provider.
 	// Embeddings always use the local Ollama instance regardless of provider.
@@ -254,10 +257,13 @@ func run() error {
 		chatCompleter = ai.NewAnthropicClient(
 			cfg.LLM.Anthropic.APIKey,
 			cfg.AI.ChatTimeout.Duration,
+			cfg.LLM.Anthropic.MaxTokens,
 		)
 		logger.Info("LLM provider: Anthropic")
 	default: // "ollama"
-		chatCompleter = ollamaClient
+		if ollamaClient != nil {
+			chatCompleter = ollamaClient
+		}
 		logger.Info("LLM provider: Ollama (local)")
 	}
 
@@ -276,7 +282,7 @@ func run() error {
 	var embedder *ai.Embedder
 	var chromaClient *ai.ChromaClient
 
-	if cfg.ChromaDBURL != "" {
+	if cfg.ChromaDBURL != "" && ollamaClient != nil {
 		chromaClient = ai.NewChromaClient(cfg.ChromaDBURL)
 		embedder = ai.NewEmbedder(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
 		chatSvc = ai.NewChatService(ollamaClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
@@ -324,15 +330,22 @@ func run() error {
 
 		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthSvc, linker, embedder, aiWriter, suggester, userDBMgr, logger)
 		logger.Info("AI features enabled", "ollama_url", cfg.OllamaBaseURL, "chromadb_url", cfg.ChromaDBURL)
-	} else {
-		// Even without ChromaDB, writer and suggester can work with the chat provider.
+	} else if chatCompleter != nil {
+		// Without ChromaDB (or Ollama), writer and suggester can work with any chat provider.
 		aiWriter := ai.NewWriter(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
 		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
 		suggester := ai.NewSuggester(chatCompleter, cfg.Models.Chat, logger)
 		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, aiWriter, suggester, userDBMgr, logger)
-		logger.Info("AI features: ChromaDB not configured; only writing assist and suggestions available")
+		if cfg.ChromaDBURL != "" && ollamaClient == nil {
+			logger.Info("AI features: Ollama not configured; embeddings/RAG disabled, writing assist and suggestions available")
+		} else {
+			logger.Info("AI features: ChromaDB not configured; only writing assist and suggestions available")
+		}
+	} else {
+		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, nil, nil, userDBMgr, logger)
+		logger.Info("AI features: no LLM provider configured; AI features disabled")
 	}
 
 	// Forward-declare webhookSvc so the file watcher closure can capture it.

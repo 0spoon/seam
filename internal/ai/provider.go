@@ -1,6 +1,16 @@
 package ai
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// Provider-agnostic domain errors returned by ChatCompleter implementations.
+// Handlers should use errors.Is() to map these to appropriate HTTP status codes.
+var (
+	ErrRateLimited = errors.New("rate limited by LLM provider")
+	ErrAuthFailed  = errors.New("LLM provider authentication failed")
+)
 
 // EmbeddingGenerator generates embedding vectors from text.
 // The only implementation is OllamaClient -- embeddings always run locally

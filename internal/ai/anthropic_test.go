@@ -14,15 +14,9 @@ import (
 
 // newTestAnthropicClient creates an AnthropicClient pointed at a test server.
 func newTestAnthropicClient(apiKey, baseURL string) *AnthropicClient {
-	return &AnthropicClient{
-		baseURL: baseURL,
-		apiKey:  apiKey,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Minute,
-		},
-		chatTimeout: 30 * time.Second,
-		maxTokens:   defaultMaxTokens,
-	}
+	c := NewAnthropicClient(apiKey, 30*time.Second, 0)
+	c.baseURL = baseURL
+	return c
 }
 
 func TestAnthropicClient_ConvertMessages(t *testing.T) {
@@ -126,7 +120,7 @@ func TestAnthropicClient_ChatCompletion_AuthError(t *testing.T) {
 		{Role: "user", Content: "hello"},
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "authentication failed")
+	require.ErrorIs(t, err, ErrAuthFailed)
 }
 
 func TestAnthropicClient_ChatCompletion_ModelNotFound(t *testing.T) {
@@ -168,7 +162,7 @@ func TestAnthropicClient_ChatCompletion_RateLimit(t *testing.T) {
 		{Role: "user", Content: "hello"},
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "rate limited")
+	require.ErrorIs(t, err, ErrRateLimited)
 }
 
 func TestAnthropicClient_ChatCompletionStream(t *testing.T) {
@@ -271,7 +265,7 @@ func TestAnthropicClient_ChatCompletionStream_Error(t *testing.T) {
 		}
 	}
 	require.Error(t, gotErr)
-	require.Contains(t, gotErr.Error(), "internal server error")
+	require.Contains(t, gotErr.Error(), "API error")
 }
 
 func TestAnthropicClient_MultipleTextBlocks(t *testing.T) {

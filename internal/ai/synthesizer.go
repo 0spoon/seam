@@ -147,7 +147,7 @@ func (s *Synthesizer) Synthesize(ctx context.Context, userID string, payload Syn
 }
 
 // SynthesizeStream is like Synthesize but returns a true streaming response,
-// yielding tokens as they arrive from Ollama.
+// yielding tokens as they arrive from the LLM provider.
 func (s *Synthesizer) SynthesizeStream(ctx context.Context, userID string, payload SynthesizePayload) (<-chan string, <-chan error) {
 	tokenCh := make(chan string, 64)
 	errCh := make(chan error, 1)
@@ -168,9 +168,9 @@ func (s *Synthesizer) SynthesizeStream(ctx context.Context, userID string, paylo
 		}
 
 		messages := BuildSynthesisMessages(payload.Prompt, rows)
-		ollamaTokenCh, ollamaErrCh := s.chat.ChatCompletionStream(ctx, s.chatModel, messages)
+		llmTokenCh, llmErrCh := s.chat.ChatCompletionStream(ctx, s.chatModel, messages)
 
-		for token := range ollamaTokenCh {
+		for token := range llmTokenCh {
 			select {
 			case tokenCh <- token:
 			case <-ctx.Done():
@@ -178,7 +178,7 @@ func (s *Synthesizer) SynthesizeStream(ctx context.Context, userID string, paylo
 				return
 			}
 		}
-		for streamErr := range ollamaErrCh {
+		for streamErr := range llmErrCh {
 			if streamErr != nil {
 				errCh <- streamErr
 			}

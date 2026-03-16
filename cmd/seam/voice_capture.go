@@ -157,8 +157,13 @@ func (m voiceCaptureModel) Update(msg tea.Msg) (voiceCaptureModel, tea.Cmd) {
 }
 
 func (m voiceCaptureModel) startRecording() (voiceCaptureModel, tea.Cmd) {
-	// Create a secure temporary file for the recording.
-	tmpFile, err := os.CreateTemp("", "seam-voice-*.wav")
+	// Create a temporary file for the recording in the user config dir
+	// to avoid TOCTOU issues in shared /tmp.
+	tmpDir, _ := os.UserConfigDir()
+	if tmpDir == "" {
+		tmpDir = os.TempDir()
+	}
+	tmpFile, err := os.CreateTemp(tmpDir, "seam-voice-*.wav")
 	if err != nil {
 		m.err = fmt.Sprintf("failed to create temp file: %v", err)
 		return m, nil
@@ -258,8 +263,9 @@ func uploadVoice(client *APIClient, audioFile string) (*Note, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		// Read body but do not expose raw server error details to user.
+		io.ReadAll(resp.Body) //nolint:errcheck // best-effort read
+		return nil, fmt.Errorf("server returned HTTP %d", resp.StatusCode)
 	}
 
 	var note Note

@@ -253,10 +253,14 @@ func (c *OllamaClient) checkResponse(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	msg := string(body)
 
+	// Log full error for debugging; return sanitized error to avoid leaking
+	// raw Ollama response messages to callers.
+	slog.Debug("ai.OllamaClient: error response",
+		"status", resp.StatusCode, "body", msg)
 	switch resp.StatusCode {
 	case http.StatusNotFound:
-		return fmt.Errorf("%w: %s", ErrModelNotFound, msg)
+		return fmt.Errorf("%w: model not found", ErrModelNotFound)
 	default:
-		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, msg)
+		return fmt.Errorf("Ollama returned status %d", resp.StatusCode)
 	}
 }

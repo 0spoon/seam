@@ -150,6 +150,10 @@ func (h *Handler) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.DeleteConversation(r.Context(), userID, id); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+			return
+		}
 		h.logger.Error("delete conversation failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return

@@ -1059,7 +1059,11 @@ func (s *Service) enqueueEmbedWithScope(ctx context.Context, userID, noteID, sco
 	if s.cfg.AIQueue == nil {
 		return
 	}
-	payload, _ := json.Marshal(ai.EmbedPayload{NoteID: noteID, Scope: scope})
+	payload, marshalErr := json.Marshal(ai.EmbedPayload{NoteID: noteID, Scope: scope})
+	if marshalErr != nil {
+		s.cfg.Logger.Warn("agent: failed to marshal embed payload", "error", marshalErr)
+		return
+	}
 	if err := s.cfg.AIQueue.Enqueue(ctx, &ai.Task{
 		UserID:   userID,
 		Type:     ai.TaskTypeEmbed,
@@ -1076,7 +1080,11 @@ func (s *Service) enqueueDeleteEmbed(ctx context.Context, userID, noteID string)
 	if s.cfg.AIQueue == nil {
 		return
 	}
-	payload, _ := json.Marshal(ai.DeleteEmbedPayload{NoteID: noteID})
+	payload, marshalErr := json.Marshal(ai.DeleteEmbedPayload{NoteID: noteID})
+	if marshalErr != nil {
+		s.cfg.Logger.Warn("agent: failed to marshal delete-embed payload", "error", marshalErr)
+		return
+	}
 	if err := s.cfg.AIQueue.Enqueue(ctx, &ai.Task{
 		UserID:   userID,
 		Type:     ai.TaskTypeDeleteEmbed,

@@ -296,41 +296,45 @@ func (e *Embedder) FindRelated(ctx context.Context, noteID, userID string, nResu
 }
 
 // ChunkText splits text into overlapping chunks for embedding.
+// Uses rune-based indexing to avoid splitting multi-byte UTF-8 characters.
 // Exported for testing.
 func ChunkText(text string, size, overlap int) []string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
 	}
-	if len(text) <= size {
+
+	runes := []rune(text)
+	if len(runes) <= size {
 		return []string{text}
 	}
 
 	var chunks []string
 	start := 0
-	for start < len(text) {
+	for start < len(runes) {
 		end := start + size
-		if end > len(text) {
-			end = len(text)
+		if end > len(runes) {
+			end = len(runes)
 		}
 
 		// Try to break at a paragraph or sentence boundary.
-		if end < len(text) {
-			// Look for paragraph break in the last 20% of the chunk.
-			breakZone := end - size/5
-			if breakZone < start {
-				breakZone = start
+		if end < len(runes) {
+			segment := string(runes[start:end])
+			breakZone := len(segment) - len(segment)/5
+			if breakZone < 0 {
+				breakZone = 0
 			}
-			if idx := strings.LastIndex(text[breakZone:end], "\n\n"); idx >= 0 {
-				end = breakZone + idx + 2
-			} else if idx := strings.LastIndex(text[breakZone:end], ". "); idx >= 0 {
-				end = breakZone + idx + 2
-			} else if idx := strings.LastIndex(text[breakZone:end], "\n"); idx >= 0 {
-				end = breakZone + idx + 1
+			if idx := strings.LastIndex(segment[breakZone:], "\n\n"); idx >= 0 {
+				// Convert byte offset back to rune count from start.
+				end = start + runeCount(segment[:breakZone+idx+2])
+			} else if idx := strings.LastIndex(segment[breakZone:], ". "); idx >= 0 {
+				end = start + runeCount(segment[:breakZone+idx+2])
+			} else if idx := strings.LastIndex(segment[breakZone:], "\n"); idx >= 0 {
+				end = start + runeCount(segment[:breakZone+idx+1])
 			}
 		}
 
-		chunk := strings.TrimSpace(text[start:end])
+		chunk := strings.TrimSpace(string(runes[start:end]))
 		if chunk != "" {
 			chunks = append(chunks, chunk)
 		}
@@ -344,4 +348,9 @@ func ChunkText(text string, size, overlap int) []string {
 	}
 
 	return chunks
+}
+
+// runeCount returns the number of runes in a string.
+func runeCount(s string) int {
+	return len([]rune(s))
 }

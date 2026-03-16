@@ -284,23 +284,33 @@ export function NoteEditorPage() {
     }, 1000);
   }, [id, handleSave]);
 
-  // Cleanup save timers on unmount -- flush any pending saves.
+  // Refs for the unmount-only cleanup effect.
+  const handleSaveRef = useRef(handleSave);
+  const updateNoteRef = useRef(updateNote);
+  const currentTitleRef = useRef(currentNote?.title);
+  handleSaveRef.current = handleSave;
+  updateNoteRef.current = updateNote;
+  currentTitleRef.current = currentNote?.title;
+
+  // Cleanup save timers on unmount only (deps: [id]).
+  // Uses refs to avoid re-running on every dependency change,
+  // which caused spurious saves on title round-trips.
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         // Flush the pending save with the latest content.
-        handleSave(contentRef.current);
+        handleSaveRef.current(contentRef.current);
       }
       if (titleTimerRef.current) {
         clearTimeout(titleTimerRef.current);
         // Flush the pending title save.
-        if (id && titleRef.current !== currentNote?.title) {
-          updateNote(id, { title: titleRef.current });
+        if (id && titleRef.current !== currentTitleRef.current) {
+          updateNoteRef.current(id, { title: titleRef.current });
         }
       }
     };
-  }, [handleSave, id, updateNote, currentNote?.title]);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally uses refs
 
   const handleDeleteClick = () => {
     setShowMenu(false);

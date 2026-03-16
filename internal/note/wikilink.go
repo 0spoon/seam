@@ -56,7 +56,9 @@ func ParseWikilinks(body string) []Link {
 }
 
 // fencedCodeRe matches fenced code blocks (``` ... ```).
-var fencedCodeRe = regexp.MustCompile("(?s)```[^\n]*\n.*?```")
+// The \n? after the opening fence makes the newline optional to handle
+// single-line fenced blocks like ```code```.
+var fencedCodeRe = regexp.MustCompile("(?s)```[^\n]*\n?.*?```")
 
 // inlineCodeRe matches inline code (`...`).
 var inlineCodeRe = regexp.MustCompile("`[^`]+`")

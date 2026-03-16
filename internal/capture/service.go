@@ -71,8 +71,9 @@ func (s *Service) CaptureURL(ctx context.Context, userID, rawURL string) (*note.
 	body := fmt.Sprintf("Source: %s\n\n---\n\n%s", content.URL, content.Body)
 
 	// Truncate body if excessively long (>50K chars).
-	if len(body) > 50000 {
-		body = body[:50000] + "\n\n[Content truncated]"
+	// Use rune-safe truncation to avoid splitting multi-byte UTF-8 characters.
+	if runes := []rune(body); len(runes) > 50000 {
+		body = string(runes[:50000]) + "\n\n[Content truncated]"
 	}
 
 	req := note.CreateNoteReq{
@@ -153,9 +154,9 @@ func generateTitle(text string) string {
 	for _, line := range lines {
 		line = trimLine(line)
 		if line != "" {
-			if len(line) > 60 {
-				// Truncate at word boundary.
-				line = line[:60]
+			if runes := []rune(line); len(runes) > 60 {
+				// Truncate at word boundary using rune-safe slicing.
+				line = string(runes[:60])
 				if idx := lastSpace(line); idx > 20 {
 					line = line[:idx]
 				}

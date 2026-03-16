@@ -28,7 +28,7 @@ export function useKeyboard(bindings: KeyBinding[]) {
         const matchesMod = ctrlOrMeta
           ? e.ctrlKey || e.metaKey
           : !e.ctrlKey && !e.metaKey;
-        const matchesShift = binding.shift ? e.shiftKey : true;
+        const matchesShift = binding.shift ? e.shiftKey : !e.shiftKey;
 
         if (e.key === binding.key && matchesMod && matchesShift) {
           e.preventDefault();

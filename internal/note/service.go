@@ -172,7 +172,7 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 		sup.IgnoreNext(absPath)
 	}
 
-	if err := atomicWriteFile(absPath, []byte(content), 0o644); err != nil {
+	if err := AtomicWriteFile(absPath, []byte(content), 0o644); err != nil {
 		return nil, fmt.Errorf("note.Service.Create: write file: %w", err)
 	}
 
@@ -507,7 +507,7 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 	if sup := s.getSuppressor(); sup != nil {
 		sup.IgnoreNext(absPath)
 	}
-	if err := atomicWriteFile(absPath, []byte(content), 0o644); err != nil {
+	if err := AtomicWriteFile(absPath, []byte(content), 0o644); err != nil {
 		// File write failed -- undo the move if we did one.
 		if pendingMove.needed {
 			if undoErr := os.Rename(pendingMove.newAbs, pendingMove.oldAbs); undoErr != nil {
@@ -522,7 +522,7 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 	if err := tx.Commit(); err != nil {
 		// Commit failed: restore old file content (best effort).
 		if oldContent != nil {
-			if restoreErr := atomicWriteFile(oldFileAbs, oldContent, 0o644); restoreErr != nil {
+			if restoreErr := AtomicWriteFile(oldFileAbs, oldContent, 0o644); restoreErr != nil {
 				s.logger.Error("note.Service.Update: failed to restore file after commit error",
 					"path", oldFileAbs, "error", restoreErr)
 			}
@@ -639,12 +639,13 @@ func (s *Service) BulkAction(ctx context.Context, userID string, req BulkActionR
 	}
 	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
 
-	// For delete, collect file paths to remove after the DB transaction commits.
+	// Collect deferred file operations to execute after successful commit.
 	var filesToDelete []string
+	var pendingMoves []pendingMove
 	notesDir := s.userDBManager.UserNotesDir(userID)
 
 	for _, noteID := range req.NoteIDs {
-		if err := s.executeBulkAction(ctx, tx, db, userID, noteID, req, notesDir, &filesToDelete); err != nil {
+		if err := s.executeBulkAction(ctx, tx, db, userID, noteID, req, notesDir, &filesToDelete, &pendingMoves); err != nil {
 			result.Failed++
 			// Sanitize error: map known domain errors to safe messages.
 			errMsg := "internal error"
@@ -663,7 +664,22 @@ func (s *Service) BulkAction(ctx context.Context, userID string, req BulkActionR
 		return nil, fmt.Errorf("note.Service.BulkAction: commit: %w", err)
 	}
 
-	// After successful commit, delete files from disk for bulk delete.
+	// After successful commit, execute deferred file operations.
+	for _, mv := range pendingMoves {
+		if err := os.MkdirAll(filepath.Dir(mv.newAbs), 0o755); err != nil {
+			s.logger.Error("note.Service.BulkAction: mkdir for move after commit",
+				"path", mv.newAbs, "error", err)
+			continue
+		}
+		if sup := s.getSuppressor(); sup != nil {
+			sup.IgnoreNext(mv.oldAbs)
+			sup.IgnoreNext(mv.newAbs)
+		}
+		if err := os.Rename(mv.oldAbs, mv.newAbs); err != nil {
+			s.logger.Error("note.Service.BulkAction: rename file after commit",
+				"old", mv.oldAbs, "new", mv.newAbs, "error", err)
+		}
+	}
 	for _, absPath := range filesToDelete {
 		if sup := s.getSuppressor(); sup != nil {
 			sup.IgnoreNext(absPath)
@@ -680,6 +696,12 @@ func (s *Service) BulkAction(ctx context.Context, userID string, req BulkActionR
 	return result, nil
 }
 
+// pendingMove records a file move to execute after successful tx.Commit().
+type pendingMove struct {
+	oldAbs string
+	newAbs string
+}
+
 // executeBulkAction handles a single note within a bulk operation transaction.
 func (s *Service) executeBulkAction(
 	ctx context.Context,
@@ -689,6 +711,7 @@ func (s *Service) executeBulkAction(
 	req BulkActionReq,
 	notesDir string,
 	filesToDelete *[]string,
+	pendingMoves *[]pendingMove,
 ) error {
 	switch req.Action {
 	case "add_tag":
@@ -755,18 +778,12 @@ func (s *Service) executeBulkAction(
 		oldAbs := filepath.Join(notesDir, existing.FilePath)
 		newAbs := filepath.Join(notesDir, newRelPath)
 
-		// Move the file on disk.
+		// Record the pending move; file rename happens after tx.Commit().
 		if newRelPath != existing.FilePath {
-			if err := os.MkdirAll(filepath.Dir(newAbs), 0o755); err != nil {
-				return fmt.Errorf("mkdir for move: %w", err)
-			}
-			if sup := s.getSuppressor(); sup != nil {
-				sup.IgnoreNext(oldAbs)
-				sup.IgnoreNext(newAbs)
-			}
-			if err := os.Rename(oldAbs, newAbs); err != nil {
-				return fmt.Errorf("rename file: %w", err)
-			}
+			*pendingMoves = append(*pendingMoves, pendingMove{
+				oldAbs: oldAbs,
+				newAbs: newAbs,
+			})
 		}
 
 		existing.ProjectID = newProjectID
@@ -960,6 +977,19 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 		title = strings.TrimSuffix(base, ".md")
 	}
 
+	// Validate the title from frontmatter to prevent unsafe characters.
+	if err := validate.Name(title); err != nil {
+		s.logger.Warn("note.Service.Reindex: unsafe title in frontmatter, using sanitized filename",
+			"file", filePath, "title", title, "error", err)
+		// Fall back to a safe filename-derived title.
+		base := filepath.Base(filePath)
+		title = strings.TrimSuffix(base, ".md")
+		// If even the filename is unsafe, use a generic title.
+		if validateErr := validate.Name(title); validateErr != nil {
+			title = "Untitled"
+		}
+	}
+
 	// Use timestamps from frontmatter if available, else current time.
 	createdAt := now
 	if !fm.Created.IsZero() {
@@ -1035,7 +1065,7 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 			if sup := s.getSuppressor(); sup != nil {
 				sup.IgnoreNext(absPath)
 			}
-			if writeErr := atomicWriteFile(absPath, []byte(newContent), 0o644); writeErr != nil {
+			if writeErr := AtomicWriteFile(absPath, []byte(newContent), 0o644); writeErr != nil {
 				s.logger.Warn("note.Service.Reindex: failed to write ID back to file",
 					"file_path", filePath, "error", writeErr)
 			}
@@ -1177,10 +1207,10 @@ func computeHash(content string) string {
 	return fmt.Sprintf("%x", h)
 }
 
-// atomicWriteFile writes data to a file atomically by writing to a temp file
+// AtomicWriteFile writes data to a file atomically by writing to a temp file
 // in the same directory and then renaming. This prevents partial writes from
 // corrupting the source-of-truth .md files on crash.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".seam-tmp-*")
 	if err != nil {
@@ -1197,6 +1227,11 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		tmp.Close()
 		os.Remove(tmpPath)
 		return fmt.Errorf("atomicWriteFile: chmod: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("atomicWriteFile: sync: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)

@@ -241,7 +241,9 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 		}
 		wsURL := fmt.Sprintf("%s://%s/api/ws", scheme, u.Host)
 
-		ctx := context.Background()
+		// Use a cancellable context so the read goroutine can be stopped
+		// when the ask screen exits (e.g., user presses Esc).
+		ctx, ctxCancel := context.WithCancel(context.Background())
 		dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
 		defer dialCancel()
 		conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
@@ -288,6 +290,7 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 		// message; subsequent messages are read by waitForStreamMsg.
 		ch := make(chan tea.Msg, 64)
 		go func() {
+			defer ctxCancel()
 			defer conn.CloseNow()
 			defer close(ch)
 
@@ -311,7 +314,9 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 					var sp struct {
 						Token string `json:"token"`
 					}
-					json.Unmarshal(wsMsg.Payload, &sp)
+					if err := json.Unmarshal(wsMsg.Payload, &sp); err != nil {
+						continue
+					}
 					ch <- askStreamTokenMsg{token: sp.Token}
 
 				case "chat.done":

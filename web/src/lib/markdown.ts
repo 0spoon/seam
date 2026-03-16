@@ -6,6 +6,23 @@ const md = new MarkdownIt({
   typographer: true,
 });
 
+// Add target="_blank" and rel="noopener noreferrer" to auto-linked URLs
+// to prevent navigation away from the SPA and for security.
+const defaultLinkOpen =
+  md.renderer.rules.link_open ||
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  // Only modify auto-linked URLs (not wikilinks, which use data-wikilink).
+  const wikilinkAttr = token.attrGet('data-wikilink');
+  if (!wikilinkAttr) {
+    token.attrSet('target', '_blank');
+    token.attrSet('rel', 'noopener noreferrer');
+  }
+  return defaultLinkOpen(tokens, idx, options, env, self);
+};
+
 // Wikilink plugin: transform [[target]] and [[target|display]] into links
 md.inline.ruler.push('wikilink', (state, silent) => {
   const src = state.src;
@@ -38,7 +55,7 @@ md.renderer.rules['wikilink'] = (tokens, idx) => {
   const escaped = target
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;');
-  return `<a class="wikilink" data-wikilink="${escaped}" href="javascript:void(0)">${md.utils.escapeHtml(display)}</a>`;
+  return `<a class="wikilink" data-wikilink="${escaped}" href="#">${md.utils.escapeHtml(display)}</a>`;
 };
 
 export function renderMarkdown(source: string): string {

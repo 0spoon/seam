@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -197,12 +198,5 @@ func isUniqueConstraintError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	target := "UNIQUE constraint failed"
-	for i := 0; i <= len(msg)-len(target); i++ {
-		if msg[i:i+len(target)] == target {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

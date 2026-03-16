@@ -190,7 +190,13 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(absPath, []byte(content), 0o644)
+		// Preserve original file permissions and write atomically.
+		info, statErr := os.Stat(absPath)
+		perm := os.FileMode(0o644)
+		if statErr == nil {
+			perm = info.Mode().Perm()
+		}
+		return note.AtomicWriteFile(absPath, []byte(content), perm)
 	})
 
 	// Create search components.
@@ -415,6 +421,7 @@ func run() error {
 		})
 		if marshalErr != nil {
 			logger.Warn("failed to marshal note changed payload", "error", marshalErr)
+			return nil
 		}
 		hub.Send(uid, ws.Message{Type: ws.MsgTypeNoteChanged, Payload: payload})
 

@@ -418,6 +418,14 @@ func (c *ChromaClient) DeleteByMetadata(ctx context.Context, collectionID string
 }
 
 // CollectionName returns the standard collection name for a user.
+// userID must be a valid ULID (alphanumeric). Invalid IDs return
+// a safe fallback to prevent collection name injection.
 func CollectionName(userID string) string {
+	// Defense-in-depth: validate userID contains only ULID-safe characters.
+	for _, r := range userID {
+		if !((r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')) {
+			return "user_invalid_notes"
+		}
+	}
 	return "user_" + userID + "_notes"
 }

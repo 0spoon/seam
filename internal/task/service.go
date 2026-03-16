@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -83,6 +84,7 @@ type Service struct {
 	store     *Store
 	dbManager userdb.Manager
 	noteSvc   NoteService
+	mu        sync.RWMutex // protects noteSvc
 	logger    *slog.Logger
 }
 
@@ -100,8 +102,18 @@ func NewService(store *Store, dbManager userdb.Manager, logger *slog.Logger) *Se
 
 // SetNoteService sets the note service dependency after construction
 // to break circular dependency during server startup.
+// Must only be called during single-threaded startup, before any HTTP requests.
 func (s *Service) SetNoteService(noteSvc NoteService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.noteSvc = noteSvc
+}
+
+// getNoteService returns the note service safely for concurrent access.
+func (s *Service) getNoteService() NoteService {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.noteSvc
 }
 
 // SyncNote parses the note body for checkboxes and reconciles them with existing
@@ -281,7 +293,11 @@ func (s *Service) ToggleDone(ctx context.Context, userID, taskID string, done bo
 // toggleCheckboxInFile reads the note file, toggles the checkbox on the
 // specified line, and writes the file back.
 func (s *Service) toggleCheckboxInFile(ctx context.Context, userID, noteID string, lineNumber int, done bool) error {
-	n, err := s.noteSvc.Get(ctx, userID, noteID)
+	noteSvc := s.getNoteService()
+	if noteSvc == nil {
+		return fmt.Errorf("note service not configured")
+	}
+	n, err := noteSvc.Get(ctx, userID, noteID)
 	if err != nil {
 		return fmt.Errorf("get note: %w", err)
 	}
@@ -326,8 +342,8 @@ func (s *Service) toggleCheckboxInFile(ctx context.Context, userID, noteID strin
 			}
 			if endIdx >= 0 {
 				// bodyStart = opening "---" (3) + newline after opening (nlIdx+1) +
-				//             content before closing (endIdx) + closing "\n---\n" (4)
-				bodyStart = 3 + nlIdx + 1 + endIdx + 4
+				//             content before closing (endIdx) + closing "\n---\n" (5)
+				bodyStart = 3 + nlIdx + 1 + endIdx + 5
 				if bodyStart > len(fileStr) {
 					bodyStart = len(fileStr)
 				}

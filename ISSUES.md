@@ -1527,3 +1527,385 @@ Also renamed internal variable names `ollamaTokenCh`/`ollamaErrCh` to
 | Third full scan | 17 | 17 | 0 |
 | LLM provider review | 10 | 10 | 0 |
 | **All** | **133** | **133** | **0** |
+
+---
+
+## Fourth Full Source Scan (2026-03-15)
+
+Comprehensive post-implementation review of all Go source files (`cmd/`, `internal/`) and
+frontend code (`web/src/`). All 133 prior issues verified as fixed. Build and tests pass
+(`make build && make test && make test-web`). 38 new issues found and verified against
+actual source code. Findings deduplicated against all prior sections.
+
+**[Fix pass 2026-03-15]** All 38 issues fixed. Build and tests pass (`make build && make test && make test-web`).
+
+### MEDIUM -- Backend
+
+#### SCAN4-M1. `toggleCheckboxInFile` bodyStart off-by-one (`+4` should be `+5`) -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/task/service.go:330`
+**Description:** The frontmatter closing delimiter `"\n---\n"` is 5 bytes, but the
+`bodyStart` calculation adds only 4.
+**Fix:** Changed `+ 4` to `+ 5` in the bodyStart calculation and updated the comment.
+
+---
+
+#### SCAN4-M2. `atomicWriteFile` missing `fsync` before rename -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/service.go:1183-1209`
+**Fix:** Added `tmp.Sync()` call between `tmp.Chmod` and `tmp.Close` in both
+`note.AtomicWriteFile` and `template/service.go:atomicWriteFile`. Also exported
+`note.AtomicWriteFile` for use by `cmd/seamd/main.go` frontmatter updater.
+
+---
+
+#### SCAN4-M3. `BulkAction` "move" renames file before transaction commit -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/service.go:767`
+**Fix:** Added `pendingMove` struct. File renames are now collected in a `pendingMoves`
+slice during the transaction and executed after `tx.Commit()` succeeds, matching the
+`filesToDelete` pattern for bulk delete.
+
+---
+
+#### SCAN4-M4. `project.Service.Update` renames directory before commit -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/project/service.go:192`
+**Fix:** Moved `os.Rename(oldDir, newDir)` to after `tx.Commit()` succeeds. DB file_path
+updates happen inside the transaction; the directory rename is now a post-commit operation
+that logs errors instead of returning them (matching the `Delete` pattern).
+
+---
+
+#### SCAN4-M5. `cmd/seamd/main.go:416-419` marshalErr fallthrough sends nil payload -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seamd/main.go:416-419`
+**Fix:** Added `return nil` inside the `marshalErr != nil` block to skip the send.
+
+---
+
+#### SCAN4-M6. `cmd/seamd/main.go:193` frontmatter updater uses non-atomic `os.WriteFile` -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seamd/main.go:193`
+**Fix:** Replaced `os.WriteFile` with `note.AtomicWriteFile`. Now reads original file
+permissions via `os.Stat` before writing, falling back to `0o644`.
+
+---
+
+#### SCAN4-M7. `chat.Handler.deleteConversation` does not map `ErrNotFound` to 404 -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/chat/handler.go:152-156`
+**Fix:** Added `errors.Is(err, ErrNotFound)` check returning 404 before the generic 500.
+
+---
+
+#### SCAN4-M8. `ai/queue.go` `LoadPending` bypasses `maxQueueSize` backpressure -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/queue.go:177-188`
+**Fix:** Added `maxQueueSize` check in the push loop. When full, logs a warning with the
+count of skipped tasks and breaks.
+
+---
+
+#### SCAN4-M9. `ai/queue.go` `LoadPending` holds mutex during DB operations -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/queue.go:161,182`
+**Fix:** Restructured to collect tasks and status resets outside the lock, perform DB
+`UpdateStatus` calls without the lock, then acquire the lock only for the `heap.Push`
+loop.
+
+---
+
+#### SCAN4-M10. Anthropic streaming SSE error event leaks raw API message -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/anthropic.go:296`
+**Fix:** Logs full error at Debug level, maps `errEvt.Error.Type` to sanitized sentinels
+(`ErrRateLimited`, `ErrAuthFailed`) or a generic "LLM provider stream error" message.
+
+---
+
+#### SCAN4-M11. `ai/chroma.go` `CollectionName` does not validate userID input -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/chroma.go:421-422`
+**Fix:** Added character validation loop that checks each rune is alphanumeric (ULID-safe).
+Returns `"user_invalid_notes"` for invalid IDs.
+
+---
+
+#### SCAN4-M12. `note/service.go` `Reindex` does not validate title from file frontmatter -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/service.go:956-961`
+**Fix:** Added `validate.Name(title)` check after title resolution. On failure, logs a
+warning and falls back to filename-derived title, then to "Untitled" if even the filename
+is unsafe.
+
+---
+
+#### SCAN4-M13. `capture/service.go` body truncation splits UTF-8 -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/capture/service.go:74-76`
+**Fix:** Replaced `body[:50000]` with `string([]rune(body)[:50000])` for rune-safe truncation.
+
+---
+
+#### SCAN4-M14. `capture/service.go` `generateTitle` truncation splits UTF-8 -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/capture/service.go:156-158`
+**Fix:** Replaced `line[:60]` with `string([]rune(line)[:60])` for rune-safe truncation.
+
+---
+
+#### SCAN4-M15. `cmd/seam/voice_capture.go:260-262` HTTP error body leaked to user -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seam/voice_capture.go:260-262`
+**Fix:** Changed to generic `"server returned HTTP %d"` message without including the
+raw response body.
+
+---
+
+#### SCAN4-M16. `template/handler.go` `apply` silently swallows JSON parse errors -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/template/handler.go:90-91`
+**Fix:** Now returns 400 for JSON parse errors. Only EOF (empty body) is treated as empty
+vars.
+
+---
+
+### MEDIUM -- Frontend
+
+#### SCAN4-WM1. `NoteEditorPage` unmount cleanup triggers spurious saves on dependency changes -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/pages/NoteEditor/NoteEditorPage.tsx:288-303`
+**Fix:** Moved cleanup functions into refs (`handleSaveRef`, `updateNoteRef`, `currentTitleRef`)
+and changed effect deps to `[id]` only. Cleanup now reads from refs, so it only re-runs
+when the note ID changes (navigating to a different note), not on title round-trips.
+
+---
+
+#### SCAN4-WM2. `AskPage` sends WebSocket message without checking connection state -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/pages/Ask/AskPage.tsx:313`
+**Fix:** Added `isConnected()` check before `wsSend`. If disconnected, shows a toast error
+and resets streaming state immediately instead of entering stuck "Thinking..." state.
+
+---
+
+#### SCAN4-WM3. `markdown-it` auto-linked URLs lack `rel="noopener noreferrer"` -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/lib/markdown.ts:3-7`
+**Fix:** Added custom `link_open` renderer rule that sets `target="_blank"` and
+`rel="noopener noreferrer"` on auto-linked URLs (skipping wikilinks which use
+`data-wikilink` attribute).
+
+---
+
+### LOW -- Backend
+
+#### SCAN4-L1. `cmd/seam/ai_assist.go:204-205` preview truncation splits UTF-8 -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seam/ai_assist.go:204-205`
+**Fix:** Replaced with `string([]rune(preview)[:77])` for rune-safe truncation.
+
+---
+
+#### SCAN4-L2. `mcp/logging.go:63-64` result text truncation splits UTF-8 -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/mcp/logging.go:63-64`
+**Fix:** Replaced with rune-safe truncation using `[]rune` conversion.
+
+---
+
+#### SCAN4-L3. `task.Service.SetNoteService` not thread-safe -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/task/service.go:103-105`
+**Fix:** Added `sync.RWMutex` to `Service` struct protecting `noteSvc`. Added
+`getNoteService()` getter used by `toggleCheckboxInFile`. Matches the pattern from
+NEW-L3 and NEW-L4.
+
+---
+
+#### SCAN4-L4. `ai/embedder.go` `ChunkText` operates on byte positions, splits UTF-8 -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/embedder.go:300-346`
+**Fix:** Rewrote `ChunkText` to use `[]rune` for all indexing. Added `runeCount` helper
+for converting byte offsets from `strings.LastIndex` back to rune counts.
+
+---
+
+#### SCAN4-L5. `openai.go`/`anthropic.go` `ErrModelNotFound` wraps raw API message -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/openai.go:237`, `internal/ai/anthropic.go:327`
+**Fix:** Changed to generic `"model not found"` message instead of raw API message in
+both `openai.go` and `anthropic.go`.
+
+---
+
+#### SCAN4-L6. `ai/ollama.go` `checkResponse` includes raw body in non-404 errors -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/ollama.go:258`
+**Fix:** Logs raw body at Debug level, returns generic `"Ollama returned status %d"` without
+the raw message. Also sanitized 404 to `"model not found"` matching external providers.
+
+---
+
+#### SCAN4-L7. `note/tag.go` `ParseTags` recompiles regex on every call -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/tag.go:36`
+**Fix:** Moved `urlRe` to a package-level `var` alongside `tagRe` and `headingRe`.
+
+---
+
+#### SCAN4-L8. `note/version_handler.go` leaks `validate.Name` error details to client -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/version_handler.go:128-130`
+**Fix:** Changed to static message `"version title contains unsafe characters"`.
+
+---
+
+#### SCAN4-L9. `cmd/seam/ask.go:294-296` WebSocket goroutine leak on screen exit -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seam/ask.go:294-296`
+**Fix:** Changed to `context.WithCancel(context.Background())`. The goroutine defers
+`ctxCancel()` so the context is cancelled when the connection closes.
+
+---
+
+#### SCAN4-L10. `cmd/seam/ask.go:314` `json.Unmarshal` error silently discarded -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seam/ask.go:314`
+**Fix:** Added error check on `json.Unmarshal`; continues to next message on failure.
+
+---
+
+#### SCAN4-L11. `cmd/seed/main.go:238-239` `rows.Err()` never checked after iteration -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seed/main.go:238-239`
+**Fix:** Added `rows.Err()` check with `log.Fatalf` after `rows.Close()`.
+
+---
+
+#### SCAN4-L12. `project/store.go` `isUniqueConstraintError` uses manual byte scan -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/project/store.go:196-207`
+**Fix:** Replaced manual byte scan with `strings.Contains`, matching the `auth/store.go` pattern.
+
+---
+
+#### SCAN4-L13. `ws/client.go` package-level `wsMessageRate` limiter is dead code -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ws/client.go:16-19`
+**Fix:** Removed the unused `wsMessageRate` package-level variable.
+
+---
+
+#### SCAN4-L14. `agent/service.go` discards `json.Marshal` errors -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/agent/service.go:1062,1079`
+**Fix:** Added error check with `slog.Warn` logging on marshal failure in both
+`enqueueEmbedWithScope` and `enqueueDeleteEmbed`.
+
+---
+
+#### SCAN4-L15. `note/wikilink.go` fenced code regex misses single-line fenced blocks -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/wikilink.go:59`
+**Fix:** Made the newline after opening fence optional (`\n?`) in the regex.
+
+---
+
+#### SCAN4-L16. `cmd/seam/voice_capture.go:161-167` temp file TOCTOU in shared `/tmp` -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seam/voice_capture.go:161-167`
+**Fix:** Changed temp file directory from `os.TempDir()` to `os.UserConfigDir()` (falling
+back to system temp). User-owned config directory avoids the TOCTOU issue on multi-user
+systems.
+
+---
+
+### LOW -- Frontend
+
+#### SCAN4-WL1. `useKeyboard` does not check `shift` when not specified in binding -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/hooks/useKeyboard.ts:31`
+**Fix:** Changed `matchesShift` logic from permissive (always true when not specified) to
+exact matching (`!e.shiftKey` when not specified).
+
+---
+
+#### SCAN4-WL2. Wikilink `javascript:void(0)` stripped by DOMPurify -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/lib/markdown.ts:41`, `web/src/lib/sanitize.ts:4-11`
+**Fix:** Changed wikilink renderer to output `href="#"` instead of `href="javascript:void(0)"`.
+Links are now focusable via Tab. Click handling still uses `data-wikilink` + event delegation.
+
+---
+
+#### SCAN4-WL3. `CommandPalette` mutable render-body counter fragile under concurrent mode -- FIXED
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/components/CommandPalette/CommandPalette.tsx:429`
+**Fix:** Replaced mutable `let globalIndex` counter with a `useMemo`-computed
+`globalIndexMap` (Map<string, number>) derived from `sections`. Each item looks up its
+index via `globalIndexMap.get(item.id)`, which is stable under concurrent rendering.
+
+---
+
+### Summary: Fourth Full Source Scan
+
+| Severity | Count | Backend | Frontend | Status |
+|----------|-------|---------|----------|--------|
+| Medium | 19 | 16 | 3 | All resolved |
+| Low | 19 | 16 | 3 | All resolved |
+| **Total** | **38** | **32** | **6** | **All resolved** |
+
+### Updated Grand Total
+
+| Category | Total | Resolved | Open |
+|----------|-------|----------|------|
+| Original audit | 27 | 27 | 0 |
+| Post-fix review | 7 | 7 | 0 |
+| Test issues | 4 | 4 | 0 |
+| Pre-existing | 16 | 16 | 0 |
+| First full scan | 13 | 13 | 0 |
+| Second full scan | 39 | 39 | 0 |
+| Third full scan | 17 | 17 | 0 |
+| LLM provider review | 10 | 10 | 0 |
+| Fourth full scan | 38 | 38 | 0 |
+| **All** | **171** | **171** | **0** |

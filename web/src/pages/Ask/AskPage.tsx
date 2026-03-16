@@ -310,6 +310,14 @@ export function AskPage() {
     }));
     const history = allHistory.slice(-MAX_HISTORY_MESSAGES);
 
+    // Check WebSocket connection before sending to avoid stuck "Thinking..." state.
+    if (!isConnected()) {
+      addToast('Not connected to server. Please try again.', 'error');
+      setIsStreaming(false);
+      isStreamingRef.current = false;
+      return;
+    }
+
     wsSend('chat.ask', { query, history });
     streamingRef.current = '';
     setStreamingContent('');

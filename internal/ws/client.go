@@ -13,11 +13,6 @@ import (
 	"github.com/katata/seam/internal/auth"
 )
 
-// wsMessageRate is the maximum inbound message rate per WebSocket connection.
-// 20 messages/second with a burst of 30 accommodates rapid typing and UI
-// interactions without allowing flood attacks.
-var wsMessageRate = rate.NewLimiter(20, 30)
-
 // MessageHandler handles incoming WebSocket messages from clients.
 // userID is the authenticated user, msg is the parsed message.
 type MessageHandler func(ctx context.Context, hub *Hub, conn *websocket.Conn, userID string, msg Message)

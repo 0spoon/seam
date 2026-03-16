@@ -234,7 +234,7 @@ func (c *OpenAIClient) checkResponse(resp *http.Response) error {
 		case http.StatusUnauthorized:
 			return fmt.Errorf("%w: invalid API key", ErrAuthFailed)
 		case http.StatusNotFound:
-			return fmt.Errorf("%w: %s", ErrModelNotFound, errResp.Error.Message)
+			return fmt.Errorf("%w: model not found", ErrModelNotFound)
 		case http.StatusTooManyRequests:
 			return fmt.Errorf("%w: try again later", ErrRateLimited)
 		default:

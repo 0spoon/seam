@@ -60,8 +60,8 @@ func (s *Server) loggingMiddleware() mcpserver.ToolHandlerMiddleware {
 						resultText = tc.Text
 						if sensitiveTools[req.Params.Name] {
 							resultText = "[REDACTED]"
-						} else if len(resultText) > 1000 {
-							resultText = resultText[:1000] + "..."
+						} else if runes := []rune(resultText); len(runes) > 1000 {
+							resultText = string(runes[:1000]) + "..."
 						}
 						break
 					}

@@ -425,8 +425,17 @@ export function CommandPalette() {
     return grouped;
   }, [resultItems]);
 
-  // Compute global index for each item for keyboard selection.
-  let globalIndex = 0;
+  // Pre-compute global index map for each item ID.
+  const globalIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    let idx = 0;
+    for (const section of sections) {
+      for (const item of section.items) {
+        map.set(item.id, idx++);
+      }
+    }
+    return map;
+  }, [sections]);
 
   return (
     <AnimatePresence
@@ -479,7 +488,7 @@ export function CommandPalette() {
                 <div key={section.section}>
                   <div className={styles.sectionHeader}>{section.section}</div>
                   {section.items.map((item) => {
-                    const itemIndex = globalIndex++;
+                    const itemIndex = globalIndexMap.get(item.id) ?? 0;
                     const Icon = item.icon;
                     return (
                       <button

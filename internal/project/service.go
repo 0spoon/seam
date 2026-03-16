@@ -184,21 +184,14 @@ func (s *Service) Update(ctx context.Context, userID, projectID string, name, de
 	}
 	defer tx.Rollback() //nolint:errcheck // rollback is a no-op after commit
 
-	// Rename directory if slug changed.
-	if existing.Slug != oldSlug {
+	// Track whether a directory rename is needed after commit.
+	slugChanged := existing.Slug != oldSlug
+	var oldDir, newDir string
+
+	if slugChanged {
 		notesDir := s.userDBManager.UserNotesDir(userID)
-		oldDir := filepath.Join(notesDir, oldSlug)
-		newDir := filepath.Join(notesDir, existing.Slug)
-		if err := os.Rename(oldDir, newDir); err != nil {
-			// If old dir does not exist, create the new one instead.
-			if os.IsNotExist(err) {
-				if mkErr := os.MkdirAll(newDir, 0o755); mkErr != nil {
-					return nil, fmt.Errorf("project.Service.Update: mkdir: %w", mkErr)
-				}
-			} else {
-				return nil, fmt.Errorf("project.Service.Update: rename dir: %w", err)
-			}
-		}
+		oldDir = filepath.Join(notesDir, oldSlug)
+		newDir = filepath.Join(notesDir, existing.Slug)
 
 		// A-9: Update file_path for all notes in this project to reflect
 		// the new slug. Without this, note.Get would fail with file-not-found
@@ -221,6 +214,21 @@ func (s *Service) Update(ctx context.Context, userID, projectID string, name, de
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("project.Service.Update: commit: %w", err)
+	}
+
+	// Rename directory on disk after successful commit.
+	if slugChanged {
+		if err := os.Rename(oldDir, newDir); err != nil {
+			if os.IsNotExist(err) {
+				if mkErr := os.MkdirAll(newDir, 0o755); mkErr != nil {
+					s.logger.Error("project.Service.Update: mkdir after commit",
+						"path", newDir, "error", mkErr)
+				}
+			} else {
+				s.logger.Error("project.Service.Update: rename dir after commit",
+					"old", oldDir, "new", newDir, "error", err)
+			}
+		}
 	}
 
 	s.logger.Info("project updated", "user_id", userID, "project_id", projectID)

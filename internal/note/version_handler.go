@@ -126,7 +126,7 @@ func (h *Handler) restoreVersion(w http.ResponseWriter, r *http.Request) {
 
 	// Validate the historical title before using it.
 	if err := validate.Name(v.Title); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("version title is not safe to restore: %v", err))
+		writeError(w, http.StatusBadRequest, "version title contains unsafe characters")
 		return
 	}
 

@@ -90,7 +90,12 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req applyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		// If no body, use empty vars.
+		// If the body is empty/EOF, use empty vars. For actual
+		// parse errors (malformed JSON), return 400.
+		if err.Error() != "EOF" {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
 		req.Vars = map[string]string{}
 	}
 

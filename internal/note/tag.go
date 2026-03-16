@@ -13,6 +13,9 @@ var tagRe = regexp.MustCompile(`(?:^|\s)#([a-zA-Z0-9][a-zA-Z0-9_-]*)`)
 // headingRe matches markdown headings (## Heading is NOT a tag).
 var headingRe = regexp.MustCompile(`(?m)^#{1,6}\s`)
 
+// urlRe matches HTTP/HTTPS URLs for removal before tag scanning.
+var urlRe = regexp.MustCompile(`https?://\S+`)
+
 // ParseTags extracts unique tags from a note body, ignoring tags inside
 // code blocks, URLs, and markdown headings. Merges with any frontmatter tags.
 // Returns a sorted, deduplicated, lowercased list.
@@ -33,7 +36,6 @@ func ParseTags(body string, frontmatterTags []string) []string {
 	cleaned := removeCodeBlocks(body)
 
 	// Remove URLs before tag scanning to avoid false positives from URL fragments.
-	urlRe := regexp.MustCompile(`https?://\S+`)
 	cleaned = urlRe.ReplaceAllString(cleaned, "")
 
 	// Process line by line to skip headings.

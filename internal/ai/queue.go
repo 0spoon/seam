@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -158,8 +159,14 @@ func (q *Queue) LoadPending(ctx context.Context) error {
 		return fmt.Errorf("ai.Queue.LoadPending: list users: %w", err)
 	}
 
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	// Collect tasks and status resets outside the lock to avoid holding
+	// the queue mutex during DB operations (SCAN4-M9).
+	type statusReset struct {
+		db     *sql.DB
+		taskID string
+	}
+	var items []*pqItem
+	var resets []statusReset
 
 	for _, userID := range users {
 		db, err := q.dbManager.Open(ctx, userID)
@@ -176,12 +183,11 @@ func (q *Queue) LoadPending(ctx context.Context) error {
 		}
 		for _, t := range tasks {
 			t.UserID = userID
-			// Reset running tasks back to pending so they get re-executed.
 			if t.Status == TaskStatusRunning {
 				t.Status = TaskStatusPending
-				q.store.UpdateStatus(ctx, db, t.ID, TaskStatusPending, nil, "")
+				resets = append(resets, statusReset{db: db, taskID: t.ID})
 			}
-			heap.Push(&q.pq, &pqItem{
+			items = append(items, &pqItem{
 				task:     t,
 				priority: t.Priority,
 			})
@@ -190,6 +196,26 @@ func (q *Queue) LoadPending(ctx context.Context) error {
 			q.logger.Info("ai.Queue.LoadPending: loaded tasks",
 				"user_id", userID, "count", len(tasks))
 		}
+	}
+
+	// Perform status resets outside the lock.
+	for _, r := range resets {
+		q.store.UpdateStatus(ctx, r.db, r.taskID, TaskStatusPending, nil, "")
+	}
+
+	// Now acquire the lock and push items, respecting maxQueueSize (SCAN4-M8).
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	loaded := 0
+	for _, item := range items {
+		if q.pq.Len() >= q.maxQueueSize {
+			q.logger.Warn("ai.Queue.LoadPending: queue full, skipping remaining tasks",
+				"max_size", q.maxQueueSize, "skipped", len(items)-loaded)
+			break
+		}
+		heap.Push(&q.pq, item)
+		loaded++
 	}
 
 	return nil

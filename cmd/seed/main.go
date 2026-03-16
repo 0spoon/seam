@@ -237,6 +237,9 @@ func main() {
 		dangling = append(dangling, d)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		log.Fatalf("iterate dangling links: %v", err)
+	}
 
 	resolved := 0
 	for _, d := range dangling {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -561,7 +562,7 @@ func (c *APIClient) doRequestCtx(ctx context.Context, method, path string, param
 // doSingleRequest performs a single HTTP request without retry logic.
 // Returns (total, statusCode, error).
 func (c *APIClient) doSingleRequest(ctx context.Context, method, path string, params url.Values, reqBody interface{}, out interface{}, timeout time.Duration) (int, int, error) {
-	u := c.BaseURL + path
+	u := strings.TrimRight(c.BaseURL, "/") + path
 	if params != nil && len(params) > 0 {
 		u += "?" + params.Encode()
 	}

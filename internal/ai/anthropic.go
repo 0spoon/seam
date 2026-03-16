@@ -293,7 +293,18 @@ func (c *AnthropicClient) ChatCompletionStream(ctx context.Context, model string
 					} `json:"error"`
 				}
 				if err := json.Unmarshal([]byte(data), &errEvt); err == nil {
-					errCh <- fmt.Errorf("ai.AnthropicClient.ChatCompletionStream: API error: %s", errEvt.Error.Message)
+					// Log full error for debugging; return sanitized sentinel
+					// to avoid leaking raw API messages to callers.
+					slog.Debug("ai.AnthropicClient: stream error",
+						"type", errEvt.Error.Type, "message", errEvt.Error.Message)
+					switch errEvt.Error.Type {
+					case "rate_limit_error":
+						errCh <- fmt.Errorf("%w: try again later", ErrRateLimited)
+					case "authentication_error":
+						errCh <- fmt.Errorf("%w: invalid API key", ErrAuthFailed)
+					default:
+						errCh <- fmt.Errorf("ai.AnthropicClient.ChatCompletionStream: LLM provider stream error")
+					}
 				}
 				return
 			}
@@ -324,7 +335,7 @@ func (c *AnthropicClient) checkResponse(resp *http.Response) error {
 		case http.StatusUnauthorized:
 			return fmt.Errorf("%w: invalid API key", ErrAuthFailed)
 		case http.StatusNotFound:
-			return fmt.Errorf("%w: %s", ErrModelNotFound, errResp.Error.Message)
+			return fmt.Errorf("%w: model not found", ErrModelNotFound)
 		case http.StatusTooManyRequests:
 			return fmt.Errorf("%w: try again later", ErrRateLimited)
 		default:

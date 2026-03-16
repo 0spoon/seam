@@ -201,8 +201,8 @@ func (m aiAssistModel) View() string {
 	} else {
 		if m.selection != "" {
 			preview := m.selection
-			if len(preview) > 80 {
-				preview = preview[:77] + "..."
+			if runes := []rune(preview); len(runes) > 80 {
+				preview = string(runes[:77]) + "..."
 			}
 			b.WriteString(styleMuted.Render(fmt.Sprintf("Selection: %q", preview)))
 			b.WriteString("\n\n")

@@ -37,6 +37,8 @@ func (s *Service) GetGraph(ctx context.Context, userID string, filter GraphFilte
 
 	if filter.Limit <= 0 {
 		filter.Limit = 500
+	} else if filter.Limit > 500 {
+		filter.Limit = 500
 	}
 
 	nodes, err := s.queryNodes(ctx, db, filter)

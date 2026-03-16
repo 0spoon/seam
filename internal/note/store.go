@@ -357,7 +357,7 @@ func (s *SQLStore) ResolveLink(ctx context.Context, db DBTX, linkText string) (s
 	escaped := escapeLIKE(linkText)
 	err = db.QueryRowContext(ctx,
 		`SELECT id FROM notes WHERE (LOWER(file_path) = LOWER(?) OR LOWER(file_path) LIKE LOWER(?) ESCAPE '\') LIMIT 1`,
-		escaped+".md", "%/"+escaped+".md",
+		linkText+".md", "%/"+escaped+".md",
 	).Scan(&noteID)
 	if err == nil {
 		return noteID, nil

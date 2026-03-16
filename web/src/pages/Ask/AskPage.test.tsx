@@ -94,7 +94,7 @@ describe('AskPage', () => {
   it('shows empty state when no messages', async () => {
     await renderAskPage();
     expect(
-      screen.getByText(/Ask a question and Seam will search your notes/),
+      screen.getByText(/Ask anything.*Seam finds the answer/),
     ).toBeInTheDocument();
   });
 
@@ -178,7 +178,7 @@ describe('AskPage', () => {
 
     // No user message should appear - empty state still showing.
     expect(
-      screen.getByText(/Ask a question and Seam will search your notes/),
+      screen.getByText(/Ask anything.*Seam finds the answer/),
     ).toBeInTheDocument();
   });
 
@@ -191,7 +191,7 @@ describe('AskPage', () => {
 
     // Empty state should still be showing.
     expect(
-      screen.getByText(/Ask a question and Seam will search your notes/),
+      screen.getByText(/Ask anything.*Seam finds the answer/),
     ).toBeInTheDocument();
   });
 
@@ -204,7 +204,7 @@ describe('AskPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByText(/Ask a question and Seam will search your notes/),
+        screen.queryByText(/Ask anything.*Seam finds the answer/),
       ).not.toBeInTheDocument();
     });
   });

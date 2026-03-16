@@ -115,21 +115,33 @@
   align-items: center;
   justify-content: center;
   height: 100vh;
-  gap: var(--space-4);
+  gap: var(--space-3);
   background: var(--bg-base);
 }
 
 .fullPageLogo {
-  composes: skeleton;
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-lg);
+  opacity: 0.6;
+  animation: fadeIn var(--duration-slow) var(--ease-out) forwards;
 }
 
-.fullPageText {
-  composes: skeleton;
-  height: 14px;
-  width: 120px;
+.fullPageWordmark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--font-size-lg);
+  color: var(--text-secondary);
+  opacity: 0;
+  animation: fadeIn var(--duration-slow) var(--ease-out) 100ms forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 0.6;
+    transform: translateY(0);
+  }
 }
 
 /* Graph skeleton */

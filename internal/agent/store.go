@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -126,11 +127,14 @@ func (s *SQLStore) ListChildSessions(ctx context.Context, db DBTX, parentID stri
 // "parent/%" matches all descendants, but NOT "parent/%/%" excludes
 // sessions with further nesting (grandchildren and deeper).
 func (s *SQLStore) ReconcileChildren(ctx context.Context, db DBTX, parentID, parentName string) (int64, error) {
+	// Escape LIKE wildcards in parentName to prevent '_' and '%' from
+	// acting as single-char and multi-char wildcards respectively.
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(parentName)
 	result, err := db.ExecContext(ctx,
 		`UPDATE agent_sessions SET parent_session_id = ?
-		 WHERE name LIKE ? AND name NOT LIKE ?
+		 WHERE name LIKE ? ESCAPE '\' AND name NOT LIKE ? ESCAPE '\'
 		 AND parent_session_id IS NULL AND id != ?`,
-		parentID, parentName+"/%", parentName+"/%/%", parentID,
+		parentID, escaped+"/%", escaped+"/%/%", parentID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("agent.SQLStore.ReconcileChildren: %w", err)

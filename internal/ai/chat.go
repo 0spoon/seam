@@ -240,6 +240,9 @@ func (c *ChatService) retrieveContext(ctx context.Context, userID, query string)
 				}
 				noteMap[id] = noteData{title: title, body: body}
 			}
+			if rErr := rows.Err(); rErr != nil {
+				slog.Warn("ai.ChatService.retrieveContext: rows iteration error", "error", rErr)
+			}
 			// Preserve ChromaDB relevance order.
 			for _, id := range noteIDs {
 				nd, ok := noteMap[id]

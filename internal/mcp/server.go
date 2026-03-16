@@ -115,7 +115,7 @@ func New(cfg Config) *Server {
 	}
 
 	mcpSrv := mcpserver.NewMCPServer(
-		"Seam Agent Memory",
+		"Seam",
 		"1.0.0",
 		mcpserver.WithToolCapabilities(false),
 		mcpserver.WithRecovery(),

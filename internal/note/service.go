@@ -528,6 +528,13 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 			}
 			// Undo the move if we did one.
 			if pendingMove.needed {
+				// Remove the new file written at the new path (absPath) to avoid orphans.
+				if absPath != oldFileAbs {
+					if rmErr := os.Remove(absPath); rmErr != nil && !os.IsNotExist(rmErr) {
+						s.logger.Error("note.Service.Update: failed to remove new file after commit error",
+							"path", absPath, "error", rmErr)
+					}
+				}
 				if undoErr := os.Rename(pendingMove.newAbs, pendingMove.oldAbs); undoErr != nil {
 					s.logger.Error("note.Service.Update: failed to undo file move after commit error",
 						"from", pendingMove.newAbs, "to", pendingMove.oldAbs, "error", undoErr)
@@ -725,7 +732,9 @@ func (s *Service) executeBulkAction(
 				return nil // Already has the tag, no-op.
 			}
 		}
-		tags := append(existing.Tags, req.Params.Tag)
+		tags := make([]string, len(existing.Tags)+1)
+		copy(tags, existing.Tags)
+		tags[len(existing.Tags)] = req.Params.Tag
 		return s.store.UpdateTags(ctx, tx, noteID, tags)
 
 	case "remove_tag":

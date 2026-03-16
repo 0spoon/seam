@@ -113,7 +113,7 @@ func (s *Store) GetConversation(ctx context.Context, db DBTX, id string) (*Conve
 	).Scan(&conv.ID, &conv.Title, &conv.CreatedAt, &conv.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, nil
+			return nil, nil, ErrNotFound
 		}
 		return nil, nil, fmt.Errorf("chat.Store.GetConversation: %w", err)
 	}
@@ -216,14 +216,22 @@ func (s *Store) addMessageInTx(ctx context.Context, db DBTX, msg Message, citati
 		return fmt.Errorf("chat.Store.AddMessage: %w", err)
 	}
 
-	// Update conversation's updated_at timestamp.
+	// Update conversation's updated_at timestamp. Check RowsAffected to
+	// detect inserts referencing a non-existent conversation.
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = db.ExecContext(ctx,
+	result, err := db.ExecContext(ctx,
 		`UPDATE conversations SET updated_at = ? WHERE id = ?`,
 		now, msg.ConversationID,
 	)
 	if err != nil {
 		return fmt.Errorf("chat.Store.AddMessage: update conversation: %w", err)
+	}
+	n, raErr := result.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("chat.Store.AddMessage: rows affected: %w", raErr)
+	}
+	if n == 0 {
+		return fmt.Errorf("chat.Store.AddMessage: conversation %s: %w", msg.ConversationID, ErrNotFound)
 	}
 
 	return nil

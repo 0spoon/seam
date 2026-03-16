@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/katata/seam/internal/userdb"
 )
@@ -320,7 +321,10 @@ func ChunkText(text string, size, overlap int) []string {
 		// Try to break at a paragraph or sentence boundary.
 		if end < len(runes) {
 			segment := string(runes[start:end])
-			breakZone := len(segment) - len(segment)/5
+			segRuneLen := utf8.RuneCountInString(segment)
+			breakZone := segRuneLen - segRuneLen/5
+			// Convert rune-based breakZone to byte offset for string slicing.
+			breakZone = len(string([]rune(segment)[:breakZone]))
 			if breakZone < 0 {
 				breakZone = 0
 			}

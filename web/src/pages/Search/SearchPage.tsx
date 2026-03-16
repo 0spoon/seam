@@ -35,15 +35,18 @@ export function SearchPage() {
     inputRef.current?.focus();
   }, []);
 
-  // Sync query to URL search params.
+  // Sync query to URL search params. Use a ref for searchParams to avoid
+  // re-triggering this effect when setSearchParams updates searchParams.
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
   useEffect(() => {
-    const currentQ = searchParams.get('q') ?? '';
+    const currentQ = searchParamsRef.current.get('q') ?? '';
     if (query.trim() && query !== currentQ) {
       setSearchParams({ q: query }, { replace: true });
     } else if (!query.trim() && currentQ) {
       setSearchParams({}, { replace: true });
     }
-  }, [query, searchParams, setSearchParams]);
+  }, [query, setSearchParams]);
 
   useEffect(() => {
     if (!query.trim()) {

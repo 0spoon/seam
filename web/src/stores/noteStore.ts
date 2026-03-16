@@ -52,7 +52,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     set({ isLoading: true, error: null, lastFilter: filter });
     try {
       const { notes, total } = await api.listNotes(filter);
-      set({ notes, total, isLoading: false });
+      // When loading with an offset (pagination), append to existing notes
+      // instead of replacing them. This prevents other consumers of the store
+      // from seeing only the latest page.
+      if (filter?.offset && filter.offset > 0) {
+        set((state) => {
+          const existingIds = new Set(state.notes.map((n) => n.id));
+          const newNotes = notes.filter((n) => !existingIds.has(n.id));
+          return { notes: [...state.notes, ...newNotes], total, isLoading: false };
+        });
+      } else {
+        set({ notes, total, isLoading: false });
+      }
     } catch (err) {
       const message = err instanceof api.ApiError ? err.message : 'Failed to fetch notes';
       set({ error: message, isLoading: false });

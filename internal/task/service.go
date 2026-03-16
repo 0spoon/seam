@@ -278,7 +278,7 @@ func (s *Service) ToggleDone(ctx context.Context, userID, taskID string, done bo
 	}
 
 	// Update the file BEFORE committing DB transaction.
-	if s.noteSvc != nil {
+	if s.getNoteService() != nil {
 		if err := s.toggleCheckboxInFile(ctx, userID, t.NoteID, t.LineNumber, done); err != nil {
 			return fmt.Errorf("task.Service.ToggleDone: file update: %w", err)
 		}
@@ -337,13 +337,15 @@ func (s *Service) toggleCheckboxInFile(ctx context.Context, userID, noteID strin
 		if nlIdx >= 0 {
 			rest = rest[nlIdx+1:]
 			endIdx := strings.Index(rest, "\n---\n")
+			closingLen := 5 // length of "\n---\n"
 			if endIdx < 0 && strings.HasSuffix(rest, "\n---") {
 				endIdx = len(rest) - 4
+				closingLen = 4 // length of "\n---" (no trailing newline)
 			}
 			if endIdx >= 0 {
 				// bodyStart = opening "---" (3) + newline after opening (nlIdx+1) +
-				//             content before closing (endIdx) + closing "\n---\n" (5)
-				bodyStart = 3 + nlIdx + 1 + endIdx + 5
+				//             content before closing (endIdx) + closing delimiter length
+				bodyStart = 3 + nlIdx + 1 + endIdx + closingLen
 				if bodyStart > len(fileStr) {
 					bodyStart = len(fileStr)
 				}

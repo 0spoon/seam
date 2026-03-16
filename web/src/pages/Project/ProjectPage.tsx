@@ -106,13 +106,6 @@ export function ProjectPage() {
       sort,
       limit: 100,
       offset: loadedNotes.length,
-    }).then(() => {
-      const storeState = useNoteStore.getState();
-      setLoadedNotes((prev) => {
-        const existingIds = new Set(prev.map((n) => n.id));
-        const newNotes = storeState.notes.filter((n) => !existingIds.has(n.id));
-        return [...prev, ...newNotes];
-      });
     });
   }, [id, fetchNotes, sort, loadedNotes.length]);
 

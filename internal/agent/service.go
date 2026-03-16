@@ -1000,16 +1000,17 @@ func truncateSiblings(siblings []SiblingFinding, maxChars int) []SiblingFinding 
 	remaining := maxChars
 	for _, sib := range siblings {
 		header := sib.SessionName + ": "
-		if remaining <= len(header) {
+		headerLen := utf8.RuneCountInString(header)
+		if remaining <= headerLen {
 			break
 		}
-		maxFindings := remaining - len(header)
+		maxFindings := remaining - headerLen
 		findings := truncateToChars(sib.Findings, maxFindings)
 		result = append(result, SiblingFinding{
 			SessionName: sib.SessionName,
 			Findings:    findings,
 		})
-		remaining -= len(header) + len(findings)
+		remaining -= headerLen + utf8.RuneCountInString(findings)
 		if remaining <= 0 {
 			break
 		}
@@ -1027,10 +1028,11 @@ func truncateKnowledge(hits []KnowledgeHit, maxChars int) []KnowledgeHit {
 	remaining := maxChars
 	for _, hit := range hits {
 		header := hit.Title + ": "
-		if remaining <= len(header) {
+		headerLen := utf8.RuneCountInString(header)
+		if remaining <= headerLen {
 			break
 		}
-		maxSnippet := remaining - len(header)
+		maxSnippet := remaining - headerLen
 		snippet := truncateToChars(hit.Snippet, maxSnippet)
 		result = append(result, KnowledgeHit{
 			Title:   hit.Title,
@@ -1038,7 +1040,7 @@ func truncateKnowledge(hits []KnowledgeHit, maxChars int) []KnowledgeHit {
 			Source:  hit.Source,
 			Score:   hit.Score,
 		})
-		remaining -= len(header) + len(snippet)
+		remaining -= headerLen + utf8.RuneCountInString(snippet)
 		if remaining <= 0 {
 			break
 		}

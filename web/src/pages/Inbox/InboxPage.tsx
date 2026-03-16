@@ -55,14 +55,6 @@ export function InboxPage() {
       sort,
       limit: 100,
       offset: loadedNotes.length,
-    }).then(() => {
-      // After fetch, the store has the new page of notes; append them.
-      const storeState = useNoteStore.getState();
-      setLoadedNotes((prev) => {
-        const existingIds = new Set(prev.map((n) => n.id));
-        const newNotes = storeState.notes.filter((n) => !existingIds.has(n.id));
-        return [...prev, ...newNotes];
-      });
     });
   }, [fetchNotes, tagFilter, sort, loadedNotes.length]);
 

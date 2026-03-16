@@ -280,7 +280,7 @@ export function SettingsPage() {
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>About</h2>
         <p className={styles.aboutText}>
-          Seam -- a local-first, AI-powered knowledge system.
+          Seam -- a local-first, AI-powered knowledge system. Where ideas connect.
         </p>
         <p className={styles.aboutVersion}>
           Version {(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0')}

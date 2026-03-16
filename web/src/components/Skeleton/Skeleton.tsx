@@ -59,8 +59,26 @@ export function EditorSkeleton() {
 export function FullPageSkeleton() {
   return (
     <div className={styles.fullPage} role="status" aria-label="Loading">
-      <div className={styles.fullPageLogo} />
-      <div className={styles.fullPageText} />
+      <svg
+        className={styles.fullPageLogo}
+        width="48"
+        height="48"
+        viewBox="0 0 64 64"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <path
+          d="M16 24C21 18 32 16 40 22C48 28 43 38 35 40C27 42 19 37 24 29C29 21 40 24 38 32"
+          stroke="var(--accent-primary)"
+          strokeWidth="3"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <circle cx="16" cy="24" r="4" fill="var(--accent-primary)" />
+        <circle cx="38" cy="32" r="4" fill="var(--accent-primary)" />
+      </svg>
+      <span className={styles.fullPageWordmark}>Seam</span>
     </div>
   );
 }

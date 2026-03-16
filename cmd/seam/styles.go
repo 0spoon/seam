@@ -13,7 +13,7 @@ var (
 	colorHeaderBg  = lipgloss.Color("#242120") // slightly lighter bg
 	colorSelected  = lipgloss.Color("#3a3330") // warm dark selection
 	colorError     = lipgloss.Color("#c46b6b") // muted red
-	colorSuccess   = lipgloss.Color("#8fad5e") // muted green
+	colorSuccess   = lipgloss.Color("#6b9b7a") // sage green (aligned with web --status-success)
 	colorBorder    = lipgloss.Color("#3a3330") // warm border
 	colorDim       = lipgloss.Color("#5e5a6e") // dim text for less emphasis
 )

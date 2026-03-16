@@ -82,8 +82,16 @@ func (s *Server) loggingMiddleware() mcpserver.ToolHandlerMiddleware {
 					s.logger.Warn("failed to generate audit record ID", "error", idErr)
 					return result, err
 				}
+				// Extract session ID from tool arguments if available.
+				var sessionID string
+				if args := req.GetArguments(); args != nil {
+					if sn, ok := args["session_name"].(string); ok && sn != "" {
+						sessionID = sn
+					}
+				}
 				tc := &agent.ToolCallRecord{
 					ID:         auditID.String(),
+					SessionID:  sessionID,
 					ToolName:   req.Params.Name,
 					Arguments:  argsJSON,
 					Result:     resultText,

@@ -423,7 +423,7 @@ func (m askModel) View() string {
 
 	if len(m.history) == 0 && !m.loading {
 		lines = append(lines, "")
-		lines = append(lines, styleMuted.Render("  Ask a question about your notes. Answers are grounded in your knowledge base."))
+		lines = append(lines, styleMuted.Render("  Ask anything -- Seam finds the answer in your notes."))
 		lines = append(lines, "")
 	}
 

@@ -49,8 +49,12 @@ export function SynthesisModal({
     }
   };
 
-  // Focus trap: keep Tab cycling within the modal.
+  // Focus trap and keyboard handling: Escape closes, Tab cycles within modal.
   const handleFocusTrap = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onClose();
+      return;
+    }
     if (e.key !== 'Tab') return;
     const modal = backdropRef.current?.querySelector('[class*="modal"]') as HTMLElement | null;
     if (!modal) return;

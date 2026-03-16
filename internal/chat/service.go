@@ -104,10 +104,10 @@ func (s *Service) GetConversation(ctx context.Context, userID, conversationID st
 
 	conv, msgs, err := s.store.GetConversation(ctx, db, conversationID)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil, ErrNotFound
+		}
 		return nil, nil, fmt.Errorf("chat.Service.GetConversation: %w", err)
-	}
-	if conv == nil {
-		return nil, nil, ErrNotFound
 	}
 	return conv, msgs, nil
 }

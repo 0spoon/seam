@@ -4,6 +4,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -51,7 +52,7 @@ func NewHub(logger *slog.Logger) *Hub {
 }
 
 // ErrTooManyConns is returned when a user exceeds the per-user connection limit.
-var ErrTooManyConns = fmt.Errorf("too many WebSocket connections")
+var ErrTooManyConns = errors.New("too many WebSocket connections")
 
 // Register adds a WebSocket connection for the given user.
 // Returns ErrTooManyConns if the user already has maxConnsPerUser connections.

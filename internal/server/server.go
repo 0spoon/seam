@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -205,13 +206,17 @@ func New(cfg Config) *Server {
 				// Try to serve the file directly.
 				path := r.URL.Path
 				if f, err := staticFS.Open(path); err == nil {
+					fi, fiErr := f.Stat()
 					f.Close()
-					fileServer.ServeHTTP(w, r)
-					return
+					// Only serve regular files; skip directories to prevent listings.
+					if fiErr == nil && !fi.IsDir() {
+						fileServer.ServeHTTP(w, r)
+						return
+					}
 				}
 				// SPA fallback: serve index.html for non-API, non-asset paths.
 				if !strings.HasPrefix(path, "/api/") {
-					http.ServeFile(w, r, cfg.WebDistDir+"/index.html")
+					http.ServeFile(w, r, filepath.Join(cfg.WebDistDir, "index.html"))
 					return
 				}
 				http.NotFound(w, r)

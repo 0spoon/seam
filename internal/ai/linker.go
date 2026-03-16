@@ -139,6 +139,9 @@ func (l *AutoLinker) SuggestLinks(ctx context.Context, userID, noteID string) ([
 				}
 				noteMap[id] = relatedNoteInfo{ID: id, Title: title, Body: body}
 			}
+			if rErr := rows.Err(); rErr != nil {
+				slog.Warn("ai.AutoLinker.SuggestLinks: rows iteration error", "error", rErr)
+			}
 			// Preserve the ChromaDB relevance order.
 			for _, id := range noteIDs {
 				if info, ok := noteMap[id]; ok {

@@ -3,6 +3,7 @@ package template
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -92,7 +93,7 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		// If the body is empty/EOF, use empty vars. For actual
 		// parse errors (malformed JSON), return 400.
-		if err.Error() != "EOF" {
+		if !errors.Is(err, io.EOF) {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}

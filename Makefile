@@ -1,8 +1,10 @@
 .PHONY: build run test test-integration test-web lint fmt clean dev-web init
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
 build:
 	@mkdir -p bin
-	go build -o bin/seamd ./cmd/seamd
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/seamd ./cmd/seamd
 	go build -o bin/seam ./cmd/seam
 
 run: build

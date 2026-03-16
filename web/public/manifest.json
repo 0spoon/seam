@@ -1,0 +1,21 @@
+{
+  "name": "Seam",
+  "short_name": "Seam",
+  "description": "A local-first, AI-powered knowledge system. Where ideas connect.",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#08090d",
+  "background_color": "#08090d",
+  "icons": [
+    {
+      "src": "/seam.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    }
+  ]
+}

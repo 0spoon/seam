@@ -38,6 +38,10 @@ import (
 	"github.com/katata/seam/internal/ws"
 )
 
+// version is set at build time via -ldflags "-X main.version=x.y.z".
+// Defaults to "dev" for local builds.
+var version = "dev"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "seamd: %v\n", err)
@@ -200,6 +204,7 @@ func run() error {
 	searchHandler := search.NewHandler(searchSvc, logger)
 
 	// Create capture components.
+	capture.Version = version
 	urlFetcher := capture.NewURLFetcher()
 	var voiceTranscriber *capture.VoiceTranscriber
 	if cfg.Whisper.ModelPath != "" {
@@ -507,6 +512,7 @@ func run() error {
 			userDB, dbErr := userDBMgr.Open(ctx, uid)
 			if dbErr != nil {
 				logger.Warn("failed to open user db for reconciliation", "user_id", uid, "error", dbErr)
+				continue
 			}
 			if recErr := watcher.Reconcile(ctx, uid, notesDir, fileHandler, userDB); recErr != nil {
 				logger.Warn("reconciliation failed", "user_id", uid, "error", recErr)

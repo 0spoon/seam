@@ -80,7 +80,7 @@ func TestStore_DeleteConversation(t *testing.T) {
 	require.NoError(t, store.DeleteConversation(ctx, db, "conv1"))
 
 	got, _, err := store.GetConversation(ctx, db, "conv1")
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrNotFound)
 	require.Nil(t, got)
 }
 

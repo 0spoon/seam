@@ -157,8 +157,8 @@ func generateTitle(text string) string {
 			if runes := []rune(line); len(runes) > 60 {
 				// Truncate at word boundary using rune-safe slicing.
 				line = string(runes[:60])
-				if idx := lastSpace(line); idx > 20 {
-					line = line[:idx]
+				if idx := lastSpaceRune(line); idx > 20 {
+					line = string([]rune(line)[:idx])
 				}
 				line += "..."
 			}
@@ -197,9 +197,12 @@ func trimLine(s string) string {
 	return s[i:j]
 }
 
-func lastSpace(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ' ' {
+// lastSpaceRune returns the rune index of the last space in s, or -1 if none.
+// Uses rune iteration to correctly handle multi-byte UTF-8 characters.
+func lastSpaceRune(s string) int {
+	runes := []rune(s)
+	for i := len(runes) - 1; i >= 0; i-- {
+		if runes[i] == ' ' {
 			return i
 		}
 	}

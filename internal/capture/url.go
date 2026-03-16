@@ -25,6 +25,10 @@ var (
 	ErrUnsafeScheme = errors.New("URL scheme not allowed")
 )
 
+// Version is the application version included in the User-Agent header.
+// Set by the server at startup; defaults to "dev" if unset.
+var Version = "dev"
+
 // URLFetcher fetches and extracts content from URLs.
 type URLFetcher struct {
 	client *http.Client
@@ -126,7 +130,7 @@ func (f *URLFetcher) FetchURL(ctx context.Context, rawURL string) (*URLContent, 
 	if err != nil {
 		return nil, fmt.Errorf("capture.FetchURL: %w", err)
 	}
-	req.Header.Set("User-Agent", "Seam/1.0 (knowledge-system)")
+	req.Header.Set("User-Agent", "Seam/"+Version+" (knowledge-system)")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*")
 
 	resp, err := f.client.Do(req)

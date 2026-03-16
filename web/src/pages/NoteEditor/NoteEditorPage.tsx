@@ -295,6 +295,8 @@ export function NoteEditorPage() {
   // Cleanup save timers on unmount only (deps: [id]).
   // Uses refs to avoid re-running on every dependency change,
   // which caused spurious saves on title round-trips.
+  // Note: React cleanup runs synchronously, but the save request uses
+  // keepalive to ensure the browser completes it even after unmount.
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) {

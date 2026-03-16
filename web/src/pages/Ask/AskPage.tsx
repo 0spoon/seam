@@ -60,16 +60,19 @@ export function AskPage() {
   }, [conversationId]);
 
   // Throttle markdown rendering of streaming content (~100ms).
+  // Always register a cleanup to clear any pending timeout, even when
+  // returning early because a throttle is already in progress.
   useEffect(() => {
     if (!streamingContent) {
       setRenderedStreaming('');
       return;
     }
-    if (renderThrottleRef.current !== undefined) return;
-    renderThrottleRef.current = setTimeout(() => {
-      renderThrottleRef.current = undefined;
-      setRenderedStreaming(sanitizeHtml(renderMarkdown(streamingRef.current)));
-    }, 100);
+    if (renderThrottleRef.current === undefined) {
+      renderThrottleRef.current = setTimeout(() => {
+        renderThrottleRef.current = undefined;
+        setRenderedStreaming(sanitizeHtml(renderMarkdown(streamingRef.current)));
+      }, 100);
+    }
     return () => {
       if (renderThrottleRef.current !== undefined) {
         clearTimeout(renderThrottleRef.current);
@@ -444,7 +447,7 @@ export function AskPage() {
         {messages.length === 0 && !isStreaming && (
           <div className={styles.emptyState}>
             <p className={styles.emptyText}>
-              Ask a question and Seam will search your notes to find the answer.
+              Ask anything -- Seam finds the answer in your notes.
             </p>
             <div className={styles.suggestions}>
               {STARTER_SUGGESTIONS.map((suggestion) => (

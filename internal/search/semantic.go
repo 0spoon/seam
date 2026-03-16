@@ -548,24 +548,30 @@ func extractSnippet(body, query string, maxLen int) string {
 
 	runes := []rune(body)
 
-	lowerBody := strings.ToLower(body)
+	bodyRunes := []rune(strings.ToLower(body))
 	queryWords := strings.Fields(strings.ToLower(query))
 
-	// Find the first matching word position (in byte offset), then convert
-	// to rune offset for slicing.
-	bestBytePos := -1
+	// Find the first matching word position in rune offset.
+	// Use rune-level search to avoid byte/rune offset mismatch when
+	// ToLower changes byte length (e.g., German sharp-s, Turkish dotted-I).
+	bestPos := -1
 	for _, word := range queryWords {
-		if pos := strings.Index(lowerBody, word); pos >= 0 {
-			if bestBytePos < 0 || pos < bestBytePos {
-				bestBytePos = pos
+		wordRunes := []rune(word)
+		for i := 0; i <= len(bodyRunes)-len(wordRunes); i++ {
+			match := true
+			for j, wr := range wordRunes {
+				if bodyRunes[i+j] != wr {
+					match = false
+					break
+				}
+			}
+			if match {
+				if bestPos < 0 || i < bestPos {
+					bestPos = i
+				}
+				break
 			}
 		}
-	}
-
-	// Convert byte position to rune position.
-	bestPos := -1
-	if bestBytePos >= 0 {
-		bestPos = len([]rune(body[:bestBytePos]))
 	}
 
 	start := 0

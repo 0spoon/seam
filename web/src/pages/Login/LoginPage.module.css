@@ -8,12 +8,7 @@
 }
 
 .bgPattern {
-  position: absolute;
-  inset: 0;
-  opacity: 0.15;
-  background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M 0 80 Q 50 60 100 80 T 200 80' fill='none' stroke='%231e2233' stroke-width='1'/%3E%3Cpath d='M 0 120 Q 50 100 100 120 T 200 120' fill='none' stroke='%231e2233' stroke-width='1'/%3E%3Cpath d='M 0 160 Q 50 140 100 160 T 200 160' fill='none' stroke='%231e2233' stroke-width='0.5'/%3E%3Cpath d='M 0 40 Q 50 20 100 40 T 200 40' fill='none' stroke='%231e2233' stroke-width='0.5'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  pointer-events: none;
+  composes: seamPattern from '../../styles/patterns.css';
 }
 
 .content {

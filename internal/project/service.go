@@ -92,13 +92,19 @@ func (s *Service) Create(ctx context.Context, userID, name, description string) 
 
 	// Create project directory on disk.
 	projectDir := filepath.Join(s.userDBManager.UserNotesDir(userID), slug)
+	// Check if directory already existed before creating it so we only
+	// clean up on failure if we created it.
+	_, statErr := os.Stat(projectDir)
+	dirExisted := statErr == nil // true if directory already exists
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		return nil, fmt.Errorf("project.Service.Create: mkdir: %w", err)
 	}
 
 	if err := s.store.Create(ctx, db, p); err != nil {
-		// Clean up directory on DB insert failure.
-		os.RemoveAll(projectDir)
+		// Clean up directory on DB insert failure only if we created it.
+		if !dirExisted {
+			os.RemoveAll(projectDir)
+		}
 		return nil, fmt.Errorf("project.Service.Create: %w", err)
 	}
 
@@ -309,9 +315,25 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 	switch cascade {
 	case "inbox":
 		// Update DB first: clear project_id and set new file_path.
+		// Track used filenames to detect collisions and generate unique names.
+		usedFilenames := make(map[string]bool)
 		for _, n := range notes {
 			filename := filepath.Base(n.filePath)
 			newRelPath := filename
+
+			// Detect filename collision and generate unique name.
+			if usedFilenames[newRelPath] {
+				ext := filepath.Ext(filename)
+				base := filename[:len(filename)-len(ext)]
+				idVal, idErr := ulid.New(ulid.Now(), rand.Reader)
+				if idErr != nil {
+					// Fallback to timestamp-based suffix.
+					newRelPath = fmt.Sprintf("%s-%d%s", base, time.Now().UnixNano(), ext)
+				} else {
+					newRelPath = fmt.Sprintf("%s-%s%s", base, idVal.String(), ext)
+				}
+			}
+			usedFilenames[newRelPath] = true
 
 			_, updateErr := tx.ExecContext(ctx,
 				`UPDATE notes SET project_id = NULL, file_path = ? WHERE id = ?`,

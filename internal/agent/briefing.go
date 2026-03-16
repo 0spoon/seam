@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"strings"
 	"unicode/utf8"
 )
 
@@ -96,10 +95,18 @@ func truncateToChars(text string, maxChars int) string {
 	runes := []rune(text)
 	truncated := string(runes[:cutAt])
 
-	// Try to break at a word boundary.
-	lastSpace := strings.LastIndex(truncated, " ")
-	if lastSpace > cutAt/2 {
-		truncated = truncated[:lastSpace]
+	// Try to break at a word boundary. Use rune-based search to
+	// avoid byte-vs-rune offset mismatch with multi-byte characters.
+	truncRunes := []rune(truncated)
+	lastSpaceIdx := -1
+	for i := len(truncRunes) - 1; i >= 0; i-- {
+		if truncRunes[i] == ' ' {
+			lastSpaceIdx = i
+			break
+		}
+	}
+	if lastSpaceIdx > cutAt/2 {
+		truncated = string(truncRunes[:lastSpaceIdx])
 	}
 
 	return truncated + "..."

@@ -115,8 +115,10 @@ function stopHeartbeat() {
   }
 }
 
+let isReconnecting = false;
+
 async function scheduleReconnect() {
-  if (reconnectTimer) return;
+  if (reconnectTimer || isReconnecting) return;
 
   // Always refresh the access token before reconnecting. The in-memory
   // token string may still be present but expired, and unlike the HTTP
@@ -124,11 +126,16 @@ async function scheduleReconnect() {
   const refresh = getRefreshToken();
   if (!refresh) return;
 
+  isReconnecting = true;
   const ok = await tryRefresh();
+  isReconnecting = false;
   if (!ok) {
     setTokens(null);
     return;
   }
+
+  // Re-check after await in case another call already scheduled reconnect.
+  if (reconnectTimer) return;
 
   reconnectAttempts++;
   setConnectionState('reconnecting');

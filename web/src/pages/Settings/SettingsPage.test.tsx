@@ -75,7 +75,7 @@ describe('SettingsPage', () => {
     renderSettingsPage();
     expect(screen.getByText('About')).toBeInTheDocument();
     expect(
-      screen.getByText('Seam -- a local-first, AI-powered knowledge system.'),
+      screen.getByText('Seam -- a local-first, AI-powered knowledge system. Where ideas connect.'),
     ).toBeInTheDocument();
   });
 

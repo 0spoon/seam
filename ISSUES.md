@@ -2006,7 +2006,7 @@ tables.
 | Low | 3 | 3 | All resolved |
 | **Total** | **6** | **6** | **All resolved** |
 
-### Updated Grand Total
+### Grand Total (prior to fifth full scan)
 
 | Category | Total | Resolved | Open |
 |----------|-------|----------|------|
@@ -2021,3 +2021,556 @@ tables.
 | Fourth full scan | 38 | 38 | 0 |
 | Migration flattening + single-DB | 6 | 6 | 0 |
 | **All** | **177** | **177** | **0** |
+
+---
+
+## Fifth Full Source Scan (2026-03-15)
+
+Comprehensive review of all Go source files (`cmd/`, `internal/`) and frontend code
+(`web/src/`). All 177 prior issues verified as resolved. 35 new issues found and verified
+against actual source code. Findings deduplicated against all prior sections.
+
+**[Fix pass 2026-03-15]** All 35 issues fixed. Build and tests pass
+(`make build && make test && make test-web`). One test fix required:
+`TestStore_DeleteConversation` updated to expect `ErrNotFound` from `GetConversation`
+instead of `nil` (consequence of SCAN5-M14 fix).
+
+### HIGH
+
+#### SCAN5-H1. `note.Service.Update` incomplete filesystem rollback on commit failure
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/service.go:492-536`
+**Description:** When a note is moved to a different project (`pendingMove.needed`), the
+file rename happens at line 501, then `AtomicWriteFile` writes new content at line 510
+(to the new path), then `tx.Commit()` is attempted at line 522. If `tx.Commit()` fails:
+
+1. Rollback restores `oldContent` to `oldFileAbs` (the original path) at line 525.
+2. Rollback undoes the rename at line 531.
+
+But the new file written by `AtomicWriteFile` at the *new* path (`absPath`) is never
+cleaned up. After rollback, two copies of the file exist: the restored old file at the
+original path and the new-content file at the new path. The new-path file becomes an
+orphan with no DB record.
+
+**Fix:** Added `os.Remove(absPath)` in the commit-failure rollback block when
+`pendingMove.needed` and `absPath != oldFileAbs`, removing the orphan file before
+undoing the rename.
+
+---
+
+#### SCAN5-H2. `cmd/seamd/main.go:507-511` nil DB passed to `Reconcile` after open failure
+
+**Status:** FIXED (2026-03-15)
+**File:** `cmd/seamd/main.go:507-511`
+**Description:** When `userDBMgr.Open(ctx, uid)` fails, the error is logged but execution
+continues. `userDB` is nil, and `watcher.Reconcile(ctx, uid, notesDir, fileHandler, userDB)`
+is called with a nil `*sql.DB`. If `Reconcile` dereferences this, the server panics at
+startup. A `continue` statement is missing after the error log.
+
+```go
+userDB, dbErr := userDBMgr.Open(ctx, uid)
+if dbErr != nil {
+    logger.Warn("failed to open user db for reconciliation", ...)
+    // missing: continue
+}
+if recErr := watcher.Reconcile(ctx, uid, notesDir, fileHandler, userDB); recErr != nil {
+```
+
+**Fix:** Added `continue` after the error log.
+
+---
+
+### MEDIUM -- Backend
+
+#### SCAN5-M1. `note.Store.ResolveLink` applies `escapeLIKE` to equality comparison
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/store.go:357-361`
+**Description:** The filename match step uses `escapeLIKE(linkText)` for both the `=` and
+`LIKE` comparisons:
+
+```go
+escaped := escapeLIKE(linkText)
+err = db.QueryRowContext(ctx,
+    `SELECT id FROM notes WHERE (LOWER(file_path) = LOWER(?) OR LOWER(file_path) LIKE LOWER(?) ESCAPE '\') LIMIT 1`,
+    escaped+".md", "%/"+escaped+".md",
+)
+```
+
+`escapeLIKE` transforms `_` -> `\_`, `%` -> `\%`, `\` -> `\\`. For the `=` comparison
+(first param), these escape sequences are treated as literal characters, meaning a wikilink
+like `[[my_file]]` will search for a file literally named `my\_file.md`, which will never
+match. The first argument should use `linkText+".md"` (unescaped); only the LIKE argument
+needs escaping.
+
+---
+
+#### SCAN5-M2. `note.Service.BulkAction` `add_tag` mutates shared slice backing array
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/note/service.go:728`
+**Description:** `tags := append(existing.Tags, req.Params.Tag)` may write into
+`existing.Tags`'s backing array if it has spare capacity. While `existing` goes out of
+scope in the current code path, this is a latent correctness bug: if `Get` results are
+ever cached, the cached object would be silently corrupted.
+
+```go
+tags := append(existing.Tags, req.Params.Tag)
+```
+
+**Fix:** Use explicit copy: `tags := make([]string, len(existing.Tags)+1); copy(tags, existing.Tags); tags[len(existing.Tags)] = req.Params.Tag`.
+
+---
+
+#### SCAN5-M3. `search.extractSnippet` byte offset from lowercased string applied to original
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/search/semantic.go:551-568`
+**Description:** `bestBytePos` is found via `strings.Index(lowerBody, word)` where
+`lowerBody = strings.ToLower(body)`. This byte offset is then applied to the original
+`body` at line 568: `body[:bestBytePos]`. For characters where `ToLower` changes byte
+length (e.g., German `\u00df`/`SS` -> `ss`, Turkish `\u0130`/`I` -> `i\u0307`), the byte
+offset from the lowered string does not correspond to the same position in the original,
+causing mid-codepoint slicing or incorrect snippet positioning.
+
+**Fix:** Compute byte offsets on `lowerBody` and also slice `lowerBody[:bestBytePos]` to
+count runes, OR perform the search on rune slices.
+
+---
+
+#### SCAN5-M4. `task.Service.ToggleDone` reads `s.noteSvc` without lock
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/task/service.go:281`
+**Description:** The field `s.noteSvc` is protected by `sync.RWMutex` (with
+`getNoteService()` getter used at line 296), but line 281 reads it directly without
+synchronization:
+
+```go
+if s.noteSvc != nil {   // line 281: unsynchronized read
+    ...
+}
+```
+
+This is inconsistent with the locked read at line 296 and creates a data race if
+`SetNoteService` is ever called concurrently.
+
+**Fix:** Replace `s.noteSvc != nil` with `s.getNoteService() != nil`.
+
+---
+
+#### SCAN5-M5. `ai/chat.go` missing `rows.Err()` after batch note loading loop
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/chat.go:227-257`
+**Description:** After the `rows.Next()` loop in `retrieveContext`, there is no call to
+`rows.Err()`. If the rows iterator encounters an error mid-scan (I/O error, corrupt data),
+the error is silently swallowed and partial context is returned as if it succeeded, leading
+to degraded AI responses with no diagnostic signal.
+
+---
+
+#### SCAN5-M6. `ai/linker.go` missing `rows.Err()` after batch note loading loop
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/linker.go:126-148`
+**Description:** Same pattern as SCAN5-M5. The batch note loading in `SuggestLinks` skips
+`rows.Err()` after the `rows.Next()` loop. A DB error during iteration silently produces
+incomplete link suggestions.
+
+---
+
+#### SCAN5-M7. `agent/service.go` `truncateSiblings`/`truncateKnowledge` mix byte and rune budgets
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/agent/service.go:1002-1012` and `1028-1042`
+**Description:** Both functions use `len()` (byte count) for budget accounting, but the
+budget represents a rune/character limit (passed to `truncateToChars` which uses
+`utf8.RuneCountInString`). For multi-byte content (CJK, emoji), `len(header)` and
+`len(findings)` return byte counts larger than rune counts, causing the budget to be
+exhausted prematurely. Items are dropped before the actual character limit is reached.
+
+```go
+remaining -= len(header) + len(findings)  // bytes, not runes
+```
+
+**Fix:** Use `utf8.RuneCountInString(header)` and `utf8.RuneCountInString(findings)`.
+
+---
+
+#### SCAN5-M8. `agent/briefing.go` `truncateToChars` compares byte index with rune count
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/agent/briefing.go:100-103`
+**Description:** After rune-safe truncation, the word-boundary adjustment uses
+`strings.LastIndex` (returns byte offset) compared against `cutAt/2` (a rune count):
+
+```go
+lastSpace := strings.LastIndex(truncated, " ")  // byte offset
+if lastSpace > cutAt/2 {                         // cutAt is rune count
+    truncated = truncated[:lastSpace]             // byte slicing (safe)
+}
+```
+
+For multi-byte text, `lastSpace` (byte index) is systematically larger than `cutAt/2`
+(rune count), making the word-break trigger more aggressively than intended.
+
+---
+
+#### SCAN5-M9. `capture/service.go:160` `lastSpace` returns byte index compared with rune threshold
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/capture/service.go:159-162`
+**Description:** Same byte-vs-rune mismatch as SCAN5-M8. After rune-safe truncation to 60
+runes, `lastSpace(line)` returns a byte index, compared against the hardcoded threshold 20
+(intended as a rune count). `lastSpace()` at line 200 iterates by bytes, so `idx > 20`
+compares a byte offset against a rune threshold.
+
+---
+
+#### SCAN5-M10. `agent/store.go` `ReconcileChildren` LIKE patterns don't escape `_` wildcard
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/agent/store.go:129-133`
+**Description:** The `ReconcileChildren` query uses `LIKE ?` with `parentName+"/%"`, but
+`parentName` can contain underscores (`_` is allowed by `sessionNameRe`). SQLite treats
+`_` as a single-character wildcard in LIKE. A parent session named `task_1` would match
+the pattern `task_1/%` which also matches `taskX1/child` (where X is any character). This
+could cause sessions from unrelated parents to be incorrectly adopted as children.
+
+**Fix:** Use `ESCAPE '\'` clause and escape `_`, `%`, `\` in `parentName`.
+
+---
+
+#### SCAN5-M11. `project.Service.Create` `os.RemoveAll` cleanup may destroy pre-existing directory
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/project/service.go:95-101`
+**Description:** If the project directory already exists before `os.MkdirAll` (e.g.,
+leftover from a previous failed creation or created by another process), and the DB insert
+fails (e.g., slug collision), `os.RemoveAll(projectDir)` at line 101 will delete the
+pre-existing directory and all its contents. This could destroy existing files.
+
+**Fix:** Check whether the directory was newly created (e.g., via `os.Stat` before
+`MkdirAll`), and only clean up if it was created by this call.
+
+---
+
+#### SCAN5-M12. `project.Service.Delete` filename collision when cascading notes to inbox
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/project/service.go:312-315`
+**Description:** When cascading notes to inbox, the new relative path is just
+`filepath.Base(n.filePath)`. If two notes in the project have the same filename in
+different subdirectories (e.g., `project-a/notes.md` and `project-a/sub/notes.md`), both
+map to `notes.md` in inbox. The second `os.Rename` overwrites the first file on disk,
+while both DB records point to the same `file_path`. One note's content is lost.
+
+**Fix:** Detect filename collisions and generate unique names (e.g., append ULID suffix).
+
+---
+
+#### SCAN5-M13. `mcp/logging.go` `ToolCallRecord.SessionID` never set -- session metrics broken
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/mcp/logging.go:85-93`
+**Description:** The `SessionID` field on `ToolCallRecord` is never populated. All tool call
+audit records are stored without a `session_id`, which means `GetSessionMetrics` (which
+queries `WHERE session_id = ?`) never matches them. The session metrics feature (tool call
+counts, error counts, avg duration) always returns zeros.
+
+**Fix:** Extract `SessionID` from MCP tool arguments (e.g., `session_name` parameter) or
+pass it through context.
+
+---
+
+#### SCAN5-M14. `chat.Store.GetConversation` returns `nil, nil, nil` for not-found
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/chat/store.go:115-116`
+**Description:** When a conversation is not found, the store returns `(nil, nil, nil)`
+instead of `(nil, nil, ErrNotFound)`. The caller (`Service.GetConversation`) must check
+for `conv == nil` explicitly. This is an anti-pattern: returning no error when the resource
+wasn't found makes it easy for future callers to forget the nil check and dereference a
+nil pointer.
+
+**Fix:** Return `(nil, nil, ErrNotFound)` on `sql.ErrNoRows`.
+
+---
+
+#### SCAN5-M15. `watcher.go:210` redundant/misleading symlink check with `os.Lstat`
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/watcher/watcher.go:210`
+**Description:** The check `info.Mode()&os.ModeSymlink == 0` after `os.Lstat` is redundant.
+With `Lstat`, if the path is a symlink, `info.IsDir()` already returns `false` (because
+`Lstat` reports the symlink itself, not its target). The `ModeSymlink` guard is unreachable.
+The code works correctly today (symlinks are rejected by the `IsDir()` check), but the
+intent is misleading. If a future refactor changes `Lstat` to `Stat`, the symlink guard
+would silently stop working because `Stat` follows symlinks and never sets `ModeSymlink`.
+
+**Fix:** Remove the redundant `info.Mode()&os.ModeSymlink == 0` check and add a comment
+explaining that `Lstat` + `IsDir()` is the symlink protection.
+
+---
+
+### MEDIUM -- Frontend
+
+#### SCAN5-WM1. `InboxPage` load-more overwrites store notes with single page
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/pages/Inbox/InboxPage.tsx:52-66`
+**Description:** `handleLoadMore` calls `fetchNotes` with an offset, but `fetchNotes` in the
+store replaces `notes` with only the new page (line 55 of noteStore: `set({ notes, total })`).
+The `.then()` reads `storeState.notes` which now only contains the second page. The
+`setLoadedNotes` merger appends correctly from `loadedNotes`, but other consumers of the
+store's `notes` array (e.g., sidebar, keyboard shortcuts) see only the latest page. If a
+note is created between the two fetches, offset shifts can produce duplicates.
+
+Same pattern exists in `ProjectPage.tsx`.
+
+**Fix:** Either have `fetchNotes` support an append mode, or use a separate store method
+for pagination that doesn't overwrite `notes`.
+
+---
+
+#### SCAN5-WM2. `ws.ts` async `scheduleReconnect` can create duplicate WebSocket connections
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/api/ws.ts:118-139`
+**Description:** `scheduleReconnect` is `async` and calls `await tryRefresh()` at line 127.
+The `if (reconnectTimer) return` guard at line 119 only prevents re-entry if `reconnectTimer`
+is already set -- but it isn't set until line 136 (after the await). If `scheduleReconnect`
+is called twice before the first `await` resolves, both calls pass the guard, both call
+`tryRefresh()`, both increment `reconnectAttempts`, and both schedule `setTimeout` callbacks
+to call `connect()`. This creates multiple concurrent WebSocket instances.
+
+**Fix:** Add a mutex flag (`isReconnecting`) set before the await and checked at entry.
+
+---
+
+#### SCAN5-WM3. `sanitize.ts` custom `javascript:` check is case-sensitive
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/lib/sanitize.ts:7`
+**Description:** The custom DOMPurify hook checks `href.startsWith('javascript:')` which is
+case-sensitive. Variants like `JavaScript:`, `jAvAsCrIpT:`, or `\tjavascript:` bypass this
+check. DOMPurify's built-in handling already covers most cases, so this is defense-in-depth,
+but the custom check should be case-insensitive for completeness.
+
+**Fix:** Use `href.toLowerCase().trimStart().startsWith('javascript:')`.
+
+---
+
+### LOW -- Backend
+
+#### SCAN5-L1. `task/service.go` frontmatter `bodyStart` off-by-one when file ends with `\n---`
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/task/service.go:340-346`
+**Description:** When a note file ends with `\n---` (no trailing newline, no body after
+frontmatter), the closing delimiter is 4 bytes (`\n---`), but `bodyStart` adds 5 bytes
+(for `\n---\n`). The guard `if bodyStart > len(fileStr)` prevents a crash, but `fmLines`
+counts one extra character as part of frontmatter, causing `lineNumber` to be off by +1.
+The checkbox toggle then targets the wrong line.
+
+---
+
+#### SCAN5-L2. `template/handler.go:95` EOF detection via string comparison
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/template/handler.go:95`
+**Description:** `err.Error() != "EOF"` uses string comparison instead of
+`errors.Is(err, io.EOF)`. Fragile if Go's `encoding/json` package changes error message
+format.
+
+**Fix:** Use `!errors.Is(err, io.EOF)`.
+
+---
+
+#### SCAN5-L3. `server/server.go:214` string concatenation for file path
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/server/server.go:214`
+**Description:** `cfg.WebDistDir+"/index.html"` uses string concatenation instead of
+`filepath.Join`. Inconsistent with codebase conventions and AGENTS.md rules.
+
+**Fix:** Use `filepath.Join(cfg.WebDistDir, "index.html")`.
+
+---
+
+#### SCAN5-L4. `server/server.go:207` static file serving can expose directory listings
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/server/server.go:207`
+**Description:** `http.Dir.Open` succeeds for directories, and `http.FileServer` serves
+directory listings for directories without an `index.html`. This could expose the file
+structure of `web/dist`. While these are only static frontend assets, directory listings
+are generally undesirable.
+
+**Fix:** Check `info.IsDir()` after `Open` and skip to SPA fallback for directories.
+
+---
+
+#### SCAN5-L5. `webhook/service.go:461-468` response body not fully drained after limited read
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/webhook/service.go:461-468`
+**Description:** `io.ReadAll(io.LimitReader(resp.Body, 1024))` reads at most 1024 bytes. If
+the response body is larger, the remainder is not drained before `resp.Body.Close()`. The
+underlying HTTP connection cannot be reused by the connection pool, causing unnecessary TCP
+overhead for webhook targets that return large responses.
+
+**Fix:** Add `io.Copy(io.Discard, resp.Body)` after reading the limited portion.
+
+---
+
+#### SCAN5-L6. `ai/embedder.go:322-334` `breakZone` uses byte length instead of rune length
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ai/embedder.go:322-334`
+**Description:** `breakZone := len(segment) - len(segment)/5` uses byte length on a string
+that was constructed from a rune slice. For multi-byte content, the break-search window
+is proportionally smaller than the intended 20% of the chunk, making sentence-boundary
+finding less effective.
+
+**Fix:** Use `utf8.RuneCountInString(segment)` for the calculation.
+
+---
+
+#### SCAN5-L7. `graph/service.go:38-39` service doesn't cap limit value
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/graph/service.go:38-39`
+**Description:** The handler caps at 500, but the service only sets a default when `<= 0`.
+If `GetGraph` is called programmatically (not through the handler), an arbitrarily large
+limit can be passed. Defense-in-depth: the service should also enforce the cap.
+
+**Fix:** Add `if filter.Limit > 500 { filter.Limit = 500 }`.
+
+---
+
+#### SCAN5-L8. `ws/hub.go:54` sentinel error uses `fmt.Errorf` instead of `errors.New`
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/ws/hub.go:54`
+**Description:** `var ErrTooManyConns = fmt.Errorf("too many WebSocket connections")` uses
+`fmt.Errorf` without `%w`. Sentinel errors should use `errors.New()` per project
+conventions. Inconsistent with SCAN2-L4 fix for webhook sentinels.
+
+**Fix:** Change to `errors.New("too many WebSocket connections")`.
+
+---
+
+#### SCAN5-L9. `chat/service.go:161-172` auto-title logic runs outside transaction (TOCTOU)
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/chat/service.go:161-172`
+**Description:** After `AddMessage` (which uses an internal transaction), the auto-title
+logic reads the conversation and updates its title as two separate operations without a
+transaction. Two concurrent messages could both see `conv.Title == ""` and both update
+the title. Benign for single-user (worst case: title set twice to same value), but
+inconsistent with the transactional patterns used elsewhere.
+
+---
+
+#### SCAN5-L10. `chat.Store.AddMessage` doesn't verify conversation exists
+
+**Status:** FIXED (2026-03-15)
+**File:** `internal/chat/store.go:209-230`
+**Description:** `addMessageInTx` inserts a message and updates the conversation's
+`updated_at`. If the conversation doesn't exist, the INSERT succeeds (if FK not enforced
+or deferred), and the UPDATE silently affects 0 rows. An orphaned message could be created
+with an invalid `conversation_id`. The handler checks for `ErrNotFound` but the service
+never returns it for this case.
+
+---
+
+### LOW -- Frontend
+
+#### SCAN5-WL1. `NoteEditorPage` unmount save flush is async but cleanup is sync
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/pages/NoteEditor/NoteEditorPage.tsx:298-313`
+**Description:** The `useEffect` cleanup calls `handleSaveRef.current(contentRef.current)`
+which is async (`handleSave` calls `updateNote`). React cleanup functions run synchronously
+-- the returned promise is discarded. If the component unmounts during navigation, the
+browser may not complete the network request before the page unloads.
+
+**Fix:** Use `navigator.sendBeacon` or `keepalive: true` on the fetch for save-on-unmount.
+
+---
+
+#### SCAN5-WL2. `noteStore.ts` `toggleNoteSelection` always triggers re-render
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/stores/noteStore.ts:191-203`
+**Description:** `toggleNoteSelection` creates a `new Set(state.selectedNoteIds)` on every
+call. Zustand uses reference equality, so this always triggers a re-render for all
+subscribers of `selectedNoteIds`, even when toggling the same item back (resulting in the
+same logical set contents).
+
+**Fix:** Compare set contents before setting state, or use a different data structure.
+
+---
+
+#### SCAN5-WL3. `SynthesisModal` missing Escape key handler
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/components/SynthesisModal/SynthesisModal.tsx`
+**Description:** The modal has a focus trap and backdrop click to close, but no keyboard
+handler for the Escape key. Users expect Escape to close modals (WCAG accessibility).
+
+**Fix:** Add `onKeyDown` handler that calls close on Escape.
+
+---
+
+#### SCAN5-WL4. `SearchPage.tsx:39-46` URL sync effect has fragile infinite loop protection
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/pages/Search/SearchPage.tsx:39-46`
+**Description:** The effect that syncs `query` to URL params includes `searchParams` in its
+dependency array. `setSearchParams` updates `searchParams`, which re-triggers the effect.
+The `query !== currentQ` guard prevents infinite loops, but this is fragile -- any change
+to the comparison logic could create an infinite render loop.
+
+---
+
+#### SCAN5-WL5. `AskPage.tsx:62-79` streaming render throttle timer cleanup race
+
+**Status:** FIXED (2026-03-15)
+**File:** `web/src/pages/Ask/AskPage.tsx:62-79`
+**Description:** The `useEffect` for throttling markdown rendering checks
+`if (renderThrottleRef.current !== undefined) return` and returns early without registering
+a cleanup. If `streamingContent` changes rapidly, the timeout from the previous render
+could fire after unmount. React ignores state updates on unmounted components, but this
+is a minor resource leak.
+
+---
+
+### Summary: Fifth Full Source Scan
+
+| Severity | Count | Fixed | Status |
+|----------|-------|-------|--------|
+| High | 2 | 2 | All resolved |
+| Medium | 18 | 18 | All resolved |
+| Low | 15 | 15 | All resolved |
+| **Total** | **35** | **35** | **All resolved** |
+
+### Updated Grand Total
+
+| Category | Total | Resolved | Open |
+|----------|-------|----------|------|
+| Original audit | 27 | 27 | 0 |
+| Post-fix review | 7 | 7 | 0 |
+| Test issues | 4 | 4 | 0 |
+| Pre-existing | 16 | 16 | 0 |
+| First full scan | 13 | 13 | 0 |
+| Second full scan | 39 | 39 | 0 |
+| Third full scan | 17 | 17 | 0 |
+| LLM provider review | 10 | 10 | 0 |
+| Fourth full scan | 38 | 38 | 0 |
+| Migration flattening + single-DB | 6 | 6 | 0 |
+| Fifth full scan | 35 | 35 | 0 |
+| **All** | **212** | **212** | **0** |

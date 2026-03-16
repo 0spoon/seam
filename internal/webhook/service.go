@@ -460,12 +460,14 @@ func (s *Service) deliver(ctx context.Context, wh *Webhook, eventType string, pa
 	}
 	defer resp.Body.Close()
 
-	// Read response body (limited).
+	// Read response body (limited) and drain the remainder so the
+	// HTTP connection can be reused by the connection pool.
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if readErr != nil {
 		s.logger.Debug("webhook response body read error",
 			"webhook_id", wh.ID, "error", readErr)
 	}
+	io.Copy(io.Discard, resp.Body) //nolint:errcheck // best-effort drain
 	respText := string(body)
 
 	duration := time.Since(start)

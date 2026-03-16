@@ -32,7 +32,7 @@ import (
 func setupPerfServer(t *testing.T) (*httptest.Server, *auth.JWTManager, userdb.Manager) {
 	t.Helper()
 	dataDir := testutil.TestDataDir(t)
-	serverDB := testutil.TestServerDB(t)
+	serverDB := testutil.TestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	userDBMgr := userdb.NewSQLManager(dataDir, 10*time.Minute, logger)

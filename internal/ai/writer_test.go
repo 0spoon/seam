@@ -62,7 +62,7 @@ func TestWriter_Assist_Expand(t *testing.T) {
 
 	ollama := NewOllamaClient(srv.URL, 30e9, 120e9)
 
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	_, err := db.Exec(
 		`INSERT INTO notes (id, title, file_path, body, content_hash, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -153,7 +153,7 @@ func TestWriter_Assist_EmptySelection_LoadsNote(t *testing.T) {
 
 	ollama := NewOllamaClient(srv.URL, 30e9, 120e9)
 
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	_, err := db.Exec(
 		`INSERT INTO notes (id, title, file_path, body, content_hash, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -170,7 +170,7 @@ func TestWriter_Assist_EmptySelection_LoadsNote(t *testing.T) {
 }
 
 func TestWriter_Assist_NoteNotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	mgr := &fixedDBManager{db: db}
 	ollama := NewOllamaClient("http://localhost:0", 30e9, 120e9)
 	writer := NewWriter(ollama, mgr, "test-model", nil)

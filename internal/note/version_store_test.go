@@ -12,7 +12,7 @@ import (
 )
 
 func TestVersionStore_Create_Get(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewVersionStore()
 	noteStore := NewSQLStore()
 	ctx := context.Background()
@@ -53,7 +53,7 @@ func TestVersionStore_Create_Get(t *testing.T) {
 }
 
 func TestVersionStore_Get_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewVersionStore()
 	ctx := context.Background()
 
@@ -62,7 +62,7 @@ func TestVersionStore_Get_NotFound(t *testing.T) {
 }
 
 func TestVersionStore_List_NewestFirst(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewVersionStore()
 	noteStore := NewSQLStore()
 	ctx := context.Background()
@@ -102,7 +102,7 @@ func TestVersionStore_List_NewestFirst(t *testing.T) {
 }
 
 func TestVersionStore_List_Pagination(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewVersionStore()
 	noteStore := NewSQLStore()
 	ctx := context.Background()
@@ -149,7 +149,7 @@ func TestVersionStore_List_Pagination(t *testing.T) {
 }
 
 func TestVersionStore_NextVersion(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewVersionStore()
 	noteStore := NewSQLStore()
 	ctx := context.Background()
@@ -189,7 +189,7 @@ func TestVersionStore_NextVersion(t *testing.T) {
 }
 
 func TestVersionStore_Cleanup(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewVersionStore()
 	noteStore := NewSQLStore()
 	ctx := context.Background()
@@ -234,7 +234,7 @@ func TestVersionStore_Cleanup(t *testing.T) {
 }
 
 func TestVersionStore_Cleanup_NoOp(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewVersionStore()
 	noteStore := NewSQLStore()
 	ctx := context.Background()
@@ -274,7 +274,7 @@ func TestVersionStore_Cleanup_NoOp(t *testing.T) {
 }
 
 func TestVersionStore_CascadeDelete(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewVersionStore()
 	noteStore := NewSQLStore()
 	ctx := context.Background()

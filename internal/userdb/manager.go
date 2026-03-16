@@ -229,7 +229,7 @@ func (m *SQLManager) openDB(userID string) (*sql.DB, error) {
 		return nil, fmt.Errorf("userdb.Manager.Open: foreign keys: %w", err)
 	}
 
-	if err := migrations.Run(db, migrations.UserMigrations()); err != nil {
+	if err := migrations.Run(db, migrations.Migrations()); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("userdb.Manager.Open: migrations: %w", err)
 	}

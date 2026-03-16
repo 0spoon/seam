@@ -13,28 +13,11 @@ import (
 	"github.com/katata/seam/migrations"
 )
 
-// TestServerDB returns an isolated in-memory SQLite database with server.db
+// TestDB returns an isolated in-memory SQLite database with all seam.db
 // migrations applied. Each call creates a fresh database named after the test.
-func TestServerDB(t *testing.T) *sql.DB {
+func TestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return OpenTestDB(t, migrations.ServerSQL)
-}
-
-// TestUserDB returns an isolated in-memory SQLite database with all per-user
-// seam.db migrations applied. Runs migrations in order so new tables
-// (e.g., agent_sessions) are available in tests.
-func TestUserDB(t *testing.T) *sql.DB {
-	t.Helper()
-
-	db := OpenTestDB(t, migrations.UserSQL)
-	for _, m := range migrations.UserMigrations() {
-		if m.Version <= 1 {
-			continue // already applied by OpenTestDB
-		}
-		_, err := db.Exec(m.SQL)
-		require.NoError(t, err)
-	}
-	return db
+	return OpenTestDB(t, migrations.InitialSQL)
 }
 
 // TestDataDir returns a temporary directory suitable for use as a data_dir

@@ -24,7 +24,7 @@ func testDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	_, err = db.Exec("PRAGMA foreign_keys=ON")
 	require.NoError(t, err)
-	_, err = db.Exec(migrations.UserSQL)
+	_, err = db.Exec(migrations.InitialSQL)
 	require.NoError(t, err)
 
 	t.Cleanup(func() { db.Close() })

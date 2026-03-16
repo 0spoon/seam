@@ -12,7 +12,7 @@ import (
 )
 
 func TestSQLStore_Create_Get(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -41,7 +41,7 @@ func TestSQLStore_Create_Get(t *testing.T) {
 }
 
 func TestSQLStore_Create_WithProject(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -74,7 +74,7 @@ func TestSQLStore_Create_WithProject(t *testing.T) {
 }
 
 func TestSQLStore_GetByFilePath(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -98,7 +98,7 @@ func TestSQLStore_GetByFilePath(t *testing.T) {
 }
 
 func TestSQLStore_GetByFilePath_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -107,7 +107,7 @@ func TestSQLStore_GetByFilePath_NotFound(t *testing.T) {
 }
 
 func TestSQLStore_Get_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -116,7 +116,7 @@ func TestSQLStore_Get_NotFound(t *testing.T) {
 }
 
 func TestSQLStore_Update(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -149,7 +149,7 @@ func TestSQLStore_Update(t *testing.T) {
 }
 
 func TestSQLStore_Update_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -165,7 +165,7 @@ func TestSQLStore_Update_NotFound(t *testing.T) {
 }
 
 func TestSQLStore_Delete(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -191,7 +191,7 @@ func TestSQLStore_Delete(t *testing.T) {
 }
 
 func TestSQLStore_Delete_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -200,7 +200,7 @@ func TestSQLStore_Delete_NotFound(t *testing.T) {
 }
 
 func TestSQLStore_List_Basic(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -229,7 +229,7 @@ func TestSQLStore_List_Basic(t *testing.T) {
 }
 
 func TestSQLStore_List_WithPagination(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -261,7 +261,7 @@ func TestSQLStore_List_WithPagination(t *testing.T) {
 }
 
 func TestSQLStore_List_InboxOnly(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -297,7 +297,7 @@ func TestSQLStore_List_InboxOnly(t *testing.T) {
 }
 
 func TestSQLStore_List_ByTag(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -324,7 +324,7 @@ func TestSQLStore_List_ByTag(t *testing.T) {
 }
 
 func TestSQLStore_UpdateTags_ReplacesExisting(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -351,7 +351,7 @@ func TestSQLStore_UpdateTags_ReplacesExisting(t *testing.T) {
 }
 
 func TestSQLStore_UpdateTags_ClearAll(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -372,7 +372,7 @@ func TestSQLStore_UpdateTags_ClearAll(t *testing.T) {
 }
 
 func TestSQLStore_ListTags(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -404,7 +404,7 @@ func TestSQLStore_ListTags(t *testing.T) {
 }
 
 func TestSQLStore_UpdateLinks_And_GetBacklinks(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -432,7 +432,7 @@ func TestSQLStore_UpdateLinks_And_GetBacklinks(t *testing.T) {
 }
 
 func TestSQLStore_UpdateLinks_DanglingLink(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -464,7 +464,7 @@ func TestSQLStore_UpdateLinks_DanglingLink(t *testing.T) {
 }
 
 func TestSQLStore_ResolveLink_ByTitle(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -481,7 +481,7 @@ func TestSQLStore_ResolveLink_ByTitle(t *testing.T) {
 }
 
 func TestSQLStore_ResolveLink_ByFilename(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -498,7 +498,7 @@ func TestSQLStore_ResolveLink_ByFilename(t *testing.T) {
 }
 
 func TestSQLStore_ResolveLink_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 

@@ -12,7 +12,7 @@ import (
 )
 
 func TestSQLStore_CreateSession_Success(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -40,7 +40,7 @@ func TestSQLStore_CreateSession_Success(t *testing.T) {
 }
 
 func TestSQLStore_CreateSession_DuplicateName(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -62,7 +62,7 @@ func TestSQLStore_CreateSession_DuplicateName(t *testing.T) {
 }
 
 func TestSQLStore_CreateSession_WithParent(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -86,7 +86,7 @@ func TestSQLStore_CreateSession_WithParent(t *testing.T) {
 }
 
 func TestSQLStore_GetSession_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -95,7 +95,7 @@ func TestSQLStore_GetSession_NotFound(t *testing.T) {
 }
 
 func TestSQLStore_GetSessionByName_Success(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -112,7 +112,7 @@ func TestSQLStore_GetSessionByName_Success(t *testing.T) {
 }
 
 func TestSQLStore_GetSessionByName_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -121,7 +121,7 @@ func TestSQLStore_GetSessionByName_NotFound(t *testing.T) {
 }
 
 func TestSQLStore_UpdateSession_Success(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -144,7 +144,7 @@ func TestSQLStore_UpdateSession_Success(t *testing.T) {
 }
 
 func TestSQLStore_UpdateSession_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -157,7 +157,7 @@ func TestSQLStore_UpdateSession_NotFound(t *testing.T) {
 }
 
 func TestSQLStore_ListSessions_FilterByStatus(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -187,7 +187,7 @@ func TestSQLStore_ListSessions_FilterByStatus(t *testing.T) {
 }
 
 func TestSQLStore_ListSessions_All(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -208,7 +208,7 @@ func TestSQLStore_ListSessions_All(t *testing.T) {
 }
 
 func TestSQLStore_ListSessions_Pagination(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -237,7 +237,7 @@ func TestSQLStore_ListSessions_Pagination(t *testing.T) {
 }
 
 func TestSQLStore_ListChildSessions(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -274,7 +274,7 @@ func TestSQLStore_ListChildSessions(t *testing.T) {
 }
 
 func TestSQLStore_ReconcileChildren(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -327,7 +327,7 @@ func TestSQLStore_ReconcileChildren(t *testing.T) {
 }
 
 func TestSQLStore_ReconcileChildren_SkipsAlreadyLinked(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -362,7 +362,7 @@ func TestSQLStore_ReconcileChildren_SkipsAlreadyLinked(t *testing.T) {
 }
 
 func TestSQLStore_LogToolCall_Success(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -397,7 +397,7 @@ func TestSQLStore_LogToolCall_Success(t *testing.T) {
 }
 
 func TestSQLStore_LogToolCall_WithoutSession(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -415,7 +415,7 @@ func TestSQLStore_LogToolCall_WithoutSession(t *testing.T) {
 }
 
 func TestSQLStore_LogToolCall_WithError(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -447,7 +447,7 @@ func TestSQLStore_LogToolCall_WithError(t *testing.T) {
 }
 
 func TestSQLStore_ListToolCalls_LimitAndOrder(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -479,7 +479,7 @@ func TestSQLStore_ListToolCalls_LimitAndOrder(t *testing.T) {
 }
 
 func TestSQLStore_CascadeDelete_ToolCallsOnSessionDelete(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -508,7 +508,7 @@ func TestSQLStore_CascadeDelete_ToolCallsOnSessionDelete(t *testing.T) {
 }
 
 func TestSQLStore_ParentDeleteSetsNull(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -536,7 +536,7 @@ func TestSQLStore_ParentDeleteSetsNull(t *testing.T) {
 }
 
 func TestSQLStore_CreateSession_MetadataRoundTrip(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -585,7 +585,7 @@ func TestSQLStore_CreateSession_MetadataRoundTrip(t *testing.T) {
 }
 
 func TestSQLStore_CreateSession_WithFindings(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -606,7 +606,7 @@ func TestSQLStore_CreateSession_WithFindings(t *testing.T) {
 }
 
 func TestSQLStore_UpdateSession_MetadataUpdate(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -632,7 +632,7 @@ func TestSQLStore_UpdateSession_MetadataUpdate(t *testing.T) {
 }
 
 func TestSQLStore_ListSessions_OrderByUpdatedAt(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -667,7 +667,7 @@ func TestSQLStore_ListSessions_OrderByUpdatedAt(t *testing.T) {
 }
 
 func TestSQLStore_ListSessions_EmptyResult(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -685,7 +685,7 @@ func TestSQLStore_ListSessions_EmptyResult(t *testing.T) {
 }
 
 func TestSQLStore_ListChildSessions_NoChildren(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -702,7 +702,7 @@ func TestSQLStore_ListChildSessions_NoChildren(t *testing.T) {
 }
 
 func TestSQLStore_ListChildSessions_OnlyCompletedSiblings(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -748,7 +748,7 @@ func TestSQLStore_ListChildSessions_OnlyCompletedSiblings(t *testing.T) {
 }
 
 func TestSQLStore_ReconcileChildren_NoOrphans(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -765,7 +765,7 @@ func TestSQLStore_ReconcileChildren_NoOrphans(t *testing.T) {
 }
 
 func TestSQLStore_ReconcileChildren_DeepHierarchy(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -825,7 +825,7 @@ func TestSQLStore_ReconcileChildren_DeepHierarchy(t *testing.T) {
 }
 
 func TestSQLStore_ReconcileChildren_SkipsGrandchildren(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -868,7 +868,7 @@ func TestSQLStore_ReconcileChildren_SkipsGrandchildren(t *testing.T) {
 }
 
 func TestSQLStore_LogToolCall_AllFields(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -907,7 +907,7 @@ func TestSQLStore_LogToolCall_AllFields(t *testing.T) {
 }
 
 func TestSQLStore_ListToolCalls_EmptyForSession(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -924,7 +924,7 @@ func TestSQLStore_ListToolCalls_EmptyForSession(t *testing.T) {
 }
 
 func TestSQLStore_ListToolCalls_DefaultLimit(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -959,7 +959,7 @@ func TestSQLStore_ListToolCalls_DefaultLimit(t *testing.T) {
 }
 
 func TestSQLStore_GetSession_TimestampPrecision(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 
@@ -985,7 +985,7 @@ func TestSQLStore_GetSession_TimestampPrecision(t *testing.T) {
 }
 
 func TestSQLStore_CreateSession_InvalidParentFK(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewSQLStore()
 	ctx := context.Background()
 

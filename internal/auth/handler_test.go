@@ -19,7 +19,7 @@ import (
 
 func newTestHandler(t *testing.T) (*auth.Handler, *auth.JWTManager) {
 	t.Helper()
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	jwtMgr := auth.NewJWTManager("test-secret-key", 15*time.Minute)
 	dataDir := testutil.TestDataDir(t)

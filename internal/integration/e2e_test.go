@@ -65,7 +65,7 @@ func (c *testClient) do(method, path string, body interface{}, out interface{}) 
 func setupServer(t *testing.T) *testClient {
 	t.Helper()
 	dataDir := testutil.TestDataDir(t)
-	serverDB := testutil.TestServerDB(t)
+	serverDB := testutil.TestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// User DB manager (real filesystem).

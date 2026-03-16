@@ -7,23 +7,8 @@ import (
 	_ "embed"
 )
 
-//go:embed server/001_users.sql
-var ServerSQL string
-
-//go:embed user/001_initial.sql
-var UserSQL string
-
-//go:embed user/002_agent_sessions.sql
-var UserSQL002 string
-
-//go:embed user/003_tasks.sql
-var UserSQL003 string
-
-//go:embed user/004_webhooks.sql
-var UserSQL004 string
-
-//go:embed user/005_task_composite_index.sql
-var UserSQL005 string
+//go:embed 001_initial.sql
+var InitialSQL string
 
 // Migration represents a single numbered migration step.
 type Migration struct {
@@ -35,20 +20,9 @@ type Migration struct {
 	PreHook func(db *sql.DB) error
 }
 
-// UserMigrations returns the ordered list of user-database migrations.
-func UserMigrations() []Migration {
+// Migrations returns the ordered list of database migrations.
+func Migrations() []Migration {
 	return []Migration{
-		{Version: 1, SQL: UserSQL},
-		{Version: 2, SQL: UserSQL002},
-		{Version: 3, SQL: UserSQL003},
-		{Version: 4, SQL: UserSQL004},
-		{Version: 5, SQL: UserSQL005},
-	}
-}
-
-// ServerMigrations returns the ordered list of server-database migrations.
-func ServerMigrations() []Migration {
-	return []Migration{
-		{Version: 1, SQL: ServerSQL},
+		{Version: 1, SQL: InitialSQL},
 	}
 }

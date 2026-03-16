@@ -99,13 +99,13 @@ func run() error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	// Open server.db (shared database for users and refresh tokens).
-	serverDBPath := filepath.Join(cfg.DataDir, "server.db")
-	serverDB, err := auth.OpenServerDB(serverDBPath)
+	// Open seam.db (owner account, refresh tokens, and auth data).
+	seamDBPath := filepath.Join(cfg.DataDir, "seam.db")
+	seamDB, err := auth.OpenDB(seamDBPath)
 	if err != nil {
-		return fmt.Errorf("open server db: %w", err)
+		return fmt.Errorf("open seam db: %w", err)
 	}
-	defer serverDB.Close()
+	defer seamDB.Close()
 
 	// Create per-user database manager.
 	userDBMgr := userdb.NewSQLManager(
@@ -126,7 +126,7 @@ func run() error {
 	go userDBMgr.Run(ctx)
 
 	// Create auth components.
-	authStore := auth.NewSQLStore(serverDB)
+	authStore := auth.NewSQLStore(seamDB)
 	jwtMgr := auth.NewJWTManager(cfg.JWTSecret, cfg.Auth.AccessTokenTTL.Duration)
 	authSvc := auth.NewService(
 		authStore, jwtMgr, userDBMgr,
@@ -772,7 +772,7 @@ func run() error {
 
 	// 5. Stop file watcher (deferred w.Close() handles this -- LIFO before DBs).
 	// 6. Close all user databases (deferred userDBMgr.CloseAll() handles this).
-	// 7. Close server database (deferred serverDB.Close() handles this).
+	// 7. Close seam database (deferred seamDB.Close() handles this).
 
 	logger.Info("shutdown complete")
 	return nil

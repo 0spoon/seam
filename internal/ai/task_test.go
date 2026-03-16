@@ -12,7 +12,7 @@ import (
 )
 
 func TestTaskStore_Create_And_Get(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewTaskStore()
 	ctx := context.Background()
 
@@ -38,7 +38,7 @@ func TestTaskStore_Create_And_Get(t *testing.T) {
 }
 
 func TestTaskStore_Get_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewTaskStore()
 
 	_, err := store.Get(context.Background(), db, "nonexistent")
@@ -46,7 +46,7 @@ func TestTaskStore_Get_NotFound(t *testing.T) {
 }
 
 func TestTaskStore_UpdateStatus(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewTaskStore()
 	ctx := context.Background()
 
@@ -82,7 +82,7 @@ func TestTaskStore_UpdateStatus(t *testing.T) {
 }
 
 func TestTaskStore_UpdateStatus_Failed(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewTaskStore()
 	ctx := context.Background()
 
@@ -106,7 +106,7 @@ func TestTaskStore_UpdateStatus_Failed(t *testing.T) {
 }
 
 func TestTaskStore_UpdateStatus_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewTaskStore()
 
 	err := store.UpdateStatus(context.Background(), db, "nonexistent", TaskStatusDone, nil, "")
@@ -114,7 +114,7 @@ func TestTaskStore_UpdateStatus_NotFound(t *testing.T) {
 }
 
 func TestTaskStore_ListPending(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewTaskStore()
 	ctx := context.Background()
 

@@ -10,7 +10,7 @@ import (
 )
 
 func TestFTSStore_Search_BasicQuery(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	// Insert test notes.
@@ -49,7 +49,7 @@ func TestFTSStore_Search_BasicQuery(t *testing.T) {
 }
 
 func TestFTSStore_Search_PrefixQuery(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	_, err := db.ExecContext(ctx,
@@ -70,7 +70,7 @@ func TestFTSStore_Search_PrefixQuery(t *testing.T) {
 }
 
 func TestFTSStore_Search_EmptyQuery(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	store := NewFTSStore()
@@ -82,7 +82,7 @@ func TestFTSStore_Search_EmptyQuery(t *testing.T) {
 }
 
 func TestFTSStore_Search_NoResults(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	_, err := db.ExecContext(ctx,
@@ -102,7 +102,7 @@ func TestFTSStore_Search_NoResults(t *testing.T) {
 }
 
 func TestFTSStore_Search_SpecialCharacters(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	_, err := db.ExecContext(ctx,
@@ -129,7 +129,7 @@ func TestFTSStore_Search_SpecialCharacters(t *testing.T) {
 }
 
 func TestFTSStore_Search_Pagination(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
@@ -158,7 +158,7 @@ func TestFTSStore_Search_Pagination(t *testing.T) {
 }
 
 func TestFTSStore_Search_AutoSync(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	// Insert a note.

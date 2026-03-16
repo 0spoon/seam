@@ -13,7 +13,7 @@ import (
 )
 
 func TestStore_CreateUser_Success(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -38,7 +38,7 @@ func TestStore_CreateUser_Success(t *testing.T) {
 }
 
 func TestStore_CreateUser_DuplicateUsername(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -55,7 +55,7 @@ func TestStore_CreateUser_DuplicateUsername(t *testing.T) {
 }
 
 func TestStore_CreateUser_DuplicateEmail(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -72,7 +72,7 @@ func TestStore_CreateUser_DuplicateEmail(t *testing.T) {
 }
 
 func TestStore_GetUserByUsername_NotFound(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -82,7 +82,7 @@ func TestStore_GetUserByUsername_NotFound(t *testing.T) {
 }
 
 func TestStore_GetUserByID_Success(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -97,7 +97,7 @@ func TestStore_GetUserByID_Success(t *testing.T) {
 }
 
 func TestStore_GetUserByID_NotFound(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -107,7 +107,7 @@ func TestStore_GetUserByID_NotFound(t *testing.T) {
 }
 
 func TestStore_RefreshToken_Lifecycle(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -139,7 +139,7 @@ func TestStore_RefreshToken_Lifecycle(t *testing.T) {
 }
 
 func TestStore_DeleteRefreshTokensByUser(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -167,7 +167,7 @@ func TestStore_DeleteRefreshTokensByUser(t *testing.T) {
 }
 
 func TestStore_RefreshToken_CascadeOnUserDelete(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	store := auth.NewSQLStore(db)
 	ctx := context.Background()
 
@@ -180,7 +180,7 @@ func TestStore_RefreshToken_CascadeOnUserDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	// Delete user directly (simulating account deletion).
-	_, err = db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", u.ID)
+	_, err = db.ExecContext(ctx, "DELETE FROM owner WHERE id = ?", u.ID)
 	require.NoError(t, err)
 
 	// Token should be cascade-deleted.
@@ -189,11 +189,11 @@ func TestStore_RefreshToken_CascadeOnUserDelete(t *testing.T) {
 }
 
 func TestStore_MigrationsIdempotent(t *testing.T) {
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
-	// Run migrations again (TestServerDB already ran them once).
+	// Run migrations again (TestDB already ran them once).
 	// This should not error because we use IF NOT EXISTS.
-	_, err := db.ExecContext(ctx, migrations.ServerSQL)
+	_, err := db.ExecContext(ctx, migrations.InitialSQL)
 	require.NoError(t, err)
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func TestStore_Create_Success(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -40,7 +40,7 @@ func TestStore_Create_Success(t *testing.T) {
 }
 
 func TestStore_Create_DuplicateSlug(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -63,7 +63,7 @@ func TestStore_Create_DuplicateSlug(t *testing.T) {
 }
 
 func TestStore_Get_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -73,7 +73,7 @@ func TestStore_Get_NotFound(t *testing.T) {
 }
 
 func TestStore_GetBySlug_Success(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -92,7 +92,7 @@ func TestStore_GetBySlug_Success(t *testing.T) {
 }
 
 func TestStore_GetBySlug_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -102,7 +102,7 @@ func TestStore_GetBySlug_NotFound(t *testing.T) {
 }
 
 func TestStore_List_Empty(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -112,7 +112,7 @@ func TestStore_List_Empty(t *testing.T) {
 }
 
 func TestStore_List_MultipleProjects(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -140,7 +140,7 @@ func TestStore_List_MultipleProjects(t *testing.T) {
 }
 
 func TestStore_Update_Success(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -169,7 +169,7 @@ func TestStore_Update_Success(t *testing.T) {
 }
 
 func TestStore_Update_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -184,7 +184,7 @@ func TestStore_Update_NotFound(t *testing.T) {
 }
 
 func TestStore_Update_DuplicateSlug(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -212,7 +212,7 @@ func TestStore_Update_DuplicateSlug(t *testing.T) {
 }
 
 func TestStore_Delete_Success(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -233,7 +233,7 @@ func TestStore_Delete_Success(t *testing.T) {
 }
 
 func TestStore_Delete_NotFound(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 
@@ -243,7 +243,7 @@ func TestStore_Delete_NotFound(t *testing.T) {
 }
 
 func TestStore_Create_EmptyDescription(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := project.NewStore()
 	ctx := context.Background()
 

@@ -10,7 +10,7 @@ import (
 )
 
 func TestStore_SetAndGetAll(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 
@@ -23,7 +23,7 @@ func TestStore_SetAndGetAll(t *testing.T) {
 }
 
 func TestStore_Set_Upsert(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 
@@ -36,7 +36,7 @@ func TestStore_Set_Upsert(t *testing.T) {
 }
 
 func TestStore_Delete(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 
@@ -50,7 +50,7 @@ func TestStore_Delete(t *testing.T) {
 }
 
 func TestStore_GetAll_Empty(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 

@@ -45,7 +45,7 @@ func minimalConfig(t *testing.T) server.Config {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	jwtMgr := auth.NewJWTManager("test-secret-key-at-least-32-chars", 15*time.Minute)
 
-	db := testutil.TestServerDB(t)
+	db := testutil.TestDB(t)
 	authStore := auth.NewSQLStore(db)
 	authSvc := auth.NewService(authStore, jwtMgr, &stubUserDBManager{}, 24*time.Hour, 4, logger)
 	authHandler := auth.NewHandler(authSvc, logger)

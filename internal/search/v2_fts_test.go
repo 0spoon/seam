@@ -10,7 +10,7 @@ import (
 )
 
 func TestFTSStore_SearchScoped_IncludeProject(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	// Insert parent projects to satisfy foreign key constraints.
@@ -38,7 +38,7 @@ func TestFTSStore_SearchScoped_IncludeProject(t *testing.T) {
 }
 
 func TestFTSStore_SearchScoped_ExcludeProject(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	// Insert parent projects to satisfy foreign key constraints.
@@ -65,7 +65,7 @@ func TestFTSStore_SearchScoped_ExcludeProject(t *testing.T) {
 }
 
 func TestFTSStore_SearchScoped_NoFilter(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	// Insert parent projects to satisfy foreign key constraints.

@@ -54,7 +54,7 @@ func (m *mockManager) Open(_ context.Context, userID string) (*sql.DB, error) {
 	}
 	db.Exec("PRAGMA journal_mode=WAL")
 	db.Exec("PRAGMA foreign_keys=ON")
-	db.Exec(migrations.UserSQL)
+	db.Exec(migrations.InitialSQL)
 	m.dbs[userID] = db
 	return db, nil
 }

@@ -63,13 +63,13 @@ func main() {
 	dataDir := "./data"
 	ctx := context.Background()
 
-	serverDB, err := auth.OpenServerDB(filepath.Join(dataDir, "server.db"))
+	seamDB, err := auth.OpenDB(filepath.Join(dataDir, "seam.db"))
 	if err != nil {
-		log.Fatalf("open server.db: %v", err)
+		log.Fatalf("open seam.db: %v", err)
 	}
-	defer serverDB.Close()
+	defer seamDB.Close()
 
-	store := auth.NewSQLStore(serverDB)
+	store := auth.NewSQLStore(seamDB)
 	if _, err := store.GetUserByUsername(ctx, "demo"); err == nil {
 		log.Fatal("demo user already exists")
 	}

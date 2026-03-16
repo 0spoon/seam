@@ -10,7 +10,7 @@ import (
 )
 
 func TestService_Update_TransactionAtomicity(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 

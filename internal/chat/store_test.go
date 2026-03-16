@@ -10,7 +10,7 @@ import (
 )
 
 func TestStore_CreateConversation(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 
@@ -34,7 +34,7 @@ func TestStore_CreateConversation(t *testing.T) {
 }
 
 func TestStore_ListConversations(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 
@@ -63,7 +63,7 @@ func TestStore_ListConversations(t *testing.T) {
 }
 
 func TestStore_DeleteConversation(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 
@@ -85,7 +85,7 @@ func TestStore_DeleteConversation(t *testing.T) {
 }
 
 func TestStore_AddMessage(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 
@@ -118,7 +118,7 @@ func TestStore_AddMessage(t *testing.T) {
 }
 
 func TestStore_GetFirstUserMessage(t *testing.T) {
-	db := testutil.TestUserDB(t)
+	db := testutil.TestDB(t)
 	store := NewStore()
 	ctx := context.Background()
 

@@ -132,8 +132,8 @@ func TestService_SearchFTS_NoMatches_ReturnsEmpty(t *testing.T) {
 }
 
 func TestService_SearchFTS_UsesTestUserDB(t *testing.T) {
-	// Demonstrate direct usage of testutil.TestUserDB with FTSStore.
-	db := testutil.TestUserDB(t)
+	// Demonstrate direct usage of testutil.TestDB with FTSStore.
+	db := testutil.TestDB(t)
 	ctx := context.Background()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)

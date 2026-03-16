@@ -32,7 +32,7 @@ import (
 func setupAgentServer(t *testing.T) *testClient {
 	t.Helper()
 	dataDir := testutil.TestDataDir(t)
-	serverDB := testutil.TestServerDB(t)
+	serverDB := testutil.TestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	userDBMgr := userdb.NewSQLManager(dataDir, 10*time.Minute, logger)

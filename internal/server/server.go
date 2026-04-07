@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/cors"
 
 	"github.com/katata/seam/internal/ai"
+	"github.com/katata/seam/internal/assistant"
 	"github.com/katata/seam/internal/auth"
 	"github.com/katata/seam/internal/capture"
 	"github.com/katata/seam/internal/chat"
@@ -59,6 +60,7 @@ type Config struct {
 	TaskHandler      *task.Handler
 	ReviewHandler    *review.Handler
 	WebhookHandler   *webhook.Handler
+	AssistantHandler *assistant.Handler
 	WSMessageHandler ws.MessageHandler
 	MCPHandler       http.Handler // MCP endpoint handler (optional, mounts at /api/mcp)
 }
@@ -186,6 +188,12 @@ func New(cfg Config) *Server {
 		if cfg.WebhookHandler != nil {
 			r.Route("/api/webhooks", func(r chi.Router) {
 				r.Mount("/", cfg.WebhookHandler.Routes())
+			})
+		}
+
+		if cfg.AssistantHandler != nil {
+			r.Route("/api/assistant", func(r chi.Router) {
+				r.Mount("/", cfg.AssistantHandler.Routes())
 			})
 		}
 	})

@@ -2,16 +2,20 @@ package ws
 
 // WebSocket message type constants.
 const (
-	MsgTypeAuth            = "auth"
-	MsgTypeNoteChanged     = "note.changed"
-	MsgTypeTaskProgress    = "task.progress"
-	MsgTypeTaskComplete    = "task.complete"
-	MsgTypeTaskFailed      = "task.failed"
-	MsgTypeChatAsk         = "chat.ask"
-	MsgTypeChatStream      = "chat.stream"
-	MsgTypeChatDone        = "chat.done"
+	MsgTypeAuth             = "auth"
+	MsgTypeNoteChanged      = "note.changed"
+	MsgTypeTaskProgress     = "task.progress"
+	MsgTypeTaskComplete     = "task.complete"
+	MsgTypeTaskFailed       = "task.failed"
+	MsgTypeChatAsk          = "chat.ask"
+	MsgTypeChatStream       = "chat.stream"
+	MsgTypeChatDone         = "chat.done"
 	MsgTypeLinkSuggestions  = "note.link_suggestions"
-	MsgTypeWebhookDelivery = "webhook.delivery"
+	MsgTypeWebhookDelivery  = "webhook.delivery"
+	MsgTypeAssistantStream  = "assistant.stream"
+	MsgTypeAssistantToolUse = "assistant.tool_use"
+	MsgTypeAssistantDone    = "assistant.done"
+	MsgTypeAssistantError   = "assistant.error"
 )
 
 // AuthPayload is the payload for an auth message.

@@ -16,21 +16,37 @@ import (
 
 // Config holds the complete server configuration.
 type Config struct {
-	Listen        string        `yaml:"listen"`
-	DataDir       string        `yaml:"data_dir"`
-	JWTSecret     string        `yaml:"jwt_secret"`
-	OllamaBaseURL string        `yaml:"ollama_base_url"`
-	ChromaDBURL   string        `yaml:"chromadb_url"`
-	LogLevel      string        `yaml:"log_level"`    // "debug", "info", "warn", "error"; default "info"
-	CORSOrigins   []string      `yaml:"cors_origins"` // allowed CORS origins; default localhost
-	Models        ModelsConfig  `yaml:"models"`
-	LLM           LLMConfig     `yaml:"llm"`
-	Whisper       WhisperConfig `yaml:"whisper"`
-	Auth          AuthConfig    `yaml:"auth"`
-	AI            AIConfig      `yaml:"ai"`
-	UserDB        UserDBConfig  `yaml:"userdb"`
-	Watcher       WatcherConfig `yaml:"watcher"`
-	WebDistDir    string        `yaml:"web_dist_dir"` // path to web/dist for SPA serving; empty uses default
+	Listen        string          `yaml:"listen"`
+	DataDir       string          `yaml:"data_dir"`
+	JWTSecret     string          `yaml:"jwt_secret"`
+	OllamaBaseURL string          `yaml:"ollama_base_url"`
+	ChromaDBURL   string          `yaml:"chromadb_url"`
+	LogLevel      string          `yaml:"log_level"`    // "debug", "info", "warn", "error"; default "info"
+	CORSOrigins   []string        `yaml:"cors_origins"` // allowed CORS origins; default localhost
+	Models        ModelsConfig    `yaml:"models"`
+	LLM           LLMConfig       `yaml:"llm"`
+	Whisper       WhisperConfig   `yaml:"whisper"`
+	Auth          AuthConfig      `yaml:"auth"`
+	AI            AIConfig        `yaml:"ai"`
+	Assistant     AssistantConfig `yaml:"assistant"`
+	UserDB        UserDBConfig    `yaml:"userdb"`
+	Watcher       WatcherConfig   `yaml:"watcher"`
+	WebDistDir    string          `yaml:"web_dist_dir"` // path to web/dist for SPA serving; empty uses default
+}
+
+// AssistantConfig specifies agentic assistant parameters.
+type AssistantConfig struct {
+	// MaxIterations is the maximum number of tool-use loop iterations.
+	// Default: 10.
+	MaxIterations int `yaml:"max_iterations"`
+
+	// ConfirmationRequired lists tool names that require user approval.
+	// Default: ["create_note", "update_note", "create_project"]
+	ConfirmationRequired []string `yaml:"confirmation_required"`
+
+	// Model overrides the chat model for the assistant.
+	// When empty, defaults to models.chat.
+	Model string `yaml:"model"`
 }
 
 // ModelsConfig specifies the AI model names.
@@ -232,6 +248,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Watcher.DebounceInterval.Duration == 0 {
 		cfg.Watcher.DebounceInterval.Duration = 200 * time.Millisecond
+	}
+	if cfg.Assistant.MaxIterations <= 0 {
+		cfg.Assistant.MaxIterations = 10
+	}
+	if len(cfg.Assistant.ConfirmationRequired) == 0 {
+		cfg.Assistant.ConfirmationRequired = []string{"create_note", "update_note", "create_project"}
 	}
 	// C-34: Apply default Whisper binary path if model path is set but binary is not.
 	if cfg.Whisper.ModelPath != "" && cfg.Whisper.BinaryPath == "" {

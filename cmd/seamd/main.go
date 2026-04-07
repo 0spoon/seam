@@ -17,6 +17,7 @@ import (
 
 	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/ai"
+	"github.com/katata/seam/internal/assistant"
 	"github.com/katata/seam/internal/auth"
 	"github.com/katata/seam/internal/capture"
 	"github.com/katata/seam/internal/chat"
@@ -553,6 +554,7 @@ func run() error {
 				var payload struct {
 					Query   string           `json:"query"`
 					History []ai.ChatMessage `json:"history,omitempty"`
+					Summary string           `json:"summary,omitempty"`
 				}
 				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 					return
@@ -573,7 +575,7 @@ func run() error {
 					}
 				}
 
-				tokenCh, citations, errCh := chatSvc.AskStream(fctx, uid, payload.Query, payload.History)
+				tokenCh, citations, errCh := chatSvc.AskStream(fctx, uid, payload.Query, payload.History, payload.Summary)
 
 				// Stream tokens to client.
 				go func() {
@@ -706,6 +708,49 @@ func run() error {
 	})
 	mcpHandler := mcpSrv.Handler(jwtMgr)
 
+	// Create assistant (agentic AI with tool use).
+	var assistantHandler *assistant.Handler
+	if chatCompleter != nil {
+		// All LLM providers implement ai.ToolChatCompleter.
+		toolCompleter, ok := chatCompleter.(ai.ToolChatCompleter)
+		if ok {
+			assistantStore := assistant.NewStore()
+			memoryStore := assistant.NewMemoryStore()
+			profileStore := assistant.NewProfileStore()
+			toolRegistry := assistant.NewToolRegistry()
+			assistant.RegisterDefaultTools(toolRegistry, noteSvc, taskSvc, projectSvc, searchSvc, graphSvc, chatHistorySvc)
+
+			assistantModel := cfg.Assistant.Model
+			if assistantModel == "" {
+				assistantModel = cfg.Models.Chat
+			}
+
+			assistantSvc := assistant.NewService(assistant.ServiceDeps{
+				Store:        assistantStore,
+				MemoryStore:  memoryStore,
+				ProfileStore: profileStore,
+				Registry:     toolRegistry,
+				LLM:          toolCompleter,
+				// All built-in providers also implement plain
+				// ChatCompleter, so the same client doubles as the
+				// summarizer for conversation digests.
+				Summarizer:    chatCompleter,
+				ChatModel:     assistantModel,
+				UserDBManager: userDBMgr,
+				Hub:           hub,
+				Logger:        logger,
+				Config: assistant.ServiceConfig{
+					MaxIterations:        cfg.Assistant.MaxIterations,
+					ConfirmationRequired: cfg.Assistant.ConfirmationRequired,
+				},
+			})
+			// Register memory/profile tools (needs the service for callbacks).
+			assistant.RegisterMemoryTools(toolRegistry, assistantSvc)
+			assistantHandler = assistant.NewHandler(assistantSvc, logger)
+			logger.Info("assistant enabled", "model", assistantModel, "max_iterations", cfg.Assistant.MaxIterations)
+		}
+	}
+
 	// Create and start the HTTP server.
 	srv := server.New(server.Config{
 		Listen:           cfg.Listen,
@@ -727,6 +772,7 @@ func run() error {
 		TaskHandler:      taskHandler,
 		ReviewHandler:    reviewHandler,
 		WebhookHandler:   webhookHandler,
+		AssistantHandler: assistantHandler,
 		WSMessageHandler: wsHandler,
 		MCPHandler:       mcpHandler,
 	})

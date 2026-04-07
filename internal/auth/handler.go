@@ -258,6 +258,16 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.Register(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, ErrRegistrationClosed) {
+			// Log at info level: this is the expected response on a
+			// configured single-user instance, not an attack signal on
+			// its own. Operators investigating noise will see the
+			// remote IP via the request log middleware.
+			h.logger.Info("registration rejected: owner already exists",
+				"remote_addr", r.RemoteAddr)
+			writeError(w, http.StatusForbidden, "registration is closed")
+			return
+		}
 		if errors.Is(err, ErrUserExists) {
 			writeError(w, http.StatusConflict, "username or email already exists")
 			return

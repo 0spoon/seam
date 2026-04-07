@@ -59,7 +59,12 @@ func TestHandler_Register_Success(t *testing.T) {
 	require.NotEmpty(t, resp.Tokens.RefreshToken)
 }
 
-func TestHandler_Register_DuplicateReturns409(t *testing.T) {
+// TestHandler_Register_ClosedAfterFirst verifies the C-2 fix at the HTTP
+// layer: the second registration attempt -- whether duplicate or fresh
+// credentials -- must be rejected with 403 Forbidden once an owner
+// exists. Seam is single-user; the registration endpoint must close
+// itself after the first successful call.
+func TestHandler_Register_ClosedAfterFirst(t *testing.T) {
 	handler, _ := newTestHandler(t)
 	r := setupRouter(handler)
 
@@ -67,19 +72,32 @@ func TestHandler_Register_DuplicateReturns409(t *testing.T) {
 		Username: "alice", Email: "alice@example.com", Password: "password123",
 	})
 
-	// First registration.
+	// First registration succeeds.
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/auth/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	// Second registration with same username.
+	// Second registration with the same credentials -- 403, not 409.
+	// The closed-registration gate fires before the unique-constraint
+	// path so the response distinguishes "registration disabled" from
+	// "this name is taken".
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest("POST", "/api/auth/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusConflict, w.Code)
+	require.Equal(t, http.StatusForbidden, w.Code)
+
+	// Second registration with a different username also returns 403.
+	otherBody, _ := json.Marshal(auth.RegisterReq{
+		Username: "mallory", Email: "mallory@example.com", Password: "password123",
+	})
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/auth/register", bytes.NewReader(otherBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
 }
 
 func TestHandler_Login_Success(t *testing.T) {

@@ -3,9 +3,22 @@ package assistant
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// maxInstructionsLen caps the user-supplied custom instructions field.
+// The field is injected verbatim into every assistant system prompt by
+// FormatForPrompt, so it is the highest-leverage prompt-injection
+// surface in the assistant. A 2KB cap leaves plenty of room for a
+// thoughtful preference statement while preventing an attacker who can
+// drive update_profile from pasting an arbitrarily long override.
+const maxInstructionsLen = 2048
+
+// ErrInstructionsTooLong is returned when SaveProfile is called with
+// an Instructions value that exceeds maxInstructionsLen runes.
+var ErrInstructionsTooLong = errors.New("instructions exceed maximum length")
 
 // UserProfile represents the user's structured profile.
 // Each field is stored as a separate row in the user_profile table.
@@ -59,7 +72,21 @@ func (s *ProfileStore) GetProfile(ctx context.Context, db *sql.DB) (*UserProfile
 
 // SaveProfile upserts non-empty profile fields. Empty fields are left unchanged
 // (not deleted). To explicitly clear a field, use UpdateProfileField with an empty value.
+//
+// H-5: Instructions is bounded at maxInstructionsLen runes. The
+// assistant injects this field verbatim into every system prompt
+// (FormatForPrompt -> "Custom instructions: ..."), so an unbounded
+// value would let a single confirmed update_profile call install an
+// arbitrary, persistent prompt-injection payload. The cap is
+// intentionally a hard rejection rather than a silent truncation
+// because truncation could leave a half-payload that still controls
+// behavior in unexpected ways.
 func (s *ProfileStore) SaveProfile(ctx context.Context, db *sql.DB, p *UserProfile) error {
+	if n := len([]rune(p.Instructions)); n > maxInstructionsLen {
+		return fmt.Errorf("assistant.ProfileStore.SaveProfile: %w (%d > %d)",
+			ErrInstructionsTooLong, n, maxInstructionsLen)
+	}
+
 	fields := map[string]string{
 		"display_name":  p.DisplayName,
 		"profession":    p.Profession,
@@ -97,9 +124,18 @@ func (s *ProfileStore) SaveProfile(ctx context.Context, db *sql.DB, p *UserProfi
 }
 
 // UpdateProfileField updates a single profile field.
+//
+// H-5: The instructions field is length-capped here as well so the
+// single-field path cannot bypass the SaveProfile check.
 func (s *ProfileStore) UpdateProfileField(ctx context.Context, db *sql.DB, key, value string) error {
 	if !isValidProfileField(key) {
 		return fmt.Errorf("assistant.ProfileStore.UpdateProfileField: unknown field %q", key)
+	}
+	if key == "instructions" {
+		if n := len([]rune(value)); n > maxInstructionsLen {
+			return fmt.Errorf("assistant.ProfileStore.UpdateProfileField: %w (%d > %d)",
+				ErrInstructionsTooLong, n, maxInstructionsLen)
+		}
 	}
 	if value == "" {
 		_, err := db.ExecContext(ctx, `DELETE FROM user_profile WHERE key = ?`, key)

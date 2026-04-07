@@ -77,7 +77,12 @@ type AssistantConfig struct {
 	MaxIterations int `yaml:"max_iterations"`
 
 	// ConfirmationRequired lists tool names that require user approval.
-	// Default: ["create_note", "update_note", "create_project"]
+	// Default: every persistent-state-mutating assistant tool
+	// (create_note, update_note, append_to_note, create_project,
+	// save_memory, update_profile). Anything that can affect future
+	// system prompts -- in particular update_profile and save_memory --
+	// MUST be in this list to defend against prompt injection from
+	// untrusted note content (see SECURITY.md H-5).
 	ConfirmationRequired []string `yaml:"confirmation_required"`
 
 	// Model overrides the chat model for the assistant.
@@ -312,7 +317,21 @@ func applyDefaults(cfg *Config) {
 		cfg.Assistant.MaxIterations = 10
 	}
 	if len(cfg.Assistant.ConfirmationRequired) == 0 {
-		cfg.Assistant.ConfirmationRequired = []string{"create_note", "update_note", "create_project"}
+		// H-5: Every assistant tool that mutates persistent state must
+		// require user confirmation, otherwise a single prompt-injected
+		// note can pivot to persistent control of the assistant via
+		// update_profile (which writes Instructions into every future
+		// system prompt) or save_memory (which is loaded into the
+		// system prompt by loadContext). append_to_note is also a
+		// silent mutation surface and is gated for the same reason.
+		cfg.Assistant.ConfirmationRequired = []string{
+			"create_note",
+			"update_note",
+			"append_to_note",
+			"create_project",
+			"save_memory",
+			"update_profile",
+		}
 	}
 	// C-34: Apply default Whisper binary path if model path is set but binary is not.
 	if cfg.Whisper.ModelPath != "" && cfg.Whisper.BinaryPath == "" {

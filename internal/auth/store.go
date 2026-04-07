@@ -23,6 +23,10 @@ var (
 	ErrNotFound           = errors.New("not found")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrValidation         = errors.New("validation error")
+	// ErrRegistrationClosed is returned by Register when an owner already
+	// exists. Seam is a single-user system; only the first registration
+	// succeeds, after which the endpoint is closed.
+	ErrRegistrationClosed = errors.New("registration is closed")
 )
 
 // User represents a registered user.
@@ -38,6 +42,7 @@ type User struct {
 // Store defines data access methods for the owner account and refresh tokens.
 type Store interface {
 	CreateUser(ctx context.Context, u *User) error
+	CountOwners(ctx context.Context) (int, error)
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
 	GetUserByID(ctx context.Context, id string) (*User, error)
 	UpdateUserPassword(ctx context.Context, id, passwordHash string) error
@@ -78,6 +83,18 @@ func (s *SQLStore) CreateUser(ctx context.Context, u *User) error {
 		return fmt.Errorf("auth.Store.CreateUser: %w", err)
 	}
 	return nil
+}
+
+// CountOwners returns the number of rows in the owner table. Used to
+// gate registration in the single-user system: once an owner exists,
+// new registrations are rejected.
+func (s *SQLStore) CountOwners(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("auth.Store.CountOwners: %w", err)
+	}
+	return n, nil
 }
 
 // GetUserByUsername retrieves a user by username. Returns ErrNotFound if

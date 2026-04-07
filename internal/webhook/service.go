@@ -55,6 +55,12 @@ var (
 	ErrNameRequired     = errors.New("name is required")
 	ErrURLRequired      = errors.New("url is required")
 	ErrEventsRequired   = errors.New("event_types is required")
+	// ErrPrivateAddress is returned when a webhook target resolves to a
+	// private, loopback, link-local, or unspecified address. Webhooks
+	// must point at public destinations: anything else (Ollama on
+	// localhost, ChromaDB on a private LAN, AWS IMDS, etc.) would let
+	// an attacker turn the server into an SSRF probe.
+	ErrPrivateAddress = errors.New("webhook URL resolves to a private address")
 )
 
 // CreateReq holds parameters for creating a webhook.
@@ -94,29 +100,77 @@ type Service struct {
 }
 
 // NewService creates a new webhook Service.
+//
+// H-3 + H-4: The HTTP client uses ssrfSafeDialer, which resolves DNS,
+// rejects any address in a private/loopback/link-local/unspecified
+// range, then dials the validated literal IP. Dialing the IP (instead
+// of the hostname) defeats DNS rebinding: the resolver answer that
+// passed validation is the exact answer used for the connection. The
+// dialer applies to the initial request AND every redirect hop, since
+// http.Transport routes all dials through DialContext.
 func NewService(store *Store, dbManager userdb.Manager, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	transport := &http.Transport{
+		DialContext: ssrfSafeDialer,
 	}
 	return &Service{
 		store:     store,
 		dbManager: dbManager,
 		client: &http.Client{
-			Timeout: deliveryTimeout,
+			Timeout:   deliveryTimeout,
+			Transport: transport,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				// Do not follow redirects to private IPs.
-				host := req.URL.Hostname()
-				if isPrivateIP(host) {
-					return fmt.Errorf("webhook.Service: redirect to private IP blocked")
-				}
 				if len(via) >= 5 {
 					return fmt.Errorf("webhook.Service: too many redirects")
 				}
+				// Reject redirects to non-HTTP(S) schemes (e.g., file://, ftp://).
+				scheme := strings.ToLower(req.URL.Scheme)
+				if scheme != "http" && scheme != "https" {
+					return fmt.Errorf("webhook.Service: redirect to %s scheme blocked", scheme)
+				}
+				// Note: the SSRF dialer enforces private-IP rejection at
+				// the transport layer for redirect targets too, so we do
+				// not need a separate hostname check here.
 				return nil
 			},
 		},
 		logger: logger,
 	}
+}
+
+// ssrfSafeDialer rejects connections to private/loopback addresses.
+// Modeled on capture.ssrfSafeDialer: resolve DNS once, validate every
+// returned IP, then connect to the validated literal IP. Dialing the
+// IP -- not the hostname -- prevents the DNS rebinding TOCTOU race
+// where a hostname check sees a public IP but the real connection
+// re-resolves to a private one.
+func ssrfSafeDialer(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("webhook.ssrfSafeDialer: %w", err)
+	}
+
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("webhook.ssrfSafeDialer: resolve: %w", err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("webhook.ssrfSafeDialer: no addresses found for %s", host)
+	}
+
+	for _, ip := range ips {
+		if isDangerousIP(ip.IP) {
+			return nil, fmt.Errorf("webhook.ssrfSafeDialer: %w", ErrPrivateAddress)
+		}
+	}
+
+	// Connect to the validated IP, not the hostname. This is the
+	// critical step that defeats DNS rebinding.
+	validatedAddr := net.JoinHostPort(ips[0].IP.String(), port)
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, network, validatedAddr)
 }
 
 // Create validates and creates a new webhook subscription.
@@ -143,15 +197,8 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateReq) (*We
 		}
 	}
 
-	// Warn about private IPs but do not block (local-first app).
-	parsed, _ := url.Parse(req.URL)
-	if parsed != nil {
-		host := parsed.Hostname()
-		if isPrivateIP(host) {
-			s.logger.Warn("webhook URL points to private IP",
-				"url", req.URL, "host", host, "user_id", userID)
-		}
-	}
+	// H-3: validateWebhookURL above already rejected private IPs;
+	// the previous warn-only behavior has been removed.
 
 	// Generate ULID and random secret.
 	now := time.Now().UTC()
@@ -419,17 +466,15 @@ func (s *Service) deliver(ctx context.Context, wh *Webhook, eventType string, pa
 	start := time.Now()
 	payload := string(payloadJSON)
 
-	// SSRF defense: check target URL for private IPs before delivery.
-	parsed, parseErr := url.Parse(wh.URL)
-	if parseErr != nil {
+	// H-3 + H-4: SSRF defense lives in the transport's ssrfSafeDialer
+	// and in validateWebhookURL at Create/Update time. We still parse
+	// the URL here just to fail fast on malformed values without
+	// touching the network.
+	if _, parseErr := url.Parse(wh.URL); parseErr != nil {
 		return deliveryResult{
 			webhookID: wh.ID, eventType: eventType, payload: string(payloadJSON),
 			errText: "invalid URL: " + parseErr.Error(), duration: time.Since(start),
 		}
-	}
-	if isPrivateIP(parsed.Hostname()) {
-		s.logger.Debug("webhook delivery to private IP",
-			"webhook_id", wh.ID, "url", wh.URL)
 	}
 
 	// Compute HMAC-SHA256 signature.
@@ -596,7 +641,18 @@ func generateSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// validateWebhookURL checks that a URL is well-formed and uses http or https.
+// validateWebhookURL checks that a URL is well-formed, uses http or
+// https, and resolves to a public address.
+//
+// H-3: This is the upfront SSRF check. The dialer enforces the same
+// rule at connect time -- belt and suspenders -- but rejecting at
+// validation gives the user a clear error at Create/Update time
+// instead of a delivery failure logged hours later.
+//
+// H-4: A passing check here is NOT sufficient on its own because the
+// answer could change between validation and the actual dial (DNS
+// rebinding). The dialer re-validates and dials the literal IP, which
+// is what actually defeats the rebinding race.
 func validateWebhookURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -607,6 +663,9 @@ func validateWebhookURL(rawURL string) error {
 	}
 	if parsed.Host == "" {
 		return fmt.Errorf("%w: host is required", ErrInvalidURL)
+	}
+	if isPrivateIP(parsed.Hostname()) {
+		return fmt.Errorf("%w: %w", ErrInvalidURL, ErrPrivateAddress)
 	}
 	return nil
 }

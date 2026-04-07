@@ -311,6 +311,11 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.UpdateProfile(r.Context(), userID, &profile); err != nil {
+		if errors.Is(err, ErrInstructionsTooLong) {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("instructions exceed maximum length of %d characters", maxInstructionsLen))
+			return
+		}
 		h.logger.Error("assistant.Handler.updateProfile: failed",
 			"error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "failed to update profile")

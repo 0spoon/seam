@@ -43,7 +43,11 @@ func TestService_Register_Success(t *testing.T) {
 	require.NotEmpty(t, resp.Tokens.RefreshToken)
 }
 
-func TestService_Register_DuplicateUsername(t *testing.T) {
+// TestService_Register_ClosedAfterFirst verifies the C-2 fix: once the
+// first owner exists, subsequent Register() calls must be rejected with
+// ErrRegistrationClosed regardless of credentials. The check runs before
+// validation so even an entirely different username/email is refused.
+func TestService_Register_ClosedAfterFirst(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
@@ -52,11 +56,23 @@ func TestService_Register_DuplicateUsername(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Same username -- still rejected, but with ErrRegistrationClosed
+	// rather than ErrUserExists. The closed-registration check fires
+	// first so we never even reach the unique-constraint path.
 	_, err = svc.Register(ctx, auth.RegisterReq{
 		Username: "alice", Email: "alice2@example.com", Password: "password123",
 	})
 	require.Error(t, err)
-	require.ErrorIs(t, err, auth.ErrUserExists)
+	require.ErrorIs(t, err, auth.ErrRegistrationClosed)
+
+	// Different username -- also rejected. This is the case the C-2
+	// audit cared about: a second person on the LAN trying to grab a
+	// token for the existing single-user database.
+	_, err = svc.Register(ctx, auth.RegisterReq{
+		Username: "mallory", Email: "mallory@example.com", Password: "password123",
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, auth.ErrRegistrationClosed)
 }
 
 func TestService_Register_EmptyFields(t *testing.T) {

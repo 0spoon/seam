@@ -87,7 +87,22 @@ func NewService(store Store, jwtManager *JWTManager, userDBManager userdb.Manage
 // C-33: Registration validation errors use ErrValidation (-> HTTP 400) instead
 // of ErrInvalidCredentials (-> HTTP 401) to distinguish input validation
 // failures from authentication failures.
+//
+// C-2: Seam is a single-user system. Once the first owner exists, this
+// endpoint must reject all subsequent registration attempts -- otherwise
+// any caller able to reach the API can register a second account and
+// (because the data layer has no per-user scoping) take over the entire
+// instance. The owner count is checked first so the bcrypt hash and
+// downstream work are skipped on closed-registration calls.
 func (s *Service) Register(ctx context.Context, req RegisterReq) (*AuthResponse, error) {
+	count, err := s.store.CountOwners(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("auth.Service.Register: count owners: %w", err)
+	}
+	if count > 0 {
+		return nil, fmt.Errorf("auth.Service.Register: %w", ErrRegistrationClosed)
+	}
+
 	if req.Username == "" {
 		return nil, fmt.Errorf("auth.Service.Register: username is required: %w", ErrValidation)
 	}

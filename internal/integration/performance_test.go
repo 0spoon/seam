@@ -204,9 +204,14 @@ func TestPerformance_1000Notes(t *testing.T) {
 	require.LessOrEqual(t, searchDuration, 5*time.Second)
 }
 
-// TestPerformance_ConcurrentUsers tests with 3 concurrent users.
+// TestPerformance_ConcurrentUsers tests 3 concurrent clients hitting
+// the single-user backend. Seam is single-user (post-C-2), so the test
+// registers one owner up front and hands the same token to 3 goroutines
+// to exercise the same per-user database under load.
 func TestPerformance_ConcurrentUsers(t *testing.T) {
 	ts, _, _ := setupPerfServer(t)
+
+	token := registerUser(t, ts, "perfuser", "perf@test.com", "password123")
 
 	var wg sync.WaitGroup
 	errors := make(chan error, 3)
@@ -215,9 +220,6 @@ func TestPerformance_ConcurrentUsers(t *testing.T) {
 		wg.Add(1)
 		go func(userIdx int) {
 			defer wg.Done()
-
-			username := fmt.Sprintf("user%d", userIdx)
-			token := registerUser(t, ts, username, fmt.Sprintf("%s@test.com", username), "password123")
 
 			// Create 50 notes per user.
 			for i := 0; i < 50; i++ {

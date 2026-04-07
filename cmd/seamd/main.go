@@ -19,6 +19,7 @@ import (
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/assistant"
 	"github.com/katata/seam/internal/auth"
+	"github.com/katata/seam/internal/briefing"
 	"github.com/katata/seam/internal/capture"
 	"github.com/katata/seam/internal/chat"
 	"github.com/katata/seam/internal/config"
@@ -27,6 +28,7 @@ import (
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/review"
+	"github.com/katata/seam/internal/scheduler"
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/server"
 	"github.com/katata/seam/internal/settings"
@@ -48,6 +50,48 @@ func main() {
 		fmt.Fprintf(os.Stderr, "seamd: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// provisionDailyBriefing creates the default daily briefing schedule on
+// startup if no schedule with that name already exists. Idempotent across
+// restarts: a duplicate-name match is treated as already provisioned.
+func provisionDailyBriefing(ctx context.Context, svc *scheduler.Service, cfg config.DailyBriefingConfig, logger *slog.Logger) error {
+	const briefingName = "Daily Briefing"
+
+	existing, err := svc.List(ctx, userdb.DefaultUserID, false)
+	if err != nil {
+		return fmt.Errorf("list schedules: %w", err)
+	}
+	for _, sch := range existing {
+		if sch.Name == briefingName {
+			logger.Debug("daily briefing schedule already provisioned",
+				"id", sch.ID, "next_run", sch.NextRunAt)
+			return nil
+		}
+	}
+
+	configJSON, err := json.Marshal(briefing.ActionConfig{
+		ProjectSlug:   cfg.ProjectSlug,
+		LookbackHours: cfg.LookbackHours,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal action config: %w", err)
+	}
+
+	enabled := true
+	created, err := svc.Create(ctx, userdb.DefaultUserID, scheduler.CreateReq{
+		Name:         briefingName,
+		CronExpr:     cfg.CronExpr,
+		ActionType:   scheduler.ActionBriefing,
+		ActionConfig: configJSON,
+		Enabled:      &enabled,
+	})
+	if err != nil {
+		return fmt.Errorf("create schedule: %w", err)
+	}
+	logger.Info("provisioned daily briefing schedule",
+		"id", created.ID, "cron", created.CronExpr, "next_run", created.NextRunAt)
+	return nil
 }
 
 // noteBodyAdapter adapts the note service to the ai.NoteBodyLoader and
@@ -751,6 +795,52 @@ func run() error {
 		}
 	}
 
+	// Create scheduler + briefing services. The scheduler runs proactive
+	// jobs (daily briefing today; reminders/automations in later phases).
+	var scheduleHandler *scheduler.Handler
+	var schedSvc *scheduler.Service
+	schedulerEnabled := cfg.Scheduler.Enabled == nil || *cfg.Scheduler.Enabled
+	if schedulerEnabled {
+		scheduleStore := scheduler.NewStore()
+		schedSvc = scheduler.NewService(scheduler.Config{
+			Store:        scheduleStore,
+			DBManager:    userDBMgr,
+			Logger:       logger,
+			TickInterval: cfg.Scheduler.TickInterval.Duration,
+		})
+
+		briefingSvc := briefing.NewService(briefing.Config{
+			NoteService:    noteSvc,
+			ProjectService: projectSvc,
+			TaskService:    taskSvc,
+			DBManager:      userDBMgr,
+			Hub:            hub,
+			Logger:         logger,
+		})
+		schedSvc.RegisterRunner(scheduler.ActionBriefing, briefingSvc.Action())
+
+		// Auto-provision the daily briefing schedule on first startup so
+		// new installs get a useful default. We deduplicate by name to
+		// avoid stacking duplicates if the server restarts.
+		if cfg.Scheduler.DailyBriefing.Enabled == nil || *cfg.Scheduler.DailyBriefing.Enabled {
+			if err := provisionDailyBriefing(ctx, schedSvc, cfg.Scheduler.DailyBriefing, logger); err != nil {
+				logger.Warn("failed to provision daily briefing schedule", "error", err)
+			}
+		}
+
+		scheduleHandler = scheduler.NewHandler(schedSvc, logger)
+
+		// Start the scheduler tick loop. Errors are logged inside Run.
+		go func() {
+			if err := schedSvc.Run(ctx); err != nil && err != context.Canceled {
+				logger.Error("scheduler stopped", "error", err)
+			}
+		}()
+		logger.Info("scheduler enabled",
+			"tick_interval", cfg.Scheduler.TickInterval.Duration,
+			"daily_briefing_cron", cfg.Scheduler.DailyBriefing.CronExpr)
+	}
+
 	// Create and start the HTTP server.
 	srv := server.New(server.Config{
 		Listen:           cfg.Listen,
@@ -773,6 +863,7 @@ func run() error {
 		ReviewHandler:    reviewHandler,
 		WebhookHandler:   webhookHandler,
 		AssistantHandler: assistantHandler,
+		ScheduleHandler:  scheduleHandler,
 		WSMessageHandler: wsHandler,
 		MCPHandler:       mcpHandler,
 	})

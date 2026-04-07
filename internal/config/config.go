@@ -31,7 +31,43 @@ type Config struct {
 	Assistant     AssistantConfig `yaml:"assistant"`
 	UserDB        UserDBConfig    `yaml:"userdb"`
 	Watcher       WatcherConfig   `yaml:"watcher"`
+	Scheduler     SchedulerConfig `yaml:"scheduler"`
 	WebDistDir    string          `yaml:"web_dist_dir"` // path to web/dist for SPA serving; empty uses default
+}
+
+// SchedulerConfig controls the cron-based scheduler that runs proactive
+// background jobs (daily briefings, automations, reminders).
+type SchedulerConfig struct {
+	// Enabled toggles the scheduler at startup. Default: true.
+	Enabled *bool `yaml:"enabled"`
+
+	// TickInterval controls how often the scheduler polls for due jobs.
+	// Default: 1 minute. Smaller values are useful in tests; values
+	// below 1 second are coerced back to 1 second.
+	TickInterval Duration `yaml:"tick_interval"`
+
+	// DailyBriefing controls the auto-provisioned daily briefing
+	// schedule. When Enabled is true and no schedule with the same name
+	// exists yet, the server creates one on startup.
+	DailyBriefing DailyBriefingConfig `yaml:"daily_briefing"`
+}
+
+// DailyBriefingConfig configures the auto-provisioned daily briefing job.
+type DailyBriefingConfig struct {
+	// Enabled controls whether the scheduler auto-creates the default
+	// daily briefing schedule on first startup. Default: true.
+	Enabled *bool `yaml:"enabled"`
+
+	// CronExpr is the cron expression that drives the briefing.
+	// Default: "0 8 * * *" (08:00 every day, server-local time).
+	CronExpr string `yaml:"cron_expr"`
+
+	// ProjectSlug is the project where briefing notes are filed.
+	// Default: "briefings".
+	ProjectSlug string `yaml:"project_slug"`
+
+	// LookbackHours bounds the "recent activity" window. Default: 24.
+	LookbackHours int `yaml:"lookback_hours"`
 }
 
 // AssistantConfig specifies agentic assistant parameters.
@@ -248,6 +284,29 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Watcher.DebounceInterval.Duration == 0 {
 		cfg.Watcher.DebounceInterval.Duration = 200 * time.Millisecond
+	}
+	if cfg.Scheduler.Enabled == nil {
+		t := true
+		cfg.Scheduler.Enabled = &t
+	}
+	if cfg.Scheduler.TickInterval.Duration == 0 {
+		cfg.Scheduler.TickInterval.Duration = time.Minute
+	}
+	if cfg.Scheduler.TickInterval.Duration < time.Second {
+		cfg.Scheduler.TickInterval.Duration = time.Second
+	}
+	if cfg.Scheduler.DailyBriefing.Enabled == nil {
+		t := true
+		cfg.Scheduler.DailyBriefing.Enabled = &t
+	}
+	if strings.TrimSpace(cfg.Scheduler.DailyBriefing.CronExpr) == "" {
+		cfg.Scheduler.DailyBriefing.CronExpr = "0 8 * * *"
+	}
+	if strings.TrimSpace(cfg.Scheduler.DailyBriefing.ProjectSlug) == "" {
+		cfg.Scheduler.DailyBriefing.ProjectSlug = "briefings"
+	}
+	if cfg.Scheduler.DailyBriefing.LookbackHours <= 0 {
+		cfg.Scheduler.DailyBriefing.LookbackHours = 24
 	}
 	if cfg.Assistant.MaxIterations <= 0 {
 		cfg.Assistant.MaxIterations = 10

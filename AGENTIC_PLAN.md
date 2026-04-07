@@ -8,7 +8,7 @@ This document describes the features, components, and architectural changes need
 |---|---|---|
 | 1 | Agentic Loop with Tool Use | **Complete** |
 | 2 | User Profile + Long-Term Memory | **Complete** |
-| 3 | Scheduled Triggers + Daily Briefing | Not started |
+| 3 | Scheduled Triggers + Daily Briefing | **Complete** |
 | 4 | Reminders + Due Dates | Not started |
 | 5 | Event-Driven Automations | Not started |
 | 6 | Document Ingestion | Not started |
@@ -23,6 +23,7 @@ This document describes the features, components, and architectural changes need
 - **2026-04-06**: Phase 2 (User Profile + Long-Term Memory) shipped: `memories` table with FTS5 search, `user_profile` key-value table, profile + memory CRUD, system prompt enrichment, memory tools (`save_memory`, `search_memories`, `get_profile`, `update_profile`).
 - **2026-04-06**: Phase 2.2 (memory decay): `SearchMemories` now ranks results by a composite of FTS5 BM25 score, true 30-day half-life decay over `last_accessed`/`created_at`, and the memory's `confidence`. `loadContext` calls `TouchMemories` so frequently-recalled items stay fresh.
 - **2026-04-06**: Phase 2.3 (conversation summarization): legacy `internal/ai/chat.go` 5-turn cap raised to a 20-message recent window. `BuildChatMessages`, `Ask`, `AskStream`, `/api/ai/ask`, and the WebSocket chat path all accept an optional `summary` field. New `ChatService.SummarizeHistory` produces digests via the LLM. The assistant `Service.Chat` automatically loads a per-conversation summary memory (category `summary`, deterministic ID `conv_summary_{id}`) for long histories, slices history to the recent window, embeds the summary in the system prompt, and triggers a background refresh after the call when the conversation has grown past the recent window plus a buffer.
+- **2026-04-06**: Phase 3 (Scheduled Triggers + Daily Briefing) shipped: new `internal/scheduler/` package with a self-contained 5-field cron parser (`cron.go`), `schedules` table migration `002_schedules.sql`, store/service/handler trio, action runner registry, polling tick loop with startup catch-up, and `/api/schedules` CRUD plus `POST /api/schedules/{id}/run`. New `internal/briefing/` package generates a daily briefing note in an auto-provisioned `briefings` project with recent activity, open tasks (grouped by note), and heuristic suggestions; degrades gracefully when sub-queries fail. seamd wires the scheduler at startup, registers the briefing runner, and idempotently provisions a default `Daily Briefing` schedule (`0 8 * * *`). New `scheduler` and `daily_briefing` config blocks expose tick interval, cron, project slug, and lookback hours.
 
 ## Current State
 
@@ -200,7 +201,7 @@ CREATE TABLE user_profile (
 
 ## Phase 3: Scheduled Triggers and Daily Briefing
 
-**Status**: Not started
+**Status**: **Complete** (2026-04-06)
 
 **Goal**: The assistant does things without being asked, on a schedule.
 

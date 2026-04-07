@@ -17,7 +17,23 @@ import (
 // migrations applied. Each call creates a fresh database named after the test.
 func TestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return OpenTestDB(t, migrations.InitialSQL)
+
+	name := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	db, err := sql.Open("sqlite", name)
+	require.NoError(t, err)
+
+	_, err = db.Exec("PRAGMA journal_mode=WAL")
+	require.NoError(t, err)
+	_, err = db.Exec("PRAGMA foreign_keys=ON")
+	require.NoError(t, err)
+
+	for _, m := range migrations.Migrations() {
+		_, err = db.Exec(m.SQL)
+		require.NoError(t, err)
+	}
+
+	t.Cleanup(func() { db.Close() })
+	return db
 }
 
 // TestDataDir returns a temporary directory suitable for use as a data_dir

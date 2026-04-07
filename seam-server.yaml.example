@@ -80,3 +80,13 @@ userdb:
 # File watcher settings.
 watcher:
   debounce_interval: "200ms"
+
+# Scheduler settings (Phase 3): cron-based proactive jobs.
+scheduler:
+  enabled: true
+  tick_interval: "1m"           # how often to poll for due jobs
+  daily_briefing:
+    enabled: true               # auto-create the default daily briefing on first start
+    cron_expr: "0 8 * * *"      # 08:00 every day, server-local time
+    project_slug: "briefings"   # project where briefing notes are filed
+    lookback_hours: 24          # window for "recent activity" in the briefing

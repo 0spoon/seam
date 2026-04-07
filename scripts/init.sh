@@ -139,6 +139,109 @@ case "${CHROMA_CHOICE:-1}" in
         ;;
 esac
 
+# -- models -------------------------------------------------------------------
+#
+# Chat and background models go through the LLM provider chosen above.
+# Embeddings always run on local Ollama -- Seam does not currently wire any
+# cloud embedding backend (OpenAI text-embedding-3-* / Voyage), so the
+# embedding model name must be a model that Ollama can pull.
+
+info "Model selection"
+
+case "$LLM_PROVIDER" in
+    openai)
+        DEFAULT_CHAT_MODEL="gpt-5.4"
+        DEFAULT_BG_MODEL="gpt-5.4-mini"
+        ;;
+    anthropic)
+        DEFAULT_CHAT_MODEL="claude-sonnet-4-6"
+        DEFAULT_BG_MODEL="claude-haiku-4-5-20251001"
+        ;;
+    *)  # ollama
+        DEFAULT_CHAT_MODEL="qwen3:32b"
+        DEFAULT_BG_MODEL="qwen3:32b"
+        ;;
+esac
+
+echo "  Chat model is used for the assistant, writing assist, chat, and suggestions."
+ask "Chat model [$DEFAULT_CHAT_MODEL]:"
+read -r CHAT_MODEL
+CHAT_MODEL="${CHAT_MODEL:-$DEFAULT_CHAT_MODEL}"
+echo
+
+echo "  Background model is used for auto-linking and other lighter background tasks."
+ask "Background model [$DEFAULT_BG_MODEL]:"
+read -r BG_MODEL
+BG_MODEL="${BG_MODEL:-$DEFAULT_BG_MODEL}"
+echo
+
+# Embeddings live in their own provider knob, independent of the chat
+# provider. Only prompt when Chroma is enabled, since without Chroma the
+# embedding model is never invoked. Defaults to Ollama -- cloud embeddings
+# are strictly opt-in.
+EMBED_PROVIDER="ollama"
+DEFAULT_EMBED_MODEL="qwen3-embedding:8b"
+EMBED_MODEL="$DEFAULT_EMBED_MODEL"
+EMBED_OPENAI_KEY=""
+EMBED_OPENAI_BASE_URL=""
+EMBED_OPENAI_DIMS="0"
+
+if [ -n "$CHROMA_URL" ]; then
+    info "Embedding provider (independent of chat provider above)"
+    echo "  1) ollama -- fully local, no API costs (recommended)"
+    echo "  2) openai -- text-embedding-3-large / -small via the OpenAI API"
+    echo
+    ask "Provider [1]:"
+    read -r EMBED_PROVIDER_CHOICE
+    echo
+
+    case "${EMBED_PROVIDER_CHOICE:-1}" in
+        1|ollama)
+            EMBED_PROVIDER="ollama"
+            DEFAULT_EMBED_MODEL="qwen3-embedding:8b"
+            ;;
+        2|openai)
+            EMBED_PROVIDER="openai"
+            DEFAULT_EMBED_MODEL="text-embedding-3-large"
+            ;;
+        *)
+            warn "Unknown choice '$EMBED_PROVIDER_CHOICE', defaulting to ollama"
+            EMBED_PROVIDER="ollama"
+            ;;
+    esac
+
+    ask "Embedding model [$DEFAULT_EMBED_MODEL]:"
+    read -r EMBED_MODEL
+    EMBED_MODEL="${EMBED_MODEL:-$DEFAULT_EMBED_MODEL}"
+    echo
+
+    if [ "$EMBED_PROVIDER" = "openai" ]; then
+        # Reuse the chat-side OpenAI key when the user already entered one,
+        # otherwise prompt separately. The seamd config block also has a
+        # fallback for this case, but asking once is friendlier than
+        # surprising the user later.
+        if [ -n "$OPENAI_API_KEY" ]; then
+            EMBED_OPENAI_KEY="$OPENAI_API_KEY"
+            ok "Reusing the OpenAI API key from the chat-provider step"
+        else
+            ask "OpenAI API key for embeddings (or set SEAM_EMBEDDINGS_OPENAI_API_KEY env var later):"
+            read -r EMBED_OPENAI_KEY
+            echo
+        fi
+        if [ -n "$OPENAI_BASE_URL" ]; then
+            EMBED_OPENAI_BASE_URL="$OPENAI_BASE_URL"
+        fi
+
+        echo "  Embedding dimensions (only text-embedding-3-* models support truncation)."
+        echo "  text-embedding-3-large is 3072 by default; 1024 trades a small amount of quality"
+        echo "  for 3x lower vector storage. Press enter for native size."
+        ask "Dimensions [native]:"
+        read -r EMBED_OPENAI_DIMS_INPUT
+        EMBED_OPENAI_DIMS="${EMBED_OPENAI_DIMS_INPUT:-0}"
+        echo
+    fi
+fi
+
 # -- listen address -----------------------------------------------------------
 
 DEFAULT_LISTEN=":8080"
@@ -160,9 +263,9 @@ ollama_base_url: "${OLLAMA_URL}"
 chromadb_url: "${CHROMA_URL}"
 
 models:
-  embeddings: "qwen3-embedding:8b"
-  background: "qwen3:32b"
-  chat: "qwen3:32b"
+  embeddings: "${EMBED_MODEL}"
+  background: "${BG_MODEL}"
+  chat: "${CHAT_MODEL}"
 
 llm:
   provider: "${LLM_PROVIDER}"
@@ -171,6 +274,13 @@ llm:
     base_url: "${OPENAI_BASE_URL}"
   anthropic:
     api_key: "${ANTHROPIC_API_KEY}"
+
+embeddings:
+  provider: "${EMBED_PROVIDER}"
+  openai:
+    api_key: "${EMBED_OPENAI_KEY}"
+    base_url: "${EMBED_OPENAI_BASE_URL}"
+    dimensions: ${EMBED_OPENAI_DIMS}
 
 whisper:
   model_path: ""
@@ -254,11 +364,20 @@ else
 fi
 
 info "Configuration summary:"
-echo "  Listen:       ${LISTEN}"
-echo "  Data dir:     ${DATA_DIR}"
-echo "  LLM provider: ${LLM_PROVIDER}"
-echo "  Ollama:       ${OLLAMA_URL}"
-echo "  ChromaDB:     ${CHROMA_SUMMARY}"
+echo "  Listen:        ${LISTEN}"
+echo "  Data dir:      ${DATA_DIR}"
+echo "  LLM provider:  ${LLM_PROVIDER}"
+echo "  Ollama:        ${OLLAMA_URL}"
+echo "  ChromaDB:      ${CHROMA_SUMMARY}"
+echo "  Chat model:    ${CHAT_MODEL}"
+echo "  Bg model:      ${BG_MODEL}"
+if [ -n "$CHROMA_URL" ]; then
+    echo "  Embed provider: ${EMBED_PROVIDER}"
+    echo "  Embed model:   ${EMBED_MODEL}"
+    if [ "$EMBED_PROVIDER" = "openai" ] && [ "$EMBED_OPENAI_DIMS" != "0" ]; then
+        echo "  Embed dims:    ${EMBED_OPENAI_DIMS}"
+    fi
+fi
 echo
 
 # -- next steps ---------------------------------------------------------------
@@ -271,13 +390,36 @@ if [ "$CHROMA_DOCKER" = "yes" ] && [ "$CHROMA_STARTED" != "yes" ]; then
 fi
 echo
 
-if [ "$LLM_PROVIDER" = "ollama" ]; then
-    info "Pull the default models:"
-    echo "  ollama pull qwen3:32b"
-    echo "  ollama pull qwen3-embedding:8b"
+# Tell the user which Ollama models they need to pull. Cloud chat users
+# only need the embedding model locally if their embedding provider is
+# also Ollama.
+NEEDS_OLLAMA_PULL="no"
+if [ "$LLM_PROVIDER" = "ollama" ]; then NEEDS_OLLAMA_PULL="yes"; fi
+if [ -n "$CHROMA_URL" ] && [ "$EMBED_PROVIDER" = "ollama" ]; then NEEDS_OLLAMA_PULL="yes"; fi
+
+if [ "$NEEDS_OLLAMA_PULL" = "yes" ]; then
+    info "Pull the local Ollama models you'll need:"
+    if [ "$LLM_PROVIDER" = "ollama" ]; then
+        echo "  ollama pull ${CHAT_MODEL}"
+        if [ "$BG_MODEL" != "$CHAT_MODEL" ]; then
+            echo "  ollama pull ${BG_MODEL}"
+        fi
+    fi
+    if [ -n "$CHROMA_URL" ] && [ "$EMBED_PROVIDER" = "ollama" ]; then
+        echo "  ollama pull ${EMBED_MODEL}"
+    fi
     echo
 fi
 
-if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ]; then
+# Reindex hint: only relevant when Chroma is enabled. After switching
+# embedding model or provider the operator must run this to repopulate
+# the new collection.
+if [ -n "$CHROMA_URL" ]; then
+    info "If you ever switch embedding models or providers, run:"
+    echo "  make reindex            # re-embed every note into the new collection"
+    echo
+fi
+
+if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$EMBED_OPENAI_KEY" ]; then
     warn "API key written to $CONFIG. Make sure this file is in .gitignore."
 fi

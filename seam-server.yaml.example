@@ -31,15 +31,21 @@ ollama_base_url: "http://localhost:11434"
 chromadb_url: "http://localhost:8000"
 
 # AI model names used by Seam.
-# Embedding model always runs on local Ollama regardless of LLM provider.
-# Chat and background models use the configured LLM provider.
+# - models.embeddings is interpreted by whichever provider you set in
+#   the embeddings block below (Ollama or OpenAI).
+# - models.chat and models.background go through the LLM provider in the
+#   llm block. Names are validated at startup against the provider so
+#   that obvious mismatches (e.g. provider=openai with chat=qwen3:32b)
+#   fail loudly instead of 404'ing on the first request. The check is
+#   skipped when llm.openai.base_url is set, since OpenAI-compatible
+#   APIs (Together, Groq, Azure, etc.) accept arbitrary model names.
 models:
   embeddings: "qwen3-embedding:8b"
   background: "qwen3:32b"
   chat: "qwen3:32b"
 
 # LLM provider for chat completions (writing assist, synthesis, suggestions, etc.).
-# Embeddings always use local Ollama + ChromaDB regardless of this setting.
+# Independent of the embeddings provider below.
 # Options: "ollama" (default), "openai", "anthropic"
 # env: SEAM_LLM_PROVIDER
 llm:
@@ -53,6 +59,9 @@ llm:
     api_key: ""             # env: SEAM_OPENAI_API_KEY
     base_url: ""            # optional; env: SEAM_OPENAI_BASE_URL
                             # defaults to https://api.openai.com/v1
+                            # set to e.g. https://api.together.xyz/v1
+                            # to use a compatible API; this also disables
+                            # the chat-model-name check above.
 
   # Anthropic settings (used when provider is "anthropic").
   anthropic:
@@ -60,6 +69,35 @@ llm:
     # Do not commit API keys to version control.
     api_key: ""             # env: SEAM_ANTHROPIC_API_KEY
     max_tokens: 4096        # max output tokens per request (Anthropic requires this)
+
+# Embedding provider. Independent of llm.provider above: a user with
+# Anthropic chat may legitimately want OpenAI or Ollama embeddings
+# (Anthropic ships no embedding model). Defaults to "ollama".
+#
+# IMPORTANT: switching providers or embedding model invalidates the
+# existing Chroma collection -- the new (provider, model) tuple gets
+# its own collection name (see ai.CollectionName), so search will
+# return nothing until you re-embed. Run `make reindex` to repopulate.
+#
+# Options: "ollama" (default), "openai"
+# env: SEAM_EMBEDDINGS_PROVIDER
+embeddings:
+  provider: "ollama"
+
+  # OpenAI settings (used when embeddings.provider is "openai").
+  openai:
+    # WARNING: Prefer SEAM_EMBEDDINGS_OPENAI_API_KEY env var over setting
+    # this in a file. When empty, falls back to llm.openai.api_key so a
+    # single key works for both chat and embeddings.
+    api_key: ""             # env: SEAM_EMBEDDINGS_OPENAI_API_KEY
+    base_url: ""            # env: SEAM_EMBEDDINGS_OPENAI_BASE_URL
+                            # defaults to https://api.openai.com/v1
+                            # falls back to llm.openai.base_url when empty
+    # Optional dimensionality reduction. Zero (default) means "use the
+    # model's native size". text-embedding-3-large is 3072 by default;
+    # set this to e.g. 1024 to trade a small amount of quality for 3x
+    # lower vector storage. Only supported by text-embedding-3-* models.
+    dimensions: 0
 
 # Whisper.cpp settings for voice transcription. Optional; required for voice capture.
 # Install: brew install whisper-cpp

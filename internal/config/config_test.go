@@ -136,8 +136,10 @@ func TestLoad_MissingRequiredFields(t *testing.T) {
 			wantErr: "jwt_secret is required",
 		},
 		{
+			// models.embeddings is only required when Chroma is configured.
+			// Without Chroma, the embedder is never invoked.
 			name:    "missing models.embeddings",
-			config:  `data_dir: "/d"` + "\n" + `jwt_secret: "test-secret-key-that-is-32-chars!"` + "\n" + `ollama_base_url: "http://localhost:11434"` + "\n" + `models: {background: "b", chat: "c"}`,
+			config:  `data_dir: "/d"` + "\n" + `jwt_secret: "test-secret-key-that-is-32-chars!"` + "\n" + `ollama_base_url: "http://localhost:11434"` + "\n" + `chromadb_url: "http://localhost:8000"` + "\n" + `models: {background: "b", chat: "c"}`,
 			wantErr: "models.embeddings is required",
 		},
 		{
@@ -405,4 +407,352 @@ models:
 	require.NoError(t, err)
 	require.Equal(t, "anthropic", cfg.LLM.Provider)
 	require.Equal(t, "sk-ant-from-env", cfg.LLM.Anthropic.APIKey)
+}
+
+// TestLoad_ChatModelProviderMismatch covers the prefix-based check that
+// flags obviously-mismatched model/provider combinations at startup,
+// e.g. provider=openai with models.chat="qwen3:32b". The check is skipped
+// when llm.openai.base_url is set, since OpenAI-compatible APIs accept
+// arbitrary names.
+func TestLoad_ChatModelProviderMismatch(t *testing.T) {
+	clearEnv(t)
+
+	cases := []struct {
+		name    string
+		config  string
+		wantErr string // empty = expect success
+	}{
+		{
+			name: "openai_provider_with_ollama_chat_model_fails",
+			config: `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+models:
+  chat: "qwen3:32b"
+  background: "qwen3:32b"
+llm:
+  provider: "openai"
+  openai:
+    api_key: "sk-test"
+`,
+			wantErr: "models.chat=\"qwen3:32b\" does not look like a openai model",
+		},
+		{
+			name: "openai_provider_with_ollama_chat_model_passes_when_base_url_set",
+			config: `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+models:
+  chat: "qwen3:32b"
+  background: "qwen3:32b"
+llm:
+  provider: "openai"
+  openai:
+    api_key: "sk-test"
+    base_url: "https://api.together.xyz/v1"
+`,
+			wantErr: "",
+		},
+		{
+			name: "openai_provider_with_gpt5_passes",
+			config: `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+models:
+  chat: "gpt-5.4"
+  background: "gpt-5.4-mini"
+llm:
+  provider: "openai"
+  openai:
+    api_key: "sk-test"
+`,
+			wantErr: "",
+		},
+		{
+			name: "openai_provider_with_o3_passes",
+			config: `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+models:
+  chat: "o3"
+  background: "o3-mini"
+llm:
+  provider: "openai"
+  openai:
+    api_key: "sk-test"
+`,
+			wantErr: "",
+		},
+		{
+			name: "openai_provider_with_chatgpt_passes",
+			config: `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+models:
+  chat: "chatgpt-4o-latest"
+  background: "gpt-4o-mini"
+llm:
+  provider: "openai"
+  openai:
+    api_key: "sk-test"
+`,
+			wantErr: "",
+		},
+		{
+			name: "anthropic_provider_with_gpt_chat_model_fails",
+			config: `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+models:
+  chat: "gpt-5.4"
+  background: "gpt-5.4-mini"
+llm:
+  provider: "anthropic"
+  anthropic:
+    api_key: "sk-ant-test"
+`,
+			wantErr: "models.chat=\"gpt-5.4\" does not look like a anthropic model",
+		},
+		{
+			name: "anthropic_provider_with_claude_passes",
+			config: `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+models:
+  chat: "claude-sonnet-4-6"
+  background: "claude-haiku-4-5-20251001"
+llm:
+  provider: "anthropic"
+  anthropic:
+    api_key: "sk-ant-test"
+`,
+			wantErr: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeConfig(t, tc.config)
+			_, err := Load(path)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateModelNameForProvider exercises the helper directly to keep
+// regression coverage of the prefix logic separate from the full Load
+// pipeline. Tests both the "looks fine" and "definitely wrong" branches
+// per provider.
+func TestValidateModelNameForProvider(t *testing.T) {
+	cases := []struct {
+		provider string
+		model    string
+		wantErr  bool
+	}{
+		// OpenAI: gpt-*, chatgpt-*, o[1-9]*
+		{"openai", "gpt-5.4", false},
+		{"openai", "gpt-5.4-mini", false},
+		{"openai", "gpt-4o", false},
+		{"openai", "GPT-5", false}, // case-insensitive
+		{"openai", "chatgpt-4o-latest", false},
+		{"openai", "o1", false},
+		{"openai", "o3-mini", false},
+		{"openai", "qwen3:32b", true},
+		{"openai", "claude-sonnet-4-6", true},
+		{"openai", "llama3", true},
+		{"openai", "", false}, // empty handled elsewhere
+
+		// Anthropic: claude-*
+		{"anthropic", "claude-sonnet-4-6", false},
+		{"anthropic", "claude-haiku-4-5-20251001", false},
+		{"anthropic", "Claude-Opus-4-6", false}, // case-insensitive
+		{"anthropic", "gpt-5.4", true},
+		{"anthropic", "qwen3:32b", true},
+		{"anthropic", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider+"_"+tc.model, func(t *testing.T) {
+			err := validateModelNameForProvider(tc.provider, tc.model, "models.chat")
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestLoad_EmbeddingsProvider tests the new embeddings provider config block.
+// Defaults to ollama; openai is opt-in.
+func TestLoad_EmbeddingsProvider(t *testing.T) {
+	clearEnv(t)
+
+	t.Run("default_is_ollama", func(t *testing.T) {
+		config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+ollama_base_url: "http://localhost:11434"
+chromadb_url: "http://localhost:8000"
+models:
+  embeddings: "qwen3-embedding:8b"
+  background: "qwen3:32b"
+  chat: "qwen3:32b"
+`
+		path := writeConfig(t, config)
+		cfg, err := Load(path)
+		require.NoError(t, err)
+		require.Equal(t, "ollama", cfg.Embeddings.Provider)
+	})
+
+	t.Run("openai_with_explicit_key", func(t *testing.T) {
+		clearEnv(t)
+		config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+chromadb_url: "http://localhost:8000"
+models:
+  embeddings: "text-embedding-3-large"
+  background: "claude-haiku-4-5-20251001"
+  chat: "claude-sonnet-4-6"
+llm:
+  provider: "anthropic"
+  anthropic:
+    api_key: "sk-ant-test"
+embeddings:
+  provider: "openai"
+  openai:
+    api_key: "sk-emb-test"
+    dimensions: 1024
+`
+		path := writeConfig(t, config)
+		cfg, err := Load(path)
+		require.NoError(t, err)
+		require.Equal(t, "openai", cfg.Embeddings.Provider)
+		require.Equal(t, "sk-emb-test", cfg.Embeddings.OpenAI.APIKey)
+		require.Equal(t, 1024, cfg.Embeddings.OpenAI.Dimensions)
+	})
+
+	t.Run("openai_falls_back_to_llm_openai_key", func(t *testing.T) {
+		clearEnv(t)
+		// embeddings.openai.api_key is empty, but llm.openai.api_key is set
+		// and should be borrowed.
+		config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+chromadb_url: "http://localhost:8000"
+models:
+  embeddings: "text-embedding-3-large"
+  background: "gpt-5.4-mini"
+  chat: "gpt-5.4"
+llm:
+  provider: "openai"
+  openai:
+    api_key: "sk-shared"
+    base_url: "https://api.openai.com/v1"
+embeddings:
+  provider: "openai"
+`
+		path := writeConfig(t, config)
+		cfg, err := Load(path)
+		require.NoError(t, err)
+		require.Equal(t, "sk-shared", cfg.Embeddings.OpenAI.APIKey)
+		require.Equal(t, "https://api.openai.com/v1", cfg.Embeddings.OpenAI.BaseURL)
+	})
+
+	t.Run("openai_missing_key_fails_when_chroma_set", func(t *testing.T) {
+		clearEnv(t)
+		config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+chromadb_url: "http://localhost:8000"
+models:
+  embeddings: "text-embedding-3-large"
+  background: "claude-haiku-4-5-20251001"
+  chat: "claude-sonnet-4-6"
+llm:
+  provider: "anthropic"
+  anthropic:
+    api_key: "sk-ant-test"
+embeddings:
+  provider: "openai"
+`
+		path := writeConfig(t, config)
+		_, err := Load(path)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "embeddings.openai.api_key is required")
+	})
+
+	t.Run("openai_skipped_when_no_chroma", func(t *testing.T) {
+		clearEnv(t)
+		// No chromadb_url -> embedding provider check is skipped entirely.
+		// This config should load even though embeddings.provider=openai
+		// has no key, because the embedder will never be used.
+		config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+ollama_base_url: "http://localhost:11434"
+models:
+  embeddings: "text-embedding-3-large"
+  background: "qwen3:32b"
+  chat: "qwen3:32b"
+embeddings:
+  provider: "openai"
+`
+		path := writeConfig(t, config)
+		cfg, err := Load(path)
+		require.NoError(t, err)
+		require.Equal(t, "openai", cfg.Embeddings.Provider)
+	})
+
+	t.Run("invalid_provider_fails", func(t *testing.T) {
+		clearEnv(t)
+		config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+ollama_base_url: "http://localhost:11434"
+chromadb_url: "http://localhost:8000"
+models:
+  embeddings: "qwen3-embedding:8b"
+  background: "qwen3:32b"
+  chat: "qwen3:32b"
+embeddings:
+  provider: "voyage"
+`
+		path := writeConfig(t, config)
+		_, err := Load(path)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "embeddings.provider must be")
+	})
+}
+
+// TestLoad_EmbeddingsEnvOverrides covers SEAM_EMBEDDINGS_* env vars.
+func TestLoad_EmbeddingsEnvOverrides(t *testing.T) {
+	clearEnv(t)
+	config := `
+data_dir: "/d"
+jwt_secret: "test-secret-key-that-is-32-chars!"
+ollama_base_url: "http://localhost:11434"
+chromadb_url: "http://localhost:8000"
+models:
+  embeddings: "qwen3-embedding:8b"
+  background: "qwen3:32b"
+  chat: "qwen3:32b"
+`
+	path := writeConfig(t, config)
+
+	t.Setenv("SEAM_EMBEDDINGS_PROVIDER", "openai")
+	t.Setenv("SEAM_EMBEDDINGS_OPENAI_API_KEY", "sk-from-env")
+	t.Setenv("SEAM_EMBEDDINGS_OPENAI_BASE_URL", "https://api.openai.com/v1/")
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "openai", cfg.Embeddings.Provider)
+	require.Equal(t, "sk-from-env", cfg.Embeddings.OpenAI.APIKey)
+	// Trailing slash should be normalized.
+	require.Equal(t, "https://api.openai.com/v1", cfg.Embeddings.OpenAI.BaseURL)
 }

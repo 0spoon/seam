@@ -25,6 +25,7 @@ type Config struct {
 	CORSOrigins   []string        `yaml:"cors_origins"` // allowed CORS origins; default localhost
 	Models        ModelsConfig    `yaml:"models"`
 	LLM           LLMConfig       `yaml:"llm"`
+	Embeddings    EmbeddingsConfig `yaml:"embeddings"`
 	Whisper       WhisperConfig   `yaml:"whisper"`
 	Auth          AuthConfig      `yaml:"auth"`
 	AI            AIConfig        `yaml:"ai"`
@@ -119,6 +120,37 @@ type OpenAIConfig struct {
 	// or OpenAI-compatible services (e.g., Together, Groq).
 	// Defaults to "https://api.openai.com/v1" when empty.
 	BaseURL string `yaml:"base_url"`
+}
+
+// EmbeddingsConfig selects the embedding backend, independent of llm.provider.
+// A user with Anthropic chat may legitimately want OpenAI or Ollama embeddings
+// (Anthropic ships no embedding model). Defaults to "ollama".
+type EmbeddingsConfig struct {
+	// Provider selects the embedding backend: "ollama" (default) or "openai".
+	Provider string `yaml:"provider"`
+
+	// OpenAI settings (used when provider is "openai"). When APIKey or BaseURL
+	// are empty, they fall back to llm.openai.api_key / llm.openai.base_url so
+	// users with a single OpenAI key only need to specify it once.
+	OpenAI EmbeddingsOpenAIConfig `yaml:"openai"`
+}
+
+// EmbeddingsOpenAIConfig holds OpenAI embedding API settings.
+type EmbeddingsOpenAIConfig struct {
+	// APIKey is the OpenAI API key. env: SEAM_EMBEDDINGS_OPENAI_API_KEY
+	// Falls back to llm.openai.api_key when empty.
+	APIKey string `yaml:"api_key"`
+
+	// BaseURL overrides the default API endpoint. Useful for Azure OpenAI
+	// or OpenAI-compatible services. env: SEAM_EMBEDDINGS_OPENAI_BASE_URL
+	// Falls back to llm.openai.base_url, then to https://api.openai.com/v1.
+	BaseURL string `yaml:"base_url"`
+
+	// Dimensions optionally truncates the embedding vector. Zero means
+	// "use the model's native dimension" and omits the field from the
+	// request. text-embedding-3-large defaults to 3072 dims; setting this
+	// to 1024 trades a small amount of quality for 3x lower storage.
+	Dimensions int `yaml:"dimensions"`
 }
 
 // AnthropicConfig holds Anthropic API settings.
@@ -248,6 +280,15 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SEAM_ANTHROPIC_API_KEY"); v != "" {
 		cfg.LLM.Anthropic.APIKey = v
 	}
+	if v := os.Getenv("SEAM_EMBEDDINGS_PROVIDER"); v != "" {
+		cfg.Embeddings.Provider = v
+	}
+	if v := os.Getenv("SEAM_EMBEDDINGS_OPENAI_API_KEY"); v != "" {
+		cfg.Embeddings.OpenAI.APIKey = v
+	}
+	if v := os.Getenv("SEAM_EMBEDDINGS_OPENAI_BASE_URL"); v != "" {
+		cfg.Embeddings.OpenAI.BaseURL = v
+	}
 	if v := os.Getenv("SEAM_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
 	}
@@ -265,6 +306,19 @@ func applyDefaults(cfg *Config) {
 	// and model names are not required.
 	if cfg.LLM.Provider == "" {
 		cfg.LLM.Provider = "ollama"
+	}
+	if cfg.Embeddings.Provider == "" {
+		cfg.Embeddings.Provider = "ollama"
+	}
+	// API key fallback: when running OpenAI on both chat and embeddings,
+	// the user only needs to set the key in one place.
+	if cfg.Embeddings.Provider == "openai" {
+		if cfg.Embeddings.OpenAI.APIKey == "" {
+			cfg.Embeddings.OpenAI.APIKey = cfg.LLM.OpenAI.APIKey
+		}
+		if cfg.Embeddings.OpenAI.BaseURL == "" {
+			cfg.Embeddings.OpenAI.BaseURL = cfg.LLM.OpenAI.BaseURL
+		}
 	}
 	if cfg.Auth.AccessTokenTTL.Duration == 0 {
 		cfg.Auth.AccessTokenTTL.Duration = 15 * time.Minute
@@ -362,6 +416,7 @@ func normalizePaths(cfg *Config) {
 	cfg.OllamaBaseURL = strings.TrimRight(cfg.OllamaBaseURL, "/")
 	cfg.ChromaDBURL = strings.TrimRight(cfg.ChromaDBURL, "/")
 	cfg.LLM.OpenAI.BaseURL = strings.TrimRight(cfg.LLM.OpenAI.BaseURL, "/")
+	cfg.Embeddings.OpenAI.BaseURL = strings.TrimRight(cfg.Embeddings.OpenAI.BaseURL, "/")
 }
 
 // warnIfInsecureConfigFile logs a warning if the YAML config file contains
@@ -400,13 +455,6 @@ func validate(cfg *Config) error {
 	} else if len(cfg.JWTSecret) < 32 {
 		errs = append(errs, errors.New("jwt_secret must be at least 32 characters"))
 	}
-	// Validate AI model names. Embeddings require Ollama; chat/background
-	// require either Ollama or an external provider.
-	if cfg.OllamaBaseURL != "" {
-		if cfg.Models.Embeddings == "" {
-			errs = append(errs, errors.New("models.embeddings is required when ollama_base_url is set"))
-		}
-	}
 	// Chat and background models are needed whenever any LLM provider is active.
 	hasLLMProvider := cfg.OllamaBaseURL != "" || cfg.LLM.Provider != "ollama"
 	if hasLLMProvider {
@@ -432,9 +480,52 @@ func validate(cfg *Config) error {
 	default:
 		errs = append(errs, fmt.Errorf("llm.provider must be \"ollama\", \"openai\", or \"anthropic\" (got %q)", cfg.LLM.Provider))
 	}
-	// External providers still need Ollama for embeddings.
-	if cfg.LLM.Provider != "ollama" && cfg.OllamaBaseURL == "" {
-		slog.Warn("ollama_base_url not configured; embeddings will not be available even with an external LLM provider")
+
+	// Catch obvious model/provider mismatches when the user is hitting the
+	// canonical OpenAI/Anthropic endpoint. Skip the OpenAI check when
+	// base_url is set, because OpenAI-compatible APIs (Together, Groq,
+	// Azure, Anyscale) accept arbitrary model names like
+	// "meta-llama/Llama-3.1-70B-Instruct".
+	if cfg.LLM.Provider == "openai" && cfg.LLM.OpenAI.BaseURL == "" {
+		if err := validateModelNameForProvider("openai", cfg.Models.Chat, "models.chat"); err != nil {
+			errs = append(errs, err)
+		}
+		if err := validateModelNameForProvider("openai", cfg.Models.Background, "models.background"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if cfg.LLM.Provider == "anthropic" {
+		// Anthropic has no base_url override in this config.
+		if err := validateModelNameForProvider("anthropic", cfg.Models.Chat, "models.chat"); err != nil {
+			errs = append(errs, err)
+		}
+		if err := validateModelNameForProvider("anthropic", cfg.Models.Background, "models.background"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// Validate the embedding provider. The check is only meaningful when
+	// Chroma is configured -- without Chroma the embedder is never invoked,
+	// so we leave the operator alone.
+	if cfg.ChromaDBURL != "" {
+		switch cfg.Embeddings.Provider {
+		case "ollama":
+			if cfg.OllamaBaseURL == "" {
+				errs = append(errs, errors.New("embeddings.provider=\"ollama\" requires ollama_base_url to be set"))
+			}
+			if cfg.Models.Embeddings == "" {
+				errs = append(errs, errors.New("models.embeddings is required when embeddings.provider=\"ollama\""))
+			}
+		case "openai":
+			if cfg.Embeddings.OpenAI.APIKey == "" {
+				errs = append(errs, errors.New("embeddings.openai.api_key is required when embeddings.provider=\"openai\" (set in config, or SEAM_EMBEDDINGS_OPENAI_API_KEY env var, or fall back to llm.openai.api_key)"))
+			}
+			if cfg.Models.Embeddings == "" {
+				errs = append(errs, errors.New("models.embeddings is required when embeddings.provider=\"openai\" (e.g. \"text-embedding-3-large\")"))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("embeddings.provider must be \"ollama\" or \"openai\" (got %q)", cfg.Embeddings.Provider))
+		}
 	}
 
 	if cfg.Auth.BcryptCost < 4 || cfg.Auth.BcryptCost > 14 {
@@ -451,6 +542,34 @@ func validate(cfg *Config) error {
 
 	if len(errs) > 0 {
 		return fmt.Errorf("validation failed: %w", errors.Join(errs...))
+	}
+	return nil
+}
+
+// validateModelNameForProvider returns an error if model is not a plausible
+// model name for the given provider's canonical endpoint. The check is
+// intentionally permissive (prefix-based) rather than a closed allowlist,
+// because new model versions ship faster than we can update Seam.
+//
+// An empty model is not flagged here -- the missing-value error is reported
+// elsewhere by the model-name-required checks.
+func validateModelNameForProvider(provider, model, fieldName string) error {
+	if model == "" {
+		return nil
+	}
+	m := strings.ToLower(model)
+	var ok bool
+	switch provider {
+	case "openai":
+		// gpt-*, chatgpt-*, o1/o2/o3/.../o9/...
+		ok = strings.HasPrefix(m, "gpt-") ||
+			strings.HasPrefix(m, "chatgpt-") ||
+			(len(m) >= 2 && m[0] == 'o' && m[1] >= '1' && m[1] <= '9')
+	case "anthropic":
+		ok = strings.HasPrefix(m, "claude-")
+	}
+	if !ok {
+		return fmt.Errorf("%s=%q does not look like a %s model name; if you are using an OpenAI-compatible API set llm.openai.base_url, otherwise pick a real %s model", fieldName, model, provider, provider)
 	}
 	return nil
 }

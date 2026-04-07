@@ -1,7 +1,8 @@
 # Binaries
 bin/
-seam
-seamd
+/seam
+/seamd
+/seam-reindex
 *.exe
 *.dll
 *.so

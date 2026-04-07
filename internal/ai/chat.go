@@ -194,7 +194,7 @@ func (c *ChatService) retrieveContext(ctx context.Context, userID, query string)
 		return nil, nil, fmt.Errorf("ai.ChatService.retrieveContext: embed query: %w", err)
 	}
 
-	colName := CollectionName(userID)
+	colName := CollectionName(userID, c.embedModel)
 	colID, err := c.chroma.GetOrCreateCollection(ctx, colName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("ai.ChatService.retrieveContext: get collection: %w", err)

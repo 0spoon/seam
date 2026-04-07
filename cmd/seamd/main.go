@@ -305,7 +305,6 @@ func run() error {
 	}
 
 	// Select the ChatCompleter based on the configured LLM provider.
-	// Embeddings always use the local Ollama instance regardless of provider.
 	var chatCompleter ai.ChatCompleter
 	switch cfg.LLM.Provider {
 	case "openai":
@@ -329,6 +328,30 @@ func run() error {
 		logger.Info("LLM provider: Ollama (local)")
 	}
 
+	// Select the EmbeddingGenerator based on embeddings.provider.
+	// This is independent of the chat provider above: a user with Anthropic
+	// chat may legitimately want OpenAI or Ollama embeddings (Anthropic ships
+	// no embedding model). Defaults to Ollama.
+	var embeddingClient ai.EmbeddingGenerator
+	switch cfg.Embeddings.Provider {
+	case "openai":
+		embeddingClient = ai.NewOpenAIEmbedder(
+			cfg.Embeddings.OpenAI.APIKey,
+			cfg.Embeddings.OpenAI.BaseURL,
+			cfg.Embeddings.OpenAI.Dimensions,
+			cfg.AI.EmbeddingTimeout.Duration,
+		)
+		logger.Info("Embedding provider: OpenAI",
+			"base_url", cfg.Embeddings.OpenAI.BaseURL,
+			"model", cfg.Models.Embeddings,
+			"dimensions", cfg.Embeddings.OpenAI.Dimensions)
+	default: // "ollama"
+		if ollamaClient != nil {
+			embeddingClient = ollamaClient
+		}
+		logger.Info("Embedding provider: Ollama (local)", "model", cfg.Models.Embeddings)
+	}
+
 	var aiHandler *ai.Handler
 	var aiQueue *ai.Queue
 	var chatSvc *ai.ChatService
@@ -344,7 +367,7 @@ func run() error {
 	var embedder *ai.Embedder
 	var chromaClient *ai.ChromaClient
 
-	if cfg.ChromaDBURL != "" && ollamaClient != nil {
+	if cfg.ChromaDBURL != "" && embeddingClient != nil {
 		chromaClient = ai.NewChromaClient(cfg.ChromaDBURL)
 
 		// Probe ChromaDB at startup so the operator gets an immediate, loud
@@ -359,10 +382,10 @@ func run() error {
 		}
 		probeCancel()
 
-		embedder = ai.NewEmbedder(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
-		chatSvc = ai.NewChatService(ollamaClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
+		embedder = ai.NewEmbedder(embeddingClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
+		chatSvc = ai.NewChatService(embeddingClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
 		synthSvc = ai.NewSynthesizer(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
-		linker := ai.NewAutoLinker(ollamaClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Background, hub, logger)
+		linker := ai.NewAutoLinker(embeddingClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Background, hub, logger)
 
 		// Register task handlers.
 		aiQueue.RegisterHandler(ai.TaskTypeEmbed, embedder.HandleEmbedTask)
@@ -396,8 +419,8 @@ func run() error {
 			}
 		})
 
-		// Enable semantic search (always uses Ollama for embeddings).
-		semanticSearcher := search.NewSemanticSearcher(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
+		// Enable semantic search using the configured embedding provider.
+		semanticSearcher := search.NewSemanticSearcher(embeddingClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
 		searchSvc.SetSemanticSearcher(semanticSearcher)
 
 		// Create AI suggester for tag/project suggestions.
@@ -406,15 +429,16 @@ func run() error {
 		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthSvc, linker, embedder, aiWriter, suggester, userDBMgr, logger)
 		logger.Info("AI features enabled", "ollama_url", cfg.OllamaBaseURL, "chromadb_url", cfg.ChromaDBURL)
 	} else if chatCompleter != nil {
-		// Without ChromaDB (or Ollama), writer and suggester can work with any chat provider.
+		// Without ChromaDB (or an embedding client), writer and suggester
+		// can still work with any chat provider.
 		aiWriter := ai.NewWriter(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
 		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
 		suggester := ai.NewSuggester(chatCompleter, cfg.Models.Chat, logger)
 		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, aiWriter, suggester, userDBMgr, logger)
-		if cfg.ChromaDBURL != "" && ollamaClient == nil {
-			logger.Info("AI features: Ollama not configured; embeddings/RAG disabled, writing assist and suggestions available")
+		if cfg.ChromaDBURL != "" && embeddingClient == nil {
+			logger.Info("AI features: embedding client not configured (embeddings.provider=ollama with no ollama_base_url); embeddings/RAG disabled, writing assist and suggestions available")
 		} else {
 			logger.Info("AI features: ChromaDB not configured; only writing assist and suggestions available")
 		}

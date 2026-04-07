@@ -57,7 +57,7 @@ func (s *SemanticSearcher) Search(ctx context.Context, userID, query string, lim
 	}
 
 	// Get the collection ID.
-	colName := ai.CollectionName(userID)
+	colName := ai.CollectionName(userID, s.model)
 	colID, err := s.chroma.GetOrCreateCollection(ctx, colName)
 	if err != nil {
 		return nil, fmt.Errorf("search.SemanticSearcher.Search: get collection: %w", err)
@@ -152,7 +152,7 @@ func (s *SemanticSearcher) SearchScoped(ctx context.Context, userID, query strin
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchScoped: embed query: %w", err)
 	}
 
-	colName := ai.CollectionName(userID)
+	colName := ai.CollectionName(userID, s.model)
 	colID, err := s.chroma.GetOrCreateCollection(ctx, colName)
 	if err != nil {
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchScoped: get collection: %w", err)
@@ -345,7 +345,7 @@ func (s *SemanticSearcher) SearchWithRecency(ctx context.Context, userID, query 
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchWithRecency: embed query: %w", err)
 	}
 
-	colName := ai.CollectionName(userID)
+	colName := ai.CollectionName(userID, s.model)
 	colID, err := s.chroma.GetOrCreateCollection(ctx, colName)
 	if err != nil {
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchWithRecency: get collection: %w", err)
@@ -445,7 +445,7 @@ func (s *SemanticSearcher) SearchScopedWithRecency(ctx context.Context, userID, 
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchScopedWithRecency: embed query: %w", err)
 	}
 
-	colName := ai.CollectionName(userID)
+	colName := ai.CollectionName(userID, s.model)
 	colID, err := s.chroma.GetOrCreateCollection(ctx, colName)
 	if err != nil {
 		return nil, fmt.Errorf("search.SemanticSearcher.SearchScopedWithRecency: get collection: %w", err)

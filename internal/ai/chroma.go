@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -442,15 +443,37 @@ func (c *ChromaClient) DeleteByMetadata(ctx context.Context, collectionID string
 	return nil
 }
 
-// CollectionName returns the standard collection name for a user.
-// userID must be a valid ULID (alphanumeric). Invalid IDs return
-// a safe fallback to prevent collection name injection.
-func CollectionName(userID string) string {
+// CollectionName returns the standard collection name for a user and embedding
+// model. The embedding model is part of the name because Chroma collections
+// have implicit dimensions (set on first insert), so two models with different
+// vector sizes cannot share a collection -- inserts would fail at runtime.
+//
+// userID must be a valid ULID (alphanumeric). Invalid IDs return a safe
+// fallback to prevent collection name injection. An empty embedModel is a
+// programmer error and also returns the fallback so tests fail loudly.
+func CollectionName(userID, embedModel string) string {
 	// Defense-in-depth: validate userID contains only ULID-safe characters.
 	for _, r := range userID {
 		if !((r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')) {
 			return "user_invalid_notes"
 		}
 	}
-	return "user_" + userID + "_notes"
+	suffix := embedModelFingerprint(embedModel)
+	if suffix == "" {
+		return "user_invalid_notes"
+	}
+	return "user_" + userID + "_notes_" + suffix
+}
+
+// embedModelFingerprint returns a short, stable, filesystem-safe identifier
+// derived from the embedding model name. Used by CollectionName to scope a
+// Chroma collection to a specific embedding model. Examples:
+//
+//	"qwen3-embedding:8b"     -> "qwen3_embedding_8b"
+//	"text-embedding-3-large" -> "text_embedding_3_large"
+//	"voyage-3.5"             -> "voyage_3_5"
+func embedModelFingerprint(model string) string {
+	s := strings.ToLower(model)
+	s = strings.NewReplacer(":", "_", "-", "_", ".", "_", "/", "_").Replace(s)
+	return strings.Trim(s, "_")
 }

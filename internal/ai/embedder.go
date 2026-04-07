@@ -74,7 +74,7 @@ func WithChunkOverlap(overlap int) func(*Embedder) {
 // EnsureCollection creates the ChromaDB collection for a user if it does not exist.
 // Returns the collection ID.
 func (e *Embedder) EnsureCollection(ctx context.Context, userID string) (string, error) {
-	name := CollectionName(userID)
+	name := CollectionName(userID, e.model)
 	colID, err := e.chroma.GetOrCreateCollection(ctx, name)
 	if err != nil {
 		return "", fmt.Errorf("ai.Embedder.EnsureCollection: %w", err)
@@ -282,7 +282,7 @@ func (e *Embedder) FindRelated(ctx context.Context, noteID, userID string, nResu
 		return nil, fmt.Errorf("ai.Embedder.FindRelated: generate embedding: %w", err)
 	}
 
-	colName := CollectionName(userID)
+	colName := CollectionName(userID, e.model)
 	colID, err := e.chroma.GetOrCreateCollection(ctx, colName)
 	if err != nil {
 		return nil, fmt.Errorf("ai.Embedder.FindRelated: get collection: %w", err)

@@ -203,5 +203,35 @@ func TestChromaClient_DeleteDocuments(t *testing.T) {
 }
 
 func TestCollectionName(t *testing.T) {
-	require.Equal(t, "user_abc123_notes", CollectionName("abc123"))
+	// Per-model fingerprint suffix scopes the collection so that switching
+	// embedding models cannot collide on a Chroma collection with mismatched
+	// dimensions.
+	require.Equal(t, "user_abc123_notes_qwen3_embedding_8b",
+		CollectionName("abc123", "qwen3-embedding:8b"))
+	require.Equal(t, "user_abc123_notes_text_embedding_3_large",
+		CollectionName("abc123", "text-embedding-3-large"))
+	require.Equal(t, "user_abc123_notes_voyage_3_5",
+		CollectionName("abc123", "voyage-3.5"))
+
+	// Empty model name is a wiring bug -- fail loudly.
+	require.Equal(t, "user_invalid_notes", CollectionName("abc123", ""))
+
+	// Userid sanitization still applies.
+	require.Equal(t, "user_invalid_notes",
+		CollectionName("../etc/passwd", "qwen3-embedding:8b"))
+}
+
+func TestEmbedModelFingerprint(t *testing.T) {
+	cases := map[string]string{
+		"qwen3-embedding:8b":     "qwen3_embedding_8b",
+		"text-embedding-3-large": "text_embedding_3_large",
+		"text-embedding-3-small": "text_embedding_3_small",
+		"voyage-3.5":             "voyage_3_5",
+		"nomic-embed-text":       "nomic_embed_text",
+		"BAAI/bge-large-en-v1.5": "baai_bge_large_en_v1_5",
+		"":                       "",
+	}
+	for in, want := range cases {
+		require.Equal(t, want, embedModelFingerprint(in), "input=%q", in)
+	}
 }

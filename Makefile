@@ -1,4 +1,4 @@
-.PHONY: build build-web build-all run test test-integration test-web lint fmt clean dev-web init install-service uninstall-service chroma-up chroma-down chroma-logs chroma-status
+.PHONY: build build-web build-all run test test-integration test-web lint fmt clean dev-web init install-service uninstall-service chroma-up chroma-down chroma-logs chroma-status reindex
 
 CHROMA_COMPOSE := docker compose -f docker/chroma-compose.yml
 
@@ -8,6 +8,7 @@ build:
 	@mkdir -p bin
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/seamd ./cmd/seamd
 	go build -o bin/seam ./cmd/seam
+	go build -o bin/seam-reindex ./cmd/seam-reindex
 
 build-web:
 	cd web && npm install && npm run build
@@ -59,6 +60,13 @@ chroma-logs:
 
 chroma-status:
 	$(CHROMA_COMPOSE) ps
+
+# Re-embed every note for the default user using the embedding provider
+# and model currently configured in seam-server.yaml. Run this after
+# changing models.embeddings or embeddings.provider, since each
+# (provider, model) tuple gets its own Chroma collection.
+reindex: build
+	./bin/seam-reindex
 
 clean:
 	rm -rf bin

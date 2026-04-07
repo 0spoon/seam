@@ -86,7 +86,7 @@ func (l *AutoLinker) SuggestLinks(ctx context.Context, userID, noteID string) ([
 	}
 
 	// Find similar notes via ChromaDB.
-	colName := CollectionName(userID)
+	colName := CollectionName(userID, l.embedModel)
 	colID, err := l.chroma.GetOrCreateCollection(ctx, colName)
 	if err != nil {
 		return nil, fmt.Errorf("ai.AutoLinker.SuggestLinks: get collection: %w", err)

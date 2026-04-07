@@ -85,19 +85,35 @@ install_launchd() {
 </plist>
 EOF
 
-    # Reload if already loaded.
-    if launchctl list 2>/dev/null | grep -q "$label"; then
-        info "Service already loaded, reloading..."
-        launchctl unload "$plist" 2>/dev/null || true
+    # Use the modern launchctl bootstrap/bootout API. The legacy
+    # load/unload commands silently fail when the service is already
+    # bootstrapped, which means a reinstall would keep running the old
+    # binary. bootout cleanly tears down any previous instance so the
+    # subsequent bootstrap picks up the freshly built seamd.
+    local domain="gui/$(id -u)"
+    local target="$domain/$label"
+
+    if launchctl print "$target" >/dev/null 2>&1; then
+        info "Service already loaded, replacing..."
+        launchctl bootout "$target" 2>/dev/null || true
+        # bootout returns before the process is fully gone; wait briefly.
+        for _ in 1 2 3 4 5; do
+            launchctl print "$target" >/dev/null 2>&1 || break
+            sleep 0.2
+        done
     fi
 
-    launchctl load -w "$plist"
+    if ! launchctl bootstrap "$domain" "$plist"; then
+        err "launchctl bootstrap failed for $plist"
+        exit 1
+    fi
+    launchctl enable "$target" 2>/dev/null || true
 
     ok "Installed launchd agent: $label"
     echo
-    echo "  Status:    launchctl list | grep $label"
-    echo "  Stop:      launchctl unload $plist"
-    echo "  Start:     launchctl load $plist"
+    echo "  Status:    launchctl print $target | head"
+    echo "  Stop:      launchctl bootout $target"
+    echo "  Start:     launchctl bootstrap $domain $plist"
     echo "  Logs:      tail -f $log_dir/seamd.log"
     echo "  Errors:    tail -f $log_dir/seamd.err.log"
     echo

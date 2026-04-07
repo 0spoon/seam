@@ -16,14 +16,19 @@ OS="$(uname -s)"
 uninstall_launchd() {
     local label="com.seam.seamd"
     local plist="$HOME/Library/LaunchAgents/$label.plist"
+    local target="gui/$(id -u)/$label"
 
-    if [ ! -f "$plist" ]; then
-        warn "No launchd agent found at $plist"
-        return 0
+    # Tear down a running instance even if the plist has already been
+    # deleted (e.g. partial cleanup from a previous run).
+    if launchctl print "$target" >/dev/null 2>&1; then
+        info "Stopping launchd agent: $label"
+        launchctl bootout "$target" 2>/dev/null || true
     fi
 
-    info "Unloading launchd agent: $label"
-    launchctl unload "$plist" 2>/dev/null || true
+    if [ ! -f "$plist" ]; then
+        warn "No launchd agent plist found at $plist"
+        return 0
+    fi
 
     rm -f "$plist"
     ok "Removed launchd agent: $plist"

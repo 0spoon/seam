@@ -2,6 +2,28 @@
 
 This document describes the features, components, and architectural changes needed to evolve Seam from a reactive knowledge system into a proactive, agentic personal AI assistant.
 
+## Status (2026-04-06)
+
+| Phase | Name | Status |
+|---|---|---|
+| 1 | Agentic Loop with Tool Use | **Complete** |
+| 2 | User Profile + Long-Term Memory | **Complete** |
+| 3 | Scheduled Triggers + Daily Briefing | Not started |
+| 4 | Reminders + Due Dates | Not started |
+| 5 | Event-Driven Automations | Not started |
+| 6 | Document Ingestion | Not started |
+| 7 | External Integrations | Not started |
+| 8 | Notifications | Not started |
+| 9 | Planning + Goal Tracking | Not started |
+| 10 | Learning + Personalization | Not started |
+
+## Changelog
+
+- **2026-04-06**: Phase 1 (Agentic Loop) shipped: `internal/assistant/` package (~4,200 LOC) with tool registry, agentic loop, SSE streaming, confirmation workflow, action audit trail. All three LLM providers (Ollama, OpenAI, Anthropic) implement `ai.ToolChatCompleter`. HTTP routes mounted at `/api/assistant`.
+- **2026-04-06**: Phase 2 (User Profile + Long-Term Memory) shipped: `memories` table with FTS5 search, `user_profile` key-value table, profile + memory CRUD, system prompt enrichment, memory tools (`save_memory`, `search_memories`, `get_profile`, `update_profile`).
+- **2026-04-06**: Phase 2.2 (memory decay): `SearchMemories` now ranks results by a composite of FTS5 BM25 score, true 30-day half-life decay over `last_accessed`/`created_at`, and the memory's `confidence`. `loadContext` calls `TouchMemories` so frequently-recalled items stay fresh.
+- **2026-04-06**: Phase 2.3 (conversation summarization): legacy `internal/ai/chat.go` 5-turn cap raised to a 20-message recent window. `BuildChatMessages`, `Ask`, `AskStream`, `/api/ai/ask`, and the WebSocket chat path all accept an optional `summary` field. New `ChatService.SummarizeHistory` produces digests via the LLM. The assistant `Service.Chat` automatically loads a per-conversation summary memory (category `summary`, deterministic ID `conv_summary_{id}`) for long histories, slices history to the recent window, embeds the summary in the system prompt, and triggers a background refresh after the call when the conversation has grown past the recent window plus a buffer.
+
 ## Current State
 
 Seam already provides a solid foundation:
@@ -20,11 +42,11 @@ The core limitation: Seam is **purely reactive**. The user must ask every questi
 
 ## Phase 1: Agentic Loop with Tool Use
 
+**Status**: **Complete** (2026-04-06)
+
 **Goal**: Let the chat AI call tools and iterate, turning it from a text generator into an agent that can act on your behalf.
 
 **Priority**: Critical -- this is the single biggest gap and the foundation for everything else.
-
-**Absorbs from features.md:** #18 (NL Query Interface), #28 (Conversation-to-Note Extraction, partial), #9 (Agent Playbooks, partial -- multi-step reasoning)
 
 ### 1.1 Assistant Service (`internal/assistant/`)
 
@@ -106,11 +128,11 @@ CREATE TABLE assistant_actions (
 
 ## Phase 2: User Profile and Long-Term Memory
 
+**Status**: **Complete** (2026-04-06)
+
 **Goal**: The assistant knows who you are, remembers what you've told it, and improves over time.
 
 **Priority**: High -- without memory, every conversation starts from zero.
-
-**Absorbs from features.md:** #1 (Reflexive Knowledge Distillation, partial), #26 (Session Handoff Protocol), #28 (Conversation-to-Note Extraction, partial)
 
 ### 2.1 User Profile (`internal/assistant/profile.go`)
 
@@ -178,11 +200,11 @@ CREATE TABLE user_profile (
 
 ## Phase 3: Scheduled Triggers and Daily Briefing
 
+**Status**: Not started
+
 **Goal**: The assistant does things without being asked, on a schedule.
 
 **Priority**: High -- proactivity is what separates an assistant from a search engine.
-
-**Absorbs from features.md:** #14 (Scheduled Agent Tasks)
 
 ### 3.1 Scheduler Service (`internal/scheduler/`)
 
@@ -270,8 +292,6 @@ ALTER TABLE tasks ADD COLUMN completed_at DATETIME;
 **Goal**: Define rules that trigger AI actions when things happen in Seam.
 
 **Priority**: Medium -- builds on the agentic loop and scheduler.
-
-**Absorbs from features.md:** #1 (Reflexive Knowledge Distillation, partial), #9 (Agent Playbooks, partial -- reusable automation templates), #10 (Smart Inbox Triage), #25 (Semantic Link Suggestions)
 
 ### 5.1 Automation Engine (`internal/automations/`)
 
@@ -575,27 +595,6 @@ CREATE TABLE topic_engagement (
 | 10 | Learning + personalization | Medium | Phase 1, Phase 2 |
 
 Phase 1 is the critical path. Nearly everything else depends on the assistant being able to use tools and take actions. Phase 6 (document ingestion) is independent and can be built in parallel.
-
----
-
-## Relationship to features.md
-
-The following features from `features.md` have been absorbed into this plan:
-
-| features.md # | Feature | Absorbed Into |
-|---|---|---|
-| 1 | Reflexive Knowledge Distillation | Phase 2 + Phase 5 |
-| 9 | Agent Playbooks | Phase 1 + Phase 5 |
-| 10 | Smart Inbox Triage | Phase 5 |
-| 14 | Scheduled Agent Tasks | Phase 3 |
-| 18 | NL Query Interface | Phase 1 |
-| 25 | Semantic Link Suggestions | Phase 5 |
-| 26 | Session Handoff Protocol | Phase 2 |
-| 28 | Conversation-to-Note Extraction | Phase 1 + Phase 2 |
-
-Features with partial overlap remain in `features.md` with cross-references: #2 (Semantic Deduplication), #20 (Plugin/Extension System), #22 (Context Budget Optimizer), #30 (Agent Confidence Scoring).
-
-All other `features.md` items are independent knowledge system improvements and remain there.
 
 ---
 

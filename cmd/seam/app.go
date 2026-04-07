@@ -1,7 +1,7 @@
 package main
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // screen identifies which screen is currently active.
@@ -67,7 +67,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle global quit and logout.
-	if km, ok := msg.(tea.KeyMsg); ok {
+	if km, ok := msg.(tea.KeyPressMsg); ok {
 		if km.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
@@ -218,21 +218,25 @@ func (m appModel) updateTimeline(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m appModel) View() string {
+func (m appModel) View() tea.View {
+	var content string
 	switch m.screen {
 	case screenLogin:
-		return m.loginModel.View()
+		content = m.loginModel.View()
 	case screenMain:
-		return m.mainModel.View()
+		content = m.mainModel.View()
 	case screenEditor:
-		return m.editorModel.View()
+		content = m.editorModel.View()
 	case screenSearch:
-		return m.searchModel.View()
+		content = m.searchModel.View()
 	case screenAsk:
-		return m.askModel.View()
+		content = m.askModel.View()
 	case screenTimeline:
-		return m.timelineModel.View()
-	default:
-		return ""
+		content = m.timelineModel.View()
 	}
+
+	v := tea.NewView(content)
+	// Run in the alternate screen buffer (moved from tea.NewProgram options in v2).
+	v.AltScreen = true
+	return v
 }

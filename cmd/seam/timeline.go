@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // openTimelineMsg signals to switch to the timeline view.
@@ -123,7 +123,7 @@ func (m timelineModel) Update(msg tea.Msg) (timelineModel, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		switch msg.String() {
 		case "q", "esc":

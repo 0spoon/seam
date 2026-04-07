@@ -3,9 +3,9 @@ package main
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // loginField identifies which text input is focused.
@@ -122,7 +122,7 @@ func (m loginModel) Update(msg tea.Msg) (loginModel, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		switch msg.String() {
 		case "tab", "shift+tab", "down", "up":

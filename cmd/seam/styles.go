@@ -1,6 +1,6 @@
 package main
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Color palette for the dark theme, aligned with FE_DESIGN.md.
 // Primary accent: amber/copper. Text: warm off-white. Background: dark.

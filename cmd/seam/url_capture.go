@@ -3,9 +3,9 @@ package main
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // urlCaptureModel handles URL capture via a simple modal.
@@ -29,7 +29,7 @@ func newURLCaptureModel(client *APIClient, width, height int) urlCaptureModel {
 	ti := textinput.New()
 	ti.Placeholder = "https://example.com/article"
 	ti.CharLimit = 2048
-	ti.Width = 50
+	ti.SetWidth(50)
 	ti.Focus()
 
 	return urlCaptureModel{
@@ -62,7 +62,7 @@ func (m urlCaptureModel) Update(msg tea.Msg) (urlCaptureModel, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		switch msg.String() {
 		case "esc":

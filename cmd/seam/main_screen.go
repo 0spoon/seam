@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // pane identifies which pane is active.
@@ -160,7 +160,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 		m.err = ""
 		return m, m.loadNotes()
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		// Any key other than "d" resets the delete confirmation.
 		if msg.String() != "d" {

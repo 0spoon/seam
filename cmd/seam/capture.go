@@ -3,10 +3,10 @@ package main
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // captureField identifies which field is focused in the capture modal.
@@ -41,7 +41,7 @@ func newCaptureModel(client *APIClient, projectID string, width, height int) cap
 	ti := textinput.New()
 	ti.Placeholder = "Note title"
 	ti.CharLimit = 256
-	ti.Width = 50
+	ti.SetWidth(50)
 	ti.Focus()
 
 	ta := textarea.New()
@@ -82,7 +82,7 @@ func (m captureModel) Update(msg tea.Msg) (captureModel, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		switch msg.String() {
 		case "esc":

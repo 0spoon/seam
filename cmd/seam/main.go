@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func main() {
@@ -57,7 +57,9 @@ func run() error {
 	}
 
 	model := newAppModel(client, authenticated, username)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	// v2: alt-screen, mouse, and keyboard enhancements are declared on the
+	// View struct instead of via tea.NewProgram options. See appModel.View.
+	p := tea.NewProgram(model)
 
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("run TUI: %w", err)

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // maxRecordingDuration is the maximum allowed recording duration.
@@ -115,7 +115,7 @@ func (m voiceCaptureModel) Update(msg tea.Msg) (voiceCaptureModel, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		switch msg.String() {
 		case "esc":
@@ -133,7 +133,7 @@ func (m voiceCaptureModel) Update(msg tea.Msg) (voiceCaptureModel, tea.Cmd) {
 			m.done = true
 			return m, nil
 
-		case "enter", " ":
+		case "enter", "space":
 			if m.loading {
 				return m, nil
 			}

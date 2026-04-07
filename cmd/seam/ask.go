@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/coder/websocket"
 )
 
@@ -69,6 +69,12 @@ func newAskModel(client *APIClient, width, height int) askModel {
 	ta.CharLimit = 1000
 	ta.MaxHeight = 4
 	ta.ShowLineNumbers = false
+	// Explicitly set the visible height. textarea.New() defaults to 6 rows;
+	// our View() math (m.height - 8) budgets only 4 rows for the input area,
+	// so without this call the status bar is pushed off the bottom of the
+	// screen. Setting MaxHeight alone does not retroactively clamp the height
+	// that New() already set.
+	ta.SetHeight(4)
 	ta.Focus()
 
 	if width > 10 {
@@ -96,12 +102,14 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 		return m, nil
 
 	case askStreamStartMsg:
-		// The WebSocket goroutine has started; process the first message
-		// and begin waiting for more from the channel.
+		// The WebSocket goroutine has started; process the first message.
+		// The recursive Update call below dispatches to askStreamTokenMsg
+		// (or askStreamDoneMsg), which itself returns waitForStreamMsg to
+		// read the next token. We must NOT spawn an additional waiter here:
+		// two concurrent readers on the same channel race and deliver
+		// adjacent tokens in swapped order, which garbles the streamed text.
 		m.streamCh = msg.ch
-		updated, cmd := m.Update(msg.first)
-		// Chain with a command to read the next streaming message.
-		return updated, tea.Batch(cmd, waitForStreamMsg(msg.ch))
+		return m.Update(msg.first)
 
 	case askStreamTokenMsg:
 		m.streamingContent += msg.token
@@ -165,7 +173,7 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		switch msg.String() {
 		case "esc":
@@ -185,8 +193,21 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "alt+s":
-			// Submit the question with Alt+S (Enter inserts newlines).
+		case "shift+enter":
+			// Shift+Enter inserts a newline in the textarea. We handle it
+			// directly (rather than letting textarea process it) because
+			// plain Enter is reserved for sending the message below.
+			//
+			// This requires a terminal that supports the Kitty keyboard
+			// protocol for key disambiguation (Ghostty, Kitty, Alacritty,
+			// iTerm2, WezTerm, Foot, Rio, Contour). On terminals without
+			// that support, Shift+Enter is indistinguishable from Enter
+			// and will submit instead.
+			m.input.InsertRune('\n')
+			return m, nil
+
+		case "enter":
+			// Submit the question.
 			if m.loading {
 				return m, nil
 			}
@@ -503,7 +524,7 @@ func (m askModel) View() string {
 
 	// Status bar.
 	statusBar := styleStatusBar.Width(m.width).Render(
-		"Alt+S: send | Enter: newline | Ctrl+Up/Down: scroll | Esc: back",
+		"Enter: send | Shift+Enter: newline | Ctrl+Up/Down: scroll | Esc: back",
 	)
 
 	return lipgloss.JoinVertical(lipgloss.Left,

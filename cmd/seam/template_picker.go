@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // templatePickerModel lets users pick a template before creating a note.
@@ -49,7 +49,7 @@ func newTemplatePickerModel(client *APIClient, projectID string, width, height i
 	ti := textinput.New()
 	ti.Placeholder = "Note title"
 	ti.CharLimit = 256
-	ti.Width = 50
+	ti.SetWidth(50)
 
 	return templatePickerModel{
 		client:     client,
@@ -123,7 +123,7 @@ func (m templatePickerModel) Update(msg tea.Msg) (templatePickerModel, tea.Cmd) 
 		m.err = msg.err.Error()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		switch msg.String() {
 		case "esc":
@@ -158,7 +158,7 @@ func (m templatePickerModel) Update(msg tea.Msg) (templatePickerModel, tea.Cmd) 
 	return m, nil
 }
 
-func (m templatePickerModel) updateList(msg tea.KeyMsg) (templatePickerModel, tea.Cmd) {
+func (m templatePickerModel) updateList(msg tea.KeyPressMsg) (templatePickerModel, tea.Cmd) {
 	switch msg.String() {
 	case "j", "down":
 		if m.cursor < len(m.templates)-1 {
@@ -180,7 +180,7 @@ func (m templatePickerModel) updateList(msg tea.KeyMsg) (templatePickerModel, te
 	return m, nil
 }
 
-func (m templatePickerModel) updateTitle(msg tea.KeyMsg) (templatePickerModel, tea.Cmd) {
+func (m templatePickerModel) updateTitle(msg tea.KeyPressMsg) (templatePickerModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		if m.applying {

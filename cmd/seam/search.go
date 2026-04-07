@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 const searchDebounce = 300 * time.Millisecond
@@ -63,7 +63,7 @@ func newSearchModel(client *APIClient, width, height int) searchModel {
 	ti := textinput.New()
 	ti.Placeholder = "Search notes..."
 	ti.CharLimit = 256
-	ti.Width = 60
+	ti.SetWidth(60)
 	ti.Focus()
 
 	return searchModel{
@@ -143,7 +143,7 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 			return searchResultsMsg{results: unified, query: query}
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		switch msg.String() {
 		case "esc":

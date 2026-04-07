@@ -5,10 +5,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // editorModel handles the full-screen note editor.
@@ -65,7 +65,7 @@ func newEditorModel(client *APIClient, noteID string, width, height int) editorM
 	ta.Focus()
 
 	if width > 4 {
-		ti.Width = width - 4
+		ti.SetWidth(width - 4)
 	}
 
 	return editorModel{
@@ -108,7 +108,7 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 		}
 		m.body.SetHeight(editorHeight)
 		if m.width > 4 {
-			m.titleInput.Width = m.width - 4
+			m.titleInput.SetWidth(m.width - 4)
 		}
 		return m, nil
 
@@ -133,14 +133,14 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 		m.err = msg.err.Error()
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		m.err = ""
 		m.status = ""
 
 		// Match save shortcut. Alt+S (Option+S on Mac) is used instead of
 		// Ctrl+S because Ctrl+S is intercepted by tmux and terminal flow
 		// control. F2 is kept as a fallback.
-		if msg.String() == "alt+s" || msg.Type == tea.KeyF2 {
+		if msg.String() == "alt+s" || msg.String() == "f2" {
 			if m.saving {
 				return m, nil
 			}

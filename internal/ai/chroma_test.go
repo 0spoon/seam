@@ -10,6 +10,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestChromaClient_Heartbeat(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, http.MethodGet, r.Method)
+			require.Equal(t, "/api/v2/heartbeat", r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"nanosecond heartbeat": 1712500000000000000}`))
+		}))
+		defer server.Close()
+
+		client := NewChromaClient(server.URL)
+		require.NoError(t, client.Heartbeat(context.Background()))
+	})
+
+	t.Run("server_error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("not ready"))
+		}))
+		defer server.Close()
+
+		client := NewChromaClient(server.URL)
+		err := client.Heartbeat(context.Background())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "503")
+	})
+
+	t.Run("server_down", func(t *testing.T) {
+		client := NewChromaClient("http://127.0.0.1:1")
+		err := client.Heartbeat(context.Background())
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrChromaUnavailable)
+	})
+}
+
 func TestChromaClient_GetOrCreateCollection(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

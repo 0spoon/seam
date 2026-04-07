@@ -19,6 +19,9 @@ data/server.db
 # Config (keep the example, ignore the real one)
 seam-server.yaml
 
+# Docker compose env (user-specific data dir, written by `make init`)
+docker/.env
+
 # Go
 vendor/
 *.test

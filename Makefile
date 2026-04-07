@@ -1,4 +1,6 @@
-.PHONY: build build-web build-all run test test-integration test-web lint fmt clean dev-web init install-service uninstall-service
+.PHONY: build build-web build-all run test test-integration test-web lint fmt clean dev-web init install-service uninstall-service chroma-up chroma-down chroma-logs chroma-status
+
+CHROMA_COMPOSE := docker compose -f docker/chroma-compose.yml
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
@@ -42,6 +44,21 @@ install-service: build-all
 
 uninstall-service:
 	@bash scripts/uninstall-service.sh
+
+# ChromaDB container management. Thin wrappers around docker compose.
+# Data dir comes from docker/.env (written by `make init`) or defaults
+# to ./data via the compose file.
+chroma-up:
+	$(CHROMA_COMPOSE) up -d
+
+chroma-down:
+	$(CHROMA_COMPOSE) down
+
+chroma-logs:
+	$(CHROMA_COMPOSE) logs -f
+
+chroma-status:
+	$(CHROMA_COMPOSE) ps
 
 clean:
 	rm -rf bin

@@ -78,6 +78,31 @@ func (c *ChromaClient) collectionPath() string {
 	return fmt.Sprintf("/api/v2/tenants/%s/databases/%s/collections", c.tenant, c.database)
 }
 
+// Heartbeat probes the ChromaDB server liveness endpoint. Returns
+// ErrChromaUnavailable wrapped with the underlying transport error if
+// the server cannot be reached, or a plain error for non-2xx responses.
+// Intended for short-timeout startup or supervisor health checks; do
+// not use this on the hot path.
+func (c *ChromaClient) Heartbeat(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v2/heartbeat", nil)
+	if err != nil {
+		return fmt.Errorf("ai.ChromaClient.Heartbeat: new request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ai.ChromaClient.Heartbeat: %w: %w", ErrChromaUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("ai.ChromaClient.Heartbeat: status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 // chromaCollectionResponse is the response from collection creation / get.
 type chromaCollectionResponse struct {
 	ID   string `json:"id"`

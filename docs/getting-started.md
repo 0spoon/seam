@@ -7,9 +7,10 @@
 | [Go](https://go.dev) | 1.25+ | Yes |
 | [Node.js](https://nodejs.org) | 22+ | For web frontend |
 | [Ollama](https://ollama.com) | Latest | For AI features |
-| [ChromaDB](https://www.trychroma.com) | Latest | For semantic search |
+| [Docker](https://www.docker.com) | Latest | For Seam-managed ChromaDB (recommended) |
+| [ChromaDB](https://www.trychroma.com) | Latest | Only if you run it yourself instead of via Docker |
 
-Seam works without AI -- you get a solid markdown note system with full-text search. Add Ollama when you want AI features. Add ChromaDB for semantic search. Add OpenAI or Anthropic when your GPU starts crying.
+Seam works without AI -- you get a solid markdown note system with full-text search. Add Ollama when you want AI features. Add ChromaDB (or let Seam run it for you in Docker) for semantic search. Add OpenAI or Anthropic when your GPU starts crying.
 
 ## Installation
 
@@ -31,6 +32,47 @@ If using Ollama, pull the default models:
 ollama pull qwen3:32b
 ollama pull qwen3-embedding:8b
 ```
+
+## ChromaDB
+
+ChromaDB is the vector store that powers semantic search, Ask Seam, auto-link suggestions, and synthesis. It is optional -- skip it and you still get full-text search and writing assist. When you run `make init`, it asks how you want to handle ChromaDB:
+
+| Choice | When to pick it |
+|---|---|
+| `docker` (default) | You have Docker installed and want Seam to manage the container for you |
+| `external` | You already run ChromaDB somewhere -- locally via brew, on another host, etc. |
+| `disable` | You do not want semantic search |
+
+If you pick `docker`, `make init` writes `docker/.env` (which records your `SEAM_DATA_DIR` so the bind mount lines up with seamd's data directory) and offers to start the container immediately. The container is defined in `docker/chroma-compose.yml` and runs `chromadb/chroma` with persistence under `${SEAM_DATA_DIR}/chromadb`.
+
+### Managing the container
+
+The Makefile has thin wrappers around `docker compose` for the chroma container:
+
+```bash
+make chroma-up           # start (or recreate) the ChromaDB container
+make chroma-down         # stop and remove the container
+make chroma-logs         # follow container logs
+make chroma-status       # show container status
+```
+
+These all act on `docker/chroma-compose.yml` and read `docker/.env` automatically.
+
+### Optional supervisor service
+
+If you install seamd as a system service (`make install-service`), the installer asks whether to also install a sibling supervisor for the ChromaDB container. The supervisor:
+
+- Runs `scripts/chroma-supervisor.sh` under launchd (macOS) or systemd --user (Linux)
+- On startup, probes `docker info`. If Docker is not running, it launches Docker Desktop on macOS (`open -ga Docker`) or starts the daemon on Linux (`systemctl --user start docker.service`, falling back to `sudo systemctl start docker` if available)
+- Polls for up to 60 seconds until the daemon is ready, then runs `docker compose up` in the foreground
+- Restarts on failure -- if you `docker compose down` manually, the service brings the container back after a short throttle interval
+- Survives reboots and login cycles, so semantic search "just works" after a restart
+
+Skip the supervisor if you manage Chroma yourself or run it on a different host. You can always run `make chroma-up` manually instead.
+
+### What seamd does if Chroma is unreachable
+
+seamd does not require ChromaDB to start. On startup, it does a 2-second heartbeat probe against `chromadb_url`. If Chroma is unreachable, it logs a single loud warning telling you to run `make chroma-up` (or install the supervisor). The AI task queue continues running normally and embeddings will succeed once Chroma comes up.
 
 ## Running
 

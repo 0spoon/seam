@@ -55,6 +55,12 @@ make build              # Build server + TUI to ./bin/
 make run                # Build and run server (reads seam-server.yaml, default :8080)
 make dev-web            # Vite dev server on :5173, proxies /api to :8080
 
+# ChromaDB container (optional, opt-in via `make init`)
+make chroma-up          # Start ChromaDB container (docker/chroma-compose.yml)
+make chroma-down        # Stop and remove the container
+make chroma-logs        # Follow container logs
+make chroma-status      # Container status
+
 # Testing
 make test               # Go unit tests (no filesystem, no external services)
 make test-integration   # Integration tests (real filesystem, on-disk SQLite)
@@ -100,6 +106,7 @@ make fmt                # gofmt + prettier
 - **Error pattern**: Domain errors as `var Err{Condition}` sentinels, wrapped with `fmt.Errorf("pkg.Service.Method: %w", err)`, mapped to HTTP status in handlers.
 - **Config**: `seam-server.yaml` + env var overrides (`SEAM_JWT_SECRET`, `SEAM_DATA_DIR`, etc.).
 - **MCP agent memory**: sessions, knowledge storage, briefings at `/api/mcp`.
+- **ChromaDB is optional and external**: seamd treats it as a remote HTTP service. It can be unreachable at startup -- main.go probes once with a 2s heartbeat and logs a Warn, never blocks. The recommended way to run it locally is the Seam-managed Docker container in `docker/chroma-compose.yml` (managed via `make chroma-up`/`down`/`logs`/`status` or the optional `scripts/chroma-supervisor.sh` service installed by `make install-service`).
 
 ## Testing Conventions
 
@@ -173,5 +180,8 @@ Content with [[wikilinks]] and #tags.
 | `web/src/styles/variables.css` | All design tokens |
 | `web/vite.config.ts` | Vite config, API proxy |
 | `seam-server.yaml.example` | Configuration reference |
+| `docker/chroma-compose.yml` | Seam-managed ChromaDB container (pinned image, bind-mounted volume) |
+| `scripts/chroma-supervisor.sh` | Wakes Docker, waits for daemon, runs `compose up`. Run by the optional supervisor service. |
+| `scripts/install-service.sh` | Installs seamd as launchd/systemd; optionally installs the chroma supervisor too |
 | `AGENTS.md` | Detailed coding conventions |
 | `SECURITY.md` | Security policies |

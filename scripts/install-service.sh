@@ -9,11 +9,14 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY="$REPO_ROOT/bin/seamd"
 CONFIG="$REPO_ROOT/seam-server.yaml"
 WEB_DIST="$REPO_ROOT/web/dist"
+CHROMA_COMPOSE="$REPO_ROOT/docker/chroma-compose.yml"
+CHROMA_SUPERVISOR="$REPO_ROOT/scripts/chroma-supervisor.sh"
 
 info() { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
 ok()   { printf "\033[1;32m==>\033[0m %s\n" "$1"; }
 warn() { printf "\033[1;33m==>\033[0m %s\n" "$1"; }
 err()  { printf "\033[1;31m==>\033[0m %s\n" "$1" >&2; }
+ask()  { printf "\033[1;37m  > \033[0m%s " "$1"; }
 
 # -- preflight ----------------------------------------------------------------
 
@@ -177,6 +180,164 @@ EOF
     fi
 }
 
+# -- optional: ChromaDB supervisor --------------------------------------------
+#
+# These install a sibling service unit whose sole job is to run
+# scripts/chroma-supervisor.sh. That script wakes Docker, waits for the
+# daemon, then attaches to `docker compose up`. Service manager keeps it
+# alive across crashes and compose-downs.
+
+install_chroma_launchd() {
+    local label="com.seam.chroma"
+    local agent_dir="$HOME/Library/LaunchAgents"
+    local plist="$agent_dir/$label.plist"
+    local log_dir="$HOME/Library/Logs/seam"
+
+    mkdir -p "$agent_dir" "$log_dir"
+
+    info "Writing launchd agent: $plist"
+    cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$CHROMA_SUPERVISOR</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$REPO_ROOT</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+    <key>StandardOutPath</key>
+    <string>$log_dir/chroma.log</string>
+    <key>StandardErrorPath</key>
+    <string>$log_dir/chroma.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>$HOME</string>
+    </dict>
+</dict>
+</plist>
+EOF
+
+    local domain="gui/$(id -u)"
+    local target="$domain/$label"
+
+    if launchctl print "$target" >/dev/null 2>&1; then
+        info "Chroma supervisor already loaded, replacing..."
+        launchctl bootout "$target" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+            launchctl print "$target" >/dev/null 2>&1 || break
+            sleep 0.2
+        done
+    fi
+
+    if ! launchctl bootstrap "$domain" "$plist"; then
+        err "launchctl bootstrap failed for $plist"
+        return 1
+    fi
+    launchctl enable "$target" 2>/dev/null || true
+
+    ok "Installed launchd agent: $label"
+    echo
+    echo "  Status:    launchctl print $target | head"
+    echo "  Stop:      launchctl bootout $target"
+    echo "  Logs:      tail -f $log_dir/chroma.log"
+    echo "  Errors:    tail -f $log_dir/chroma.err.log"
+    echo
+}
+
+install_chroma_systemd() {
+    local unit="seamd-chroma.service"
+    local unit_dir="$HOME/.config/systemd/user"
+    local unit_path="$unit_dir/$unit"
+
+    mkdir -p "$unit_dir"
+
+    info "Writing systemd unit: $unit_path"
+    cat > "$unit_path" <<EOF
+[Unit]
+Description=Seam ChromaDB supervisor
+After=network-online.target
+Wants=network-online.target
+Before=seamd.service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash $CHROMA_SUPERVISOR
+WorkingDirectory=$REPO_ROOT
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$unit"
+
+    ok "Installed systemd unit: $unit"
+    echo
+    echo "  Status:    systemctl --user status $unit"
+    echo "  Stop:      systemctl --user stop $unit"
+    echo "  Logs:      journalctl --user -u $unit -f"
+    echo
+}
+
+maybe_install_chroma_supervisor() {
+    # Precondition: compose file exists.
+    if [ ! -f "$CHROMA_COMPOSE" ]; then
+        return 0
+    fi
+
+    # Precondition: supervisor script exists and is readable.
+    if [ ! -r "$CHROMA_SUPERVISOR" ]; then
+        warn "Chroma supervisor script missing at $CHROMA_SUPERVISOR, skipping"
+        return 0
+    fi
+
+    # Precondition: docker on PATH. We do not require the daemon to be
+    # running -- the supervisor waits for it.
+    if ! command -v docker >/dev/null 2>&1; then
+        warn "docker not found on PATH; skipping Chroma supervisor install"
+        warn "Install Docker and re-run 'make install-service' to add it later."
+        return 0
+    fi
+
+    echo
+    info "Optional: install a supervisor service for the ChromaDB container"
+    echo "  This runs a sibling $( [ "$OS" = "Darwin" ] && echo 'launchd agent' || echo 'systemd user unit' )"
+    echo "  that wakes Docker, waits for the daemon, and runs 'docker compose up'."
+    echo "  It restarts on failure and at login/boot. Skip if you manage Chroma yourself."
+    echo
+    ask "Install the Chroma supervisor? [y/N]"
+    read -r install_chroma_answer
+    echo
+
+    if [[ ! "$install_chroma_answer" =~ ^[Yy]$ ]]; then
+        info "Skipping Chroma supervisor. You can run 'make chroma-up' manually."
+        return 0
+    fi
+
+    case "$OS" in
+        Darwin) install_chroma_launchd ;;
+        Linux)  install_chroma_systemd ;;
+    esac
+}
+
 # -- dispatch -----------------------------------------------------------------
 
 case "$OS" in
@@ -188,3 +349,5 @@ case "$OS" in
         exit 1
         ;;
 esac
+
+maybe_install_chroma_supervisor

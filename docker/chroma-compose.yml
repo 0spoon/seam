@@ -1,0 +1,26 @@
+# Seam ChromaDB service.
+#
+# Managed by `make chroma-up`, `make chroma-down`, `make chroma-logs`,
+# `make chroma-status`. The data directory comes from SEAM_DATA_DIR (set
+# in docker/.env by `make init`, or exported in your shell). It defaults
+# to ./data so the Compose file is usable as-is from the repo root.
+#
+# Bind mount: ${SEAM_DATA_DIR}/chromadb on the host -> /data in the
+# container. Chroma persists its sqlite + parquet files there.
+#
+# This file is checked in. Edit ports, image version, or volume paths
+# here -- not in a wrapper script.
+
+services:
+  chroma:
+    image: chromadb/chroma:0.6.3
+    container_name: seam-chroma
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${SEAM_DATA_DIR:-./data}/chromadb:/data
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /data
+      ANONYMIZED_TELEMETRY: "FALSE"

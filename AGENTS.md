@@ -13,6 +13,16 @@ make build                # build seamd (server) + seam (TUI) to ./bin/
 make run                  # build and run the server
 make dev-web              # run React dev server (Vite, port 5173, proxies /api to :8080)
 make clean                # remove build artifacts + web/dist
+
+# Optional ChromaDB container (chosen via `make init`)
+make chroma-up            # start the Seam-managed ChromaDB container
+make chroma-down          # stop and remove the container
+make chroma-logs          # follow container logs
+make chroma-status        # show container status
+
+# Service install (also offers an optional Chroma supervisor)
+make install-service      # install seamd as launchd (macOS) or systemd --user (Linux)
+make uninstall-service    # remove the service(s)
 ```
 Note: When working on tasks, use `seam` MCP tools to track session progress and store memories.
 
@@ -275,3 +285,7 @@ and rationale for each rule.
 | `docs/security.md` | Security model and invariants |
 | `seam-server.yaml.example` | Server configuration template |
 | `migrations/001_initial.sql` | Complete database schema (single flattened migration) |
+| `docker/chroma-compose.yml` | Pinned ChromaDB container with bind-mounted volume under `${SEAM_DATA_DIR}/chromadb` |
+| `scripts/chroma-supervisor.sh` | Wakes Docker on demand, waits for the daemon, then `exec`s `docker compose up` for the chroma service. Run by the optional supervisor unit. |
+| `scripts/install-service.sh` | Installs seamd as launchd/systemd, optionally installs the chroma supervisor as a sibling unit |
+| `scripts/uninstall-service.sh` | Symmetric removal of both service units |

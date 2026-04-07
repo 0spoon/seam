@@ -18,7 +18,15 @@ jwt_secret: ""
 # env: SEAM_OLLAMA_URL
 ollama_base_url: "http://localhost:11434"
 
-# ChromaDB API URL. Optional; required for semantic search (Phase 2+).
+# ChromaDB API URL. Optional; required for semantic search.
+# Leave blank to disable semantic search entirely (FTS still works).
+#
+# Recommended: let Seam manage ChromaDB in a Docker container. Run
+# `make init` and pick the "docker" option, then `make chroma-up` to
+# start the container defined in docker/chroma-compose.yml. Or install
+# the optional supervisor service via `make install-service` to keep
+# it running across reboots.
+#
 # env: SEAM_CHROMADB_URL
 chromadb_url: "http://localhost:8000"
 

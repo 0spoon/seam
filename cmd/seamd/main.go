@@ -346,6 +346,19 @@ func run() error {
 
 	if cfg.ChromaDBURL != "" && ollamaClient != nil {
 		chromaClient = ai.NewChromaClient(cfg.ChromaDBURL)
+
+		// Probe ChromaDB at startup so the operator gets an immediate, loud
+		// signal if the container is not running. We do not block startup --
+		// the AI task queue will retry naturally once Chroma comes up.
+		probeCtx, probeCancel := context.WithTimeout(ctx, 2*time.Second)
+		if probeErr := chromaClient.Heartbeat(probeCtx); probeErr != nil {
+			logger.Warn("ChromaDB unreachable at startup; semantic search and embeddings will queue until it is available",
+				"chromadb_url", cfg.ChromaDBURL,
+				"error", probeErr,
+				"hint", "run `make chroma-up`, or install the supervisor service via `make install-service`")
+		}
+		probeCancel()
+
 		embedder = ai.NewEmbedder(ollamaClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
 		chatSvc = ai.NewChatService(ollamaClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
 		synthSvc = ai.NewSynthesizer(chatCompleter, userDBMgr, cfg.Models.Chat, logger)

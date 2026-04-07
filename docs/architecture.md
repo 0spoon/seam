@@ -41,6 +41,8 @@ graph TD
 
 **Multi-user, single machine.** Each user gets isolated storage -- their own SQLite database, notes directory, and ChromaDB collection. Edit your `.md` files with vim, VS Code, or whatever you want -- Seam watches for changes via `fsnotify` and re-indexes automatically.
 
+**ChromaDB is the only external runtime dependency for AI features.** seamd treats it as a remote HTTP service (always, even when it lives on `localhost`) and tolerates it being unreachable -- a 2-second startup probe logs a Warn but never blocks boot, and the AI task queue retries naturally once Chroma comes up. The recommended deployment is the Seam-managed Docker container in `docker/chroma-compose.yml`, started via `make chroma-up` or kept alive by the optional supervisor service installed by `make install-service`. See [Getting Started](getting-started.md#chromadb) for the full setup story.
+
 ## Tech Stack
 
 | Layer | Technology | Why |
@@ -48,7 +50,7 @@ graph TD
 | **Backend** | Go + chi router | Single binary, low memory, strong concurrency. No CGO |
 | **Storage** | Plain `.md` files on disk | Portable, human-readable, yours forever. Source of truth |
 | **Metadata** | SQLite per-user (`modernc.org/sqlite`) | ACID, FTS5, zero infrastructure. Pure Go |
-| **Vector store** | ChromaDB | Per-user collections, HTTP API |
+| **Vector store** | ChromaDB (optionally containerized) | Per-user collections, HTTP API. Seam can manage it via `docker/chroma-compose.yml` |
 | **AI** | Ollama / OpenAI / Anthropic | Local by default, cloud when you want it |
 | **TUI** | Bubble Tea | Elm architecture for your terminal |
 | **Web** | React 19 + TypeScript 5.9 + Vite 7 | CodeMirror 6 markdown editor |

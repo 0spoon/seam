@@ -58,11 +58,56 @@ uninstall_systemd() {
     ok "Removed systemd unit: $unit_path"
 }
 
+# -- optional: ChromaDB supervisor --------------------------------------------
+
+uninstall_chroma_launchd() {
+    local label="com.seam.chroma"
+    local plist="$HOME/Library/LaunchAgents/$label.plist"
+    local target="gui/$(id -u)/$label"
+
+    if launchctl print "$target" >/dev/null 2>&1; then
+        info "Stopping launchd agent: $label"
+        launchctl bootout "$target" 2>/dev/null || true
+    fi
+
+    if [ -f "$plist" ]; then
+        rm -f "$plist"
+        ok "Removed launchd agent: $plist"
+    fi
+}
+
+uninstall_chroma_systemd() {
+    local unit="seamd-chroma.service"
+    local unit_path="$HOME/.config/systemd/user/$unit"
+
+    if [ ! -f "$unit_path" ]; then
+        return 0
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        warn "systemctl not found, leaving $unit_path in place"
+        return 0
+    fi
+
+    info "Stopping and disabling: $unit"
+    systemctl --user disable --now "$unit" 2>/dev/null || true
+
+    rm -f "$unit_path"
+    systemctl --user daemon-reload
+    ok "Removed systemd unit: $unit_path"
+}
+
 # -- dispatch -----------------------------------------------------------------
 
 case "$OS" in
-    Darwin) uninstall_launchd ;;
-    Linux)  uninstall_systemd ;;
+    Darwin)
+        uninstall_launchd
+        uninstall_chroma_launchd
+        ;;
+    Linux)
+        uninstall_systemd
+        uninstall_chroma_systemd
+        ;;
     *)
         err "Unsupported OS: $OS"
         exit 1

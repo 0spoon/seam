@@ -54,7 +54,8 @@ Seam is a knowledge system where your notes are plain `.md` files on disk and AI
 git clone https://github.com/katata/seam.git
 cd seam
 make build          # builds bin/seamd (server) + bin/seam (TUI)
-make init           # interactive config (JWT secret, data dir, LLM provider)
+make init           # interactive config (JWT secret, data dir, LLM provider, Chroma)
+make chroma-up      # optional: start the Seam-managed ChromaDB container (if you picked Docker in init)
 make run            # starts server on :8080
 
 # In separate terminals:
@@ -62,7 +63,7 @@ make run            # starts server on :8080
 cd web && npm install && npm run dev               # Web frontend on :5173
 ```
 
-See [Getting Started](docs/getting-started.md) for prerequisites and full configuration.
+`make init` asks how you want to handle ChromaDB -- a Seam-managed Docker container (recommended), an external instance you already run, or disable semantic search entirely. See [Getting Started](docs/getting-started.md) for prerequisites, the optional supervisor service, and full configuration.
 
 ## Documentation
 

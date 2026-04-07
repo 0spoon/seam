@@ -1,4 +1,4 @@
-.PHONY: build run test test-integration test-web lint fmt clean dev-web init
+.PHONY: build run test test-integration test-web lint fmt clean dev-web init install-service uninstall-service
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
@@ -31,6 +31,12 @@ dev-web:
 
 init:
 	@bash scripts/init.sh
+
+install-service: build
+	@bash scripts/install-service.sh
+
+uninstall-service:
+	@bash scripts/uninstall-service.sh
 
 clean:
 	rm -rf bin

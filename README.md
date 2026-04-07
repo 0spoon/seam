@@ -42,6 +42,10 @@ Seam is a knowledge system where your notes are plain `.md` files on disk and AI
 
 **AI** -- Three LLM providers (Ollama, OpenAI, Anthropic). Embeddings always local. Auto-link suggestions, writing assist, tag/project suggestions, voice transcription with Whisper.
 
+**Assistant** -- Agentic chat that actually does things. Tool-use loop calls into your notes, projects, tasks, search, and graph (22+ tools), with explicit approval gates for writes and a full audit trail. Per-user profile and long-term memory (facts, preferences, decisions, commitments) with FTS5 search, recency decay, and automatic conversation summarization. Streaming responses over SSE.
+
+**Daily Briefing** -- In-process cron scheduler assembles a daily summary note from recent activity. Auto-provisioned on first run; manage schedules via `/api/schedules` or trigger on demand.
+
 **Agent Memory** -- MCP server gives AI coding agents persistent long-term memory, session tracking, and access to your knowledge base.
 
 ## Quick Start

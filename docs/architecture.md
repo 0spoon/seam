@@ -115,14 +115,14 @@ internal/
   review/                   # knowledge gardening queue
   search/                   # FTS5 + semantic search
   server/                   # HTTP server, middleware, router wiring
-  settings/                 # per-user settings
+  settings/                 # owner settings
   task/                     # checkbox task extraction and tracking
   template/                 # note templates with variable substitution
-  userdb/                   # per-user SQLite database manager
+  userdb/                   # SQLite database manager (owner-scoped seam.db)
   validate/                 # path traversal, input sanitization
   watcher/                  # fsnotify file watcher + startup reconciliation
   webhook/                  # webhook CRUD, HMAC delivery, SSRF protection
-  ws/                       # WebSocket hub (per-user connections, broadcast)
+  ws/                       # WebSocket hub (connection registry, broadcast)
   testutil/                 # shared test helpers
   integration/              # e2e + performance tests
 web/
@@ -137,6 +137,6 @@ web/
     styles/                 # CSS variables, global styles, CSS Modules
 migrations/
   server/                   # server.db migrations
-  user/                     # per-user seam.db migrations
+  user/                     # seam.db migrations (owner-scoped data)
 docs/                       # documentation
 ```

@@ -34,7 +34,7 @@ internal/           Core domain packages (strict layering, no circular imports)
   userdb/           Per-user SQLite DB manager (WAL, idle eviction)
   validate/         Path traversal & input sanitization
   watcher/          fsnotify file watcher
-  ws/               WebSocket hub (per-user)
+  ws/               WebSocket hub (connection registry, broadcast)
 migrations/
   server/           server.db migrations (users, refresh tokens)
   user/             seam.db migrations (notes, projects, links, FTS, agent)

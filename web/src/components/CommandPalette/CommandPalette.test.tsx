@@ -118,7 +118,8 @@ function setUIState(overrides: Record<string, unknown>) {
   };
   const merged = { ...defaults, ...overrides };
   vi.mocked(useUIStore).mockImplementation(
-    (selector: (s: Record<string, unknown>) => unknown) => selector(merged),
+    ((selector: (s: Record<string, unknown>) => unknown) =>
+      selector(merged)) as never,
   );
 }
 
@@ -128,7 +129,8 @@ function setProjectState(overrides: Record<string, unknown>) {
   };
   const merged = { ...defaults, ...overrides };
   vi.mocked(useProjectStore).mockImplementation(
-    (selector: (s: Record<string, unknown>) => unknown) => selector(merged),
+    ((selector: (s: Record<string, unknown>) => unknown) =>
+      selector(merged)) as never,
   );
 }
 

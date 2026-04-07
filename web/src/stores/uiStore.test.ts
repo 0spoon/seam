@@ -100,8 +100,8 @@ describe('uiStore', () => {
 
   it('fetchTags populates tags array', async () => {
     const mockTags = [
-      { tag: 'go', count: 5 },
-      { tag: 'rust', count: 3 },
+      { name: 'go', count: 5 },
+      { name: 'rust', count: 3 },
     ];
     vi.mocked(api.listTags).mockResolvedValueOnce(mockTags);
 

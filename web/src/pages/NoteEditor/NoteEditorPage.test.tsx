@@ -194,7 +194,7 @@ describe('NoteEditorPage', () => {
       updated_at: '2026-03-08T14:30:00Z',
     };
     vi.mocked(useNoteStore).mockImplementation(
-      (selector: (s: Record<string, unknown>) => unknown) => {
+      ((selector: (s: Record<string, unknown>) => unknown) => {
         const state: Record<string, unknown> = {
           currentNote: mockCurrentNote,
           backlinks: [],
@@ -205,7 +205,7 @@ describe('NoteEditorPage', () => {
           clearCurrentNote: mockClearCurrentNote,
         };
         return selector(state);
-      },
+      }) as never,
     );
   });
 
@@ -228,7 +228,7 @@ describe('NoteEditorPage', () => {
   it('disables AI assist when no note loaded', () => {
     mockCurrentNote = null;
     vi.mocked(useNoteStore).mockImplementation(
-      (selector: (s: Record<string, unknown>) => unknown) => {
+      ((selector: (s: Record<string, unknown>) => unknown) => {
         const state: Record<string, unknown> = {
           currentNote: null,
           backlinks: [],
@@ -239,7 +239,7 @@ describe('NoteEditorPage', () => {
           clearCurrentNote: mockClearCurrentNote,
         };
         return selector(state);
-      },
+      }) as never,
     );
 
     renderEditor();

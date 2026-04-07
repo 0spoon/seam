@@ -7,7 +7,7 @@ import { CommandPalette } from '../CommandPalette/CommandPalette';
 import { CaptureModal } from '../Modal/CaptureModal';
 import { ToastContainer } from '../Toast/ToastContainer';
 import { useUIStore } from '../../stores/uiStore';
-import { useKeyboard } from '../../hooks/useKeyboard';
+import { useKeyboard, type KeyBinding } from '../../hooks/useKeyboard';
 import { setNavigate } from '../../lib/navigation';
 import styles from './Layout.module.css';
 
@@ -30,7 +30,7 @@ export function Layout() {
   const toggleZenMode = useUIStore((s) => s.toggleZenMode);
 
   const keyBindings = useMemo(() => {
-    const bindings = [
+    const bindings: KeyBinding[] = [
       {
         key: 'k',
         meta: true,

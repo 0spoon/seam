@@ -112,8 +112,8 @@ export function NoteEditorPage() {
     link: ResolvedLink;
     position: { top: number; left: number };
   } | null>(null);
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const graceTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const graceTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const titleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const contentRef = useRef('');

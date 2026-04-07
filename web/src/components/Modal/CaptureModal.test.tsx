@@ -68,13 +68,13 @@ describe('CaptureModal', () => {
     vi.clearAllMocks();
     // Reset to default open state
     vi.mocked(useUIStore).mockImplementation(
-      (selector: (s: Record<string, unknown>) => unknown) => {
+      ((selector: (s: Record<string, unknown>) => unknown) => {
         const state: Record<string, unknown> = {
           captureModalOpen: true,
           setCaptureModalOpen: mockSetCaptureModalOpen,
         };
         return selector(state);
-      },
+      }) as never,
     );
     vi.mocked(listTemplates).mockResolvedValue([]);
   });
@@ -87,13 +87,13 @@ describe('CaptureModal', () => {
 
   it('does not render when closed', () => {
     vi.mocked(useUIStore).mockImplementation(
-      (selector: (s: Record<string, unknown>) => unknown) => {
+      ((selector: (s: Record<string, unknown>) => unknown) => {
         const state: Record<string, unknown> = {
           captureModalOpen: false,
           setCaptureModalOpen: mockSetCaptureModalOpen,
         };
         return selector(state);
-      },
+      }) as never,
     );
 
     const { container } = renderModal();

@@ -45,6 +45,7 @@ beforeEach(() => {
   });
   useToastStore.setState({ toasts: [] });
   vi.mocked(getMe).mockResolvedValue({
+    id: 'test-user-id',
     username: 'testuser',
     email: 'test@example.com',
   });

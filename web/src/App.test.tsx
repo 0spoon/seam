@@ -175,8 +175,8 @@ describe('App', () => {
       logout: vi.fn(),
     };
     vi.mocked(useAuthStore).mockImplementation(
-      (selector: (s: Record<string, unknown>) => unknown) =>
-        selector(authState),
+      ((selector: (s: Record<string, unknown>) => unknown) =>
+        selector(authState)) as never,
     );
   });
 
@@ -202,8 +202,8 @@ describe('App', () => {
       isLoading: false,
     };
     vi.mocked(useAuthStore).mockImplementation(
-      (selector: (s: Record<string, unknown>) => unknown) =>
-        selector(authState),
+      ((selector: (s: Record<string, unknown>) => unknown) =>
+        selector(authState)) as never,
     );
 
     renderApp('/');
@@ -217,8 +217,8 @@ describe('App', () => {
       isLoading: true,
     };
     vi.mocked(useAuthStore).mockImplementation(
-      (selector: (s: Record<string, unknown>) => unknown) =>
-        selector(authState),
+      ((selector: (s: Record<string, unknown>) => unknown) =>
+        selector(authState)) as never,
     );
 
     renderApp('/');
@@ -232,8 +232,8 @@ describe('App', () => {
       restoreSession,
     };
     vi.mocked(useAuthStore).mockImplementation(
-      (selector: (s: Record<string, unknown>) => unknown) =>
-        selector(authState),
+      ((selector: (s: Record<string, unknown>) => unknown) =>
+        selector(authState)) as never,
     );
 
     renderApp('/');

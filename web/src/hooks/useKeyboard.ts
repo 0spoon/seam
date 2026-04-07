@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 
 type KeyHandler = (e: KeyboardEvent) => void;
 
-interface KeyBinding {
+export interface KeyBinding {
   key: string;
   ctrl?: boolean;
   meta?: boolean;

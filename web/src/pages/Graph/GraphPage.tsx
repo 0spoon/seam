@@ -1057,7 +1057,7 @@ export function GraphPage() {
     if (minimapRef.current) {
       const minimapCy = cytoscape({
         container: minimapRef.current,
-        elements: cy.elements().jsons(),
+        elements: cy.elements().jsons() as cytoscape.ElementDefinition[],
         style: [
           {
             selector: 'node',
@@ -1242,17 +1242,17 @@ export function GraphPage() {
       }
 
       if (visible) {
-        node.show();
+        node.style('display', 'element');
       } else {
-        node.hide();
+        node.style('display', 'none');
       }
     });
 
     cy.edges().forEach((edge) => {
       if (edge.source().hidden() || edge.target().hidden()) {
-        edge.hide();
+        edge.style('display', 'none');
       } else {
-        edge.show();
+        edge.style('display', 'element');
       }
     });
     cy.endBatch();
@@ -1438,7 +1438,10 @@ export function GraphPage() {
         });
 
         if (bestNode) {
-          const idx = visibleNodes.indexOf(bestNode);
+          const targetId = (bestNode as cytoscape.NodeSingular).id();
+          const idx = visibleNodes
+            .toArray()
+            .findIndex((n) => n.id() === targetId);
           setFocusedNodeIndex(idx);
           cy.elements().unselect();
           (bestNode as cytoscape.NodeSingular).select();

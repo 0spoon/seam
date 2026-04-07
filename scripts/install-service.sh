@@ -8,6 +8,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY="$REPO_ROOT/bin/seamd"
 CONFIG="$REPO_ROOT/seam-server.yaml"
+WEB_DIST="$REPO_ROOT/web/dist"
 
 info() { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
 ok()   { printf "\033[1;32m==>\033[0m %s\n" "$1"; }
@@ -25,6 +26,15 @@ fi
 if [ ! -f "$CONFIG" ]; then
     err "Config not found at $CONFIG"
     err "Run 'make init' first to generate it."
+    exit 1
+fi
+
+# seamd serves both the JSON API and the React SPA from web/dist on the
+# same port, so the "web server" is just the built frontend assets. Make
+# sure the build exists before installing the service.
+if [ ! -f "$WEB_DIST/index.html" ]; then
+    err "Web frontend not built at $WEB_DIST"
+    err "Run 'make build-web' (or 'make build-all') first."
     exit 1
 fi
 
@@ -91,7 +101,9 @@ EOF
     echo "  Logs:      tail -f $log_dir/seamd.log"
     echo "  Errors:    tail -f $log_dir/seamd.err.log"
     echo
-    echo "The service will start automatically at login and restart on failure."
+    echo "The service runs seamd, which serves both the JSON API and the React"
+    echo "SPA (from $WEB_DIST) on the listen address in $CONFIG."
+    echo "It starts at login and restarts on failure."
 }
 
 # -- Linux (systemd --user) ---------------------------------------------------
@@ -137,6 +149,9 @@ EOF
     echo "  Stop:      systemctl --user stop $unit"
     echo "  Start:     systemctl --user start $unit"
     echo "  Logs:      journalctl --user -u $unit -f"
+    echo
+    echo "The service runs seamd, which serves both the JSON API and the React"
+    echo "SPA (from $WEB_DIST) on the listen address in $CONFIG."
     echo
 
     if ! loginctl show-user "$USER" 2>/dev/null | grep -q "Linger=yes"; then

@@ -1,4 +1,4 @@
-.PHONY: build run test test-integration test-web lint fmt clean dev-web init install-service uninstall-service
+.PHONY: build build-web build-all run test test-integration test-web lint fmt clean dev-web init install-service uninstall-service
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
@@ -6,6 +6,11 @@ build:
 	@mkdir -p bin
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/seamd ./cmd/seamd
 	go build -o bin/seam ./cmd/seam
+
+build-web:
+	cd web && npm install && npm run build
+
+build-all: build build-web
 
 run: build
 	./bin/seamd
@@ -32,7 +37,7 @@ dev-web:
 init:
 	@bash scripts/init.sh
 
-install-service: build
+install-service: build-all
 	@bash scripts/install-service.sh
 
 uninstall-service:

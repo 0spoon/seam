@@ -2914,4 +2914,429 @@ with sensible defaults.
 | Fifth full scan | 35 | 35 | 0 |
 | Phase 1 assistant review | 18 | 18 | 0 |
 | Phase 2 memory/profile review | 9 | 9 | 0 |
-| **All** | **239** | **239** | **0** |
+| Phase 3 scheduler/briefing review | 16 | 16 | 0 |
+| **All** | **255** | **255** | **0** |
+
+---
+
+## Phase 3: Scheduler / Briefing + Recent-Code Audit (2026-04-06)
+
+Audit of new code introduced in commits `18e56aa..48fda19` (Phase 1+2+3 of
+AGENTIC_PLAN.md): the agentic assistant package, the conversation summarization
+support added to `internal/ai`, and the cron-driven scheduler + daily briefing
+service. All previously logged issues from the prior 13 audit passes were
+verified as still resolved -- this section only lists newly discovered bugs.
+
+Findings deduplicated against all prior sections.
+
+### HIGH
+
+#### SCAN6-H1. Assistant recent-history slicing can orphan tool messages -- FIXED
+
+- **Severity**: high
+- **Category**: logic
+- **Location**: `internal/assistant/service.go:632`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Added `safeRecentBoundary` helper that walks the proposed
+  positional cut backwards while it lands on a `"tool"` message or just
+  past an assistant message with `ToolCalls`. Both `Chat` and
+  `ChatStream` go through `applyConversationSummary`, so the fix
+  applies uniformly.
+- **Description**: `applyConversationSummary` slices the recent window with
+  `recent := history[len(history)-maxAssistantRecentMessages:]`. The slice
+  boundary is purely positional and ignores tool-use grouping. If message
+  `len-20` is a `"tool"` role result whose corresponding `"assistant"` message
+  with `tool_calls` lives at index `len-21` (now outside the window), the
+  resulting `messages` slice contains an orphan `tool_call_id` with no matching
+  `tool_use` block. OpenAI and Anthropic both reject this with a 400 error
+  ("tool_call_id ... refers to tool call ... not found in messages"). The user
+  sees a 500 from `assistant.Service.Chat` after a long, tool-heavy
+  conversation crosses the 20-message threshold.
+- **Suggested fix**: Walk backwards from the slice boundary and rewind to the
+  first message whose role is not `"tool"` and that does not have a parent
+  `"assistant"` message with `ToolCalls` outside the window. Equivalently:
+  reject any boundary that lands inside a tool-use group. The same fix applies
+  to `ChatStream`, which calls `applyConversationSummary` identically.
+
+---
+
+#### SCAN6-H2. Scheduler goroutine not joined during shutdown -- FIXED
+
+- **Severity**: high
+- **Category**: race-condition
+- **Location**: `cmd/seamd/main.go:833-838`, shutdown sequence at `894-914`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Added `schedDone := make(chan struct{})`, `defer
+  close(schedDone)` inside the scheduler goroutine, and `<-schedDone`
+  after the AI queue drain so any in-flight tick finishes before
+  `userDBMgr.CloseAll()` runs. Matches the existing `aiQueueDone`
+  pattern.
+- **Description**: `schedSvc.Run(ctx)` runs in an unsupervised goroutine. The
+  shutdown sequence cancels `ctx`, then synchronously closes the HTTP server,
+  MCP, hub, and AI queue, and finally lets the deferred `userDBMgr.CloseAll()`
+  fire. There is no `WaitGroup` or done-channel for the scheduler goroutine.
+  If a tick was in flight when shutdown began (e.g., `briefing.Generate` mid-
+  way through `noteSvc.Create`), the runner may still be writing to the user
+  DB after `CloseAll()` runs, producing `sql: database is closed` errors and
+  in the worst case losing the freshly generated briefing note. The
+  scheduler's own follow-up `MarkRun`/`MarkError` write also targets the
+  closed DB.
+- **Suggested fix**: Add `schedDone := make(chan struct{})` around the
+  goroutine, `defer close(schedDone)` inside, and `<-schedDone` between the
+  AI queue drain (step 4) and the deferred DB close. Match the existing
+  `aiQueueDone` pattern.
+
+---
+
+### MEDIUM
+
+#### SCAN6-M1. `provisionDailyBriefing` re-creates renamed schedules on every restart -- FIXED
+
+- **Severity**: medium
+- **Category**: logic
+- **Location**: `cmd/seamd/main.go:58-95`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Added an optional `ID` field on `scheduler.CreateReq` so
+  callers can force a deterministic ID. `provisionDailyBriefing` now
+  uses the constant `defaultDailyBriefingID = "default_daily_briefing"`
+  and looks up the existing schedule by ID instead of by name. Renames
+  no longer trigger duplicate provisioning.
+- **Description**: Idempotency is keyed on the literal name `"Daily Briefing"`.
+  If the user renames the auto-provisioned schedule (e.g., to "Morning Brief"
+  via the API or UI), the next server restart sees no schedule named
+  `"Daily Briefing"` and creates a fresh one. The user ends up with both their
+  renamed schedule and a duplicate. Stacking continues on every restart that
+  follows another rename.
+- **Suggested fix**: Persist a marker that the default has been provisioned --
+  either a settings row (`assistant.default_briefing_provisioned=true`) or an
+  identifying field on the schedule itself (e.g., a known `id` like
+  `"default_daily_briefing"` instead of a generated ULID). Match by that
+  marker, not by user-mutable name.
+
+---
+
+#### SCAN6-M2. `loadContext` touches recency-fallback memories, polluting decay scoring -- FIXED
+
+- **Severity**: medium
+- **Category**: logic
+- **Location**: `internal/assistant/service.go:798-817`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Track whether the memories came from `SearchMemories`
+  (relevance path) vs. `GetRecentMemories` (fallback) and only call
+  `TouchMemories` in the relevance case. Decay scoring now reflects
+  actual recall events instead of being inflated on every chat turn.
+- **Description**: When FTS finds no relevant memories, the code falls back to
+  `GetRecentMemories(..., 5)` and then unconditionally calls `TouchMemories`
+  on the resulting IDs. The decay-scoring formula in `relevanceScore` is built
+  on the assumption that `last_accessed` represents *relevant* recall events
+  ("frequently-recalled items stay fresh"). Touching the 5 most recent
+  memories on every chat turn -- regardless of whether they relate to the
+  user's message -- inflates `last_accessed` for whatever happens to be the
+  newest memories and starves all older ones. After a few chat turns, every
+  memory in the recency window has `last_accessed = now`, defeating the
+  purpose of the decay metric.
+- **Suggested fix**: Only call `TouchMemories` when memories came from
+  `SearchMemories` (the relevance path), not from `GetRecentMemories` (the
+  fallback). Move the `TouchMemories` call into the `if userMessage != ""`
+  branch's success block.
+
+---
+
+#### SCAN6-M3. Direct equality with `ErrNotFound` instead of `errors.Is` -- FIXED
+
+- **Severity**: medium
+- **Category**: error-handling
+- **Location**: `internal/assistant/service.go:639,694`,
+  `internal/assistant/memory.go:98`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Replaced direct `==` comparisons with `errors.Is` in
+  `applyConversationSummary`, `refreshConversationSummary`, and
+  `MemoryStore.GetMemory`. Added the `errors` import to both files.
+- **Description**: P2-H3 was logged as fixing this anti-pattern, but the fix
+  only landed in `handler.go`. Three remaining call sites still use direct
+  equality:
+  - `service.go:639` -- `if err != ErrNotFound` in `applyConversationSummary`
+  - `service.go:694` -- `if err != ErrNotFound` in `refreshConversationSummary`
+  - `memory.go:98` -- `if err == sql.ErrNoRows` in `GetMemory`
+  These work today only because the underlying functions return the sentinel
+  unwrapped. Any future refactor that wraps the error (e.g., adding context
+  via `fmt.Errorf("...: %w", ...)`) silently breaks the not-found detection.
+- **Suggested fix**: Replace with `errors.Is(err, ErrNotFound)` /
+  `errors.Is(err, sql.ErrNoRows)`.
+
+---
+
+#### SCAN6-M4. `chat.Store.SearchMessages` LIKE escape misses backslash -- FIXED
+
+- **Severity**: medium
+- **Category**: logic
+- **Location**: `internal/chat/store.go:265`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Updated the replacer to escape `\` first, then `%` and `_`:
+  `strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_")`. Order
+  ensures the wildcard escapes inserted later are not re-doubled.
+- **Description**: P2-H7 added LIKE wildcard escaping with
+  `strings.NewReplacer("%", "\\%", "_", "\\_")` and `ESCAPE '\'`. The fix
+  forgot to escape the escape character itself. SQLite docs: "If the ESCAPE
+  character precedes any character other than a wildcard or itself, the
+  result is undefined." A search query containing a literal `\` (e.g., a
+  Windows path or a regex fragment) produces undefined LIKE behavior.
+- **Suggested fix**: Add `"\\", "\\\\"` to the replacer:
+  `strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_")`. Note ordering
+  matters -- escape `\` first.
+
+---
+
+#### SCAN6-M5. Assistant approve/reject endpoints return 500 for not-found -- FIXED
+
+- **Severity**: medium
+- **Category**: api-misuse
+- **Location**: `internal/assistant/handler.go:233-237`, `260-264`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Both `approveAction` and `rejectAction` now check
+  `errors.Is(err, ErrNotFound)` and return 404 "action not found"
+  before falling through to the generic 500 path. Matches the existing
+  `deleteMemory` behavior.
+- **Description**: `approveAction` and `rejectAction` collapse all errors to
+  500 without distinguishing `ErrNotFound`. A request for a missing or
+  expired action ID returns `500 "failed to approve action"` instead of
+  `404 "action not found"`. Inconsistent with `deleteMemory` (line 403) which
+  correctly maps `ErrNotFound` to 404.
+- **Suggested fix**: Add `if errors.Is(err, ErrNotFound) { writeError(w, 404,
+  "action not found"); return }` before the generic 500 path in both handlers.
+
+---
+
+#### SCAN6-M6. `Store.ListActionsByID` returns `(nil, nil)` for not-found -- FIXED
+
+- **Severity**: medium
+- **Category**: api-misuse
+- **Location**: `internal/assistant/store.go:115-137`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Renamed to `Store.GetAction` to match single-result
+  semantics and returned `ErrNotFound` instead of `(nil, nil)` when no
+  row is found. Updated the only caller (`Service.ApproveAction`) to
+  drop its nil-check workaround and map `ErrNotFound` directly.
+- **Description**: When the action does not exist, the function returns
+  `(nil, nil)` instead of `(nil, ErrNotFound)`. The caller `ApproveAction`
+  works around this with an explicit `if actions == nil { return nil,
+  ErrNotFound }`, but the pattern is exactly what SCAN5-M14 flagged for
+  `chat.Store.GetConversation`. Future callers will forget the nil check and
+  dereference a nil pointer. The function name (`ListActionsByID`) is also
+  misleading -- it returns a single action, not a list.
+- **Suggested fix**: Return `(nil, ErrNotFound)` when no row is found. Rename
+  to `GetAction` to match the single-result semantics.
+
+---
+
+#### SCAN6-M7. Briefing generates a new note on every run, no same-day dedupe -- FIXED
+
+- **Severity**: medium
+- **Category**: logic
+- **Location**: `internal/briefing/briefing.go:119-155`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Added `findExistingForToday` helper that lists notes in the
+  briefings project and looks for one whose title matches today's
+  generated title. When found, `Generate` calls `notes.Update` with
+  the freshly rendered body instead of `Create`. Extended the
+  `NoteService` interface (and the test mock) with `Update` to support
+  this. Lookup errors degrade gracefully -- the caller falls back to
+  `Create`.
+- **Description**: `Generate` always calls `notes.Create`. The title format is
+  `"YYYY-MM-DD Daily Briefing"` (deterministic per day), but `Create` does
+  not deduplicate by title. If the cron fires once at 08:00 and the user
+  manually triggers via `POST /api/schedules/{id}/run` later the same day,
+  two notes with the same title appear in the briefings project. Same applies
+  to a server restart that re-runs missed jobs in the catch-up tick.
+- **Suggested fix**: Look up an existing note in the briefings project with
+  today's title before calling `Create`. If one exists, call `Update` (or
+  append) instead. Alternatively, encode the date in a deterministic ULID
+  prefix and use upsert semantics.
+
+---
+
+#### SCAN6-M8. Scheduler `Update` silently drops `run_at` when both fields supplied -- FIXED
+
+- **Severity**: medium
+- **Category**: api-misuse
+- **Location**: `internal/scheduler/service.go:254-260`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: `Service.Update` now returns `ErrCronAndRunAtBoth` (a 400
+  via the existing handler mapping) when both fields end up set on
+  the merged schedule, mirroring `Service.Create`. No more silent
+  data-loss surface.
+- **Description**: `Service.Create` rejects `cron_expr` + `run_at` together
+  with `ErrCronAndRunAtBoth` (a 400 in the handler). `Service.Update`
+  accepts the same combination but silently nullifies `run_at` after
+  applying both fields. The HTTP response returns 200 with `RunAt: nil`,
+  giving the caller no signal that their input was discarded. Inconsistent
+  validation between the two paths and a silent data-loss surface.
+- **Suggested fix**: Apply the same `ErrCronAndRunAtBoth` validation in
+  `Update` after merging the request fields onto the existing schedule.
+  Return 400 instead of silently clearing `RunAt`.
+
+---
+
+#### SCAN6-M9. `ChatStream` discards `generateULID` error for pending actions -- FIXED
+
+- **Severity**: medium
+- **Category**: error-handling
+- **Location**: `internal/assistant/service.go:434`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: `ChatStream` now mirrors `Chat`'s pattern: check the
+  `generateULID` error, log a warning, and fall back to
+  `fmt.Sprintf("pending_%d", time.Now().UnixNano())`. Empty action IDs
+  no longer leak into `assistant_actions` or SSE confirmation events.
+- **Description**: `actionID, _ := generateULID()` discards the error. If
+  entropy generation fails, `actionID` is the empty string, which is then
+  inserted into `assistant_actions` and emitted in the SSE confirmation
+  event. The DB INSERT may succeed (PRIMARY KEY allows empty string once),
+  but a second concurrent failure causes a UNIQUE-constraint collision, and
+  the client cannot meaningfully approve/reject an action with an empty ID.
+  The non-streaming `Chat` path at line 199-203 handles this correctly with
+  a timestamp fallback; `ChatStream` does not.
+- **Suggested fix**: Mirror the `Chat` path -- check the error and fall back
+  to `fmt.Sprintf("pending_%d", time.Now().UnixNano())` on failure. Better:
+  extract the fallback into a helper used by both call sites.
+
+---
+
+#### SCAN6-M10. Briefing renders timestamps in mixed UTC and local time -- FIXED
+
+- **Severity**: medium
+- **Category**: logic
+- **Location**: `internal/briefing/briefing.go:269-291`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: `renderBriefing` normalizes `now` to UTC and calls
+  `n.UpdatedAt.UTC().Format(...)` for the per-note line. Both header
+  and per-note timestamps now use the same zone, eliminating the
+  midnight-UTC straddle artifact.
+- **Description**: The briefing header uses `now.Format("Monday, January 2
+  2006")` and `now.Format("15:04 MST")` where `now = time.Now().UTC()`, so
+  the displayed time-zone label is always `"UTC"`. The per-note line uses
+  `n.UpdatedAt.Local().Format("15:04")`, which is the *server's* local time,
+  not UTC and not the user's time zone. Within a single briefing the user
+  sees the header timestamp in UTC and the note timestamps in (e.g.) PDT,
+  which appear to belong to different days when the run straddles midnight
+  UTC. Even ignoring DST, the discrepancy is confusing for any non-UTC
+  server.
+- **Suggested fix**: Pick one zone and stick with it. Either render
+  everything in UTC (drop the `.Local()` call) or honor `UserProfile.Timezone`
+  (already in the profile schema) and convert both header and per-note
+  timestamps to the user's TZ.
+
+---
+
+### LOW
+
+#### SCAN6-L1. Briefing task groups appear in non-deterministic order for ties -- FIXED
+
+- **Severity**: low
+- **Category**: logic
+- **Location**: `internal/briefing/briefing.go:299-303`, `335-353`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: `groupTasksByNote` records insertion order in a separate
+  slice and iterates that instead of the map. `renderBriefing`'s
+  `sort.SliceStable` comparator now adds `noteID` as a deterministic
+  tie-break when `mostRecent` is equal.
+- **Description**: `groupTasksByNote` builds groups by iterating a Go map
+  (random order), then `renderBriefing` calls `sort.SliceStable` keyed only
+  on `mostRecent`. Stable sort preserves *input* order for equal keys, but
+  the input order is itself random. Two task groups with identical
+  `mostRecent` appear in different orders across runs.
+- **Suggested fix**: Use a deterministic secondary key (e.g., `noteID`) in
+  the sort comparator, or sort the keys of the map before iterating.
+
+---
+
+#### SCAN6-L2. `mustMarshal` swallows marshal errors and returns a fake JSON result -- FIXED
+
+- **Severity**: low
+- **Category**: error-handling
+- **Location**: `internal/assistant/tool_impls.go:891-898`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Renamed to `marshalResult` and changed the signature to
+  `(json.RawMessage, error)`. All 19 call sites in `tool_impls.go`
+  were updated to propagate the error. The agentic loop's existing
+  `tr.Error` path now surfaces marshal failures to the LLM as real
+  errors instead of silently feeding it a fake `{"error":"..."}`
+  blob. Removed the now-unused `log/slog` import.
+- **Description**: When `json.Marshal` fails (e.g., a struct contains a NaN
+  float or an unsupported type), the helper logs the error and returns
+  `{"error":"failed to marshal result"}` as the tool's normal result. The
+  agentic loop sees this as a successful tool call and feeds the fake result
+  back to the LLM, which has no way to distinguish a real `error` field from
+  a fake one. The LLM may then reason as if the tool actually returned that
+  string.
+- **Suggested fix**: Make `mustMarshal` return `(json.RawMessage, error)`,
+  propagate the error up to the tool function, and let the agentic loop's
+  existing `tr.Error` path handle it. The current callers all `return
+  mustMarshal(...), nil`, so updating them is mechanical.
+
+---
+
+#### SCAN6-L3. `recordAction` sets `ExecutedAt` on failed actions -- FIXED
+
+- **Severity**: low
+- **Category**: logic
+- **Location**: `internal/assistant/service.go:603-613`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Only set `ExecutedAt` on the success path
+  (`status == ActionStatusExecuted`). Failed actions are now recorded
+  with `executed_at = nil`, so audit-log consumers can distinguish
+  "we tried" from "the side effect actually ran".
+- **Description**: `recordAction` always sets `ExecutedAt: now`, even when the
+  status is `ActionStatusFailed`. The field name implies "time of successful
+  execution", and audit-log API consumers will treat a non-null `executed_at`
+  as evidence the side effect actually happened. A failed tool call (e.g., a
+  DB error during `notes.Create`) appears in the audit log with both
+  `status = "failed"` and `executed_at` set, which is contradictory.
+- **Suggested fix**: Set `ExecutedAt` only on the success path, or rename the
+  field to `AttemptedAt` if "we tried at this moment" is the intended
+  semantics. The DB schema already allows null, so write `nil` for failed
+  actions.
+
+---
+
+#### SCAN6-L4. Assistant silently disabled if chat completer lacks tool support -- FIXED
+
+- **Severity**: low
+- **Category**: api-misuse
+- **Location**: `cmd/seamd/main.go:759-796`
+- **Status**: FIXED (2026-04-06)
+- **Fix**: Added `logger.Warn("assistant disabled: chat completer
+  does not support tool use")` on the `!ok` branch of the type
+  assertion so operators see why `/api/assistant` routes are missing
+  if a future provider only implements `ChatCompleter`.
+- **Description**: `if toolCompleter, ok := chatCompleter.(ai.ToolChatCompleter); ok`
+  is the only branch that decides whether to wire the assistant. When `!ok`,
+  no log line is emitted -- the assistant simply does not exist and the
+  routes are silently absent. Future LLM providers that implement
+  `ChatCompleter` but not `ToolChatCompleter` would disappear the assistant
+  feature with no diagnostic. (Today all three built-in providers satisfy
+  the interface, so this is latent.)
+- **Suggested fix**: Add `else { logger.Warn("assistant disabled: chat
+  completer does not support tool use") }` so operators see why the feature
+  is missing.
+
+---
+
+### Summary: Phase 3 Scheduler/Briefing + Recent-Code Audit
+
+| Severity | Count | Backend | Status |
+|----------|-------|---------|--------|
+| High | 2 | 2 | All resolved |
+| Medium | 10 | 10 | All resolved |
+| Low | 4 | 4 | All resolved |
+| **Total** | **16** | **16** | **All resolved** |
+
+Most important findings to address first:
+1. **SCAN6-H1** -- the recent-history slicing bug will produce 500s on long
+   tool-heavy conversations as soon as users hit the 20-message threshold.
+2. **SCAN6-H2** -- the scheduler shutdown ordering will surface as
+   "database is closed" errors in production logs the first time a server
+   is restarted while a briefing is generating.
+3. **SCAN6-M1** -- the duplicate-briefing-on-rename bug is observable on
+   any server restart after a user touches the default schedule.
+4. **SCAN6-M2** -- the recency-fallback touch is silently degrading the
+   memory ranking metric on every chat turn already.

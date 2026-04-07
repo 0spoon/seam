@@ -231,6 +231,10 @@ func (h *Handler) approveAction(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.ApproveAction(r.Context(), userID, actionID)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "action not found")
+			return
+		}
 		h.logger.Error("assistant.Handler.approveAction: failed",
 			"error", err, "user_id", userID, "action_id", actionID)
 		writeError(w, http.StatusInternalServerError, "failed to approve action")
@@ -257,6 +261,10 @@ func (h *Handler) rejectAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.RejectAction(r.Context(), userID, actionID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "action not found")
+			return
+		}
 		h.logger.Error("assistant.Handler.rejectAction: failed",
 			"error", err, "user_id", userID, "action_id", actionID)
 		writeError(w, http.StatusInternalServerError, "failed to reject action")

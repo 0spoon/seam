@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/katata/seam/internal/chat"
@@ -86,10 +85,10 @@ func registerSearchNotes(registry *ToolRegistry, searchSvc *search.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"results": results,
 				"total":   total,
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -120,7 +119,7 @@ func registerReadNote(registry *ToolRegistry, noteSvc *note.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"id":         n.ID,
 				"title":      n.Title,
 				"body":       n.Body,
@@ -128,7 +127,7 @@ func registerReadNote(registry *ToolRegistry, noteSvc *note.Service) {
 				"project_id": n.ProjectID,
 				"created_at": n.CreatedAt.Format(time.RFC3339),
 				"updated_at": n.UpdatedAt.Format(time.RFC3339),
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -180,10 +179,10 @@ func registerCreateNote(registry *ToolRegistry, noteSvc *note.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"id":    n.ID,
 				"title": n.Title,
-			}), nil
+			})
 		},
 		ReadOnly: false,
 	})
@@ -243,10 +242,10 @@ func registerUpdateNote(registry *ToolRegistry, noteSvc *note.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"id":    n.ID,
 				"title": n.Title,
-			}), nil
+			})
 		},
 		ReadOnly: false,
 	})
@@ -282,10 +281,10 @@ func registerAppendToNote(registry *ToolRegistry, noteSvc *note.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"id":    n.ID,
 				"title": n.Title,
-			}), nil
+			})
 		},
 		ReadOnly: false,
 	})
@@ -357,10 +356,10 @@ func registerListNotes(registry *ToolRegistry, noteSvc *note.Service) {
 					UpdatedAt: n.UpdatedAt.Format(time.RFC3339),
 				})
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"notes": slim,
 				"total": total,
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -391,9 +390,9 @@ func registerListProjects(registry *ToolRegistry, projectSvc *project.Service) {
 					Description: p.Description,
 				})
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"projects": slim,
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -429,11 +428,11 @@ func registerCreateProject(registry *ToolRegistry, projectSvc *project.Service) 
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"id":   p.ID,
 				"name": p.Name,
 				"slug": p.Slug,
-			}), nil
+			})
 		},
 		ReadOnly: false,
 	})
@@ -481,10 +480,10 @@ func registerListTasks(registry *ToolRegistry, taskSvc *task.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"tasks": tasks,
 				"total": total,
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -519,10 +518,10 @@ func registerToggleTask(registry *ToolRegistry, taskSvc *task.Service) {
 			if err := taskSvc.ToggleDone(ctx, userID, params.TaskID, params.Done); err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"task_id": params.TaskID,
 				"done":    params.Done,
-			}), nil
+			})
 		},
 		ReadOnly: false,
 	})
@@ -538,11 +537,11 @@ func registerGetDailyNote(registry *ToolRegistry, noteSvc *note.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"id":    n.ID,
 				"title": n.Title,
 				"body":  n.Body,
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -590,7 +589,7 @@ func registerGetGraph(registry *ToolRegistry, graphSvc *graph.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(g), nil
+			return marshalResult(g)
 		},
 		ReadOnly: true,
 	})
@@ -629,9 +628,9 @@ func registerFindRelated(registry *ToolRegistry, searchSvc *search.Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"results": results,
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -644,13 +643,13 @@ func registerGetCurrentTime(registry *ToolRegistry) {
 		Parameters:  mustJSON(map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}),
 		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
 			now := time.Now()
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"datetime":    now.Format(time.RFC3339),
 				"date":        now.Format("2006-01-02"),
 				"time":        now.Format("15:04:05"),
 				"day_of_week": now.Weekday().String(),
 				"timezone":    now.Location().String(),
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -709,10 +708,10 @@ func registerSearchConversations(registry *ToolRegistry, chatSvc *chat.Service) 
 					CreatedAt:      m.CreatedAt,
 				})
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"messages": slim,
 				"count":    len(slim),
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -753,11 +752,11 @@ func registerSaveMemory(registry *ToolRegistry, svc *Service) {
 			if err := svc.CreateMemory(ctx, userID, m); err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"id":       m.ID,
 				"category": m.Category,
 				"saved":    true,
-			}), nil
+			})
 		},
 		ReadOnly: false,
 	})
@@ -796,10 +795,10 @@ func registerSearchMemories(registry *ToolRegistry, svc *Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"memories": memories,
 				"count":    len(memories),
-			}), nil
+			})
 		},
 		ReadOnly: true,
 	})
@@ -815,7 +814,7 @@ func registerGetProfile(registry *ToolRegistry, svc *Service) {
 			if err != nil {
 				return nil, err
 			}
-			return mustMarshal(profile), nil
+			return marshalResult(profile)
 		},
 		ReadOnly: true,
 	})
@@ -870,9 +869,9 @@ func registerUpdateProfile(registry *ToolRegistry, svc *Service) {
 			if err := svc.UpdateProfile(ctx, userID, &params); err != nil {
 				return nil, err
 			}
-			return mustMarshal(map[string]interface{}{
+			return marshalResult(map[string]interface{}{
 				"updated": true,
-			}), nil
+			})
 		},
 		ReadOnly: false,
 	})
@@ -887,12 +886,14 @@ func mustJSON(v interface{}) json.RawMessage {
 	return b
 }
 
-// mustMarshal marshals a value to json.RawMessage.
-func mustMarshal(v interface{}) json.RawMessage {
+// marshalResult marshals a tool result to json.RawMessage. Errors are
+// propagated up so the agentic loop can surface them via the standard
+// tr.Error path -- never inject a fake JSON object that the LLM might
+// mistake for a real result.
+func marshalResult(v interface{}) (json.RawMessage, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		slog.Error("assistant.mustMarshal: failed to marshal", "error", err)
-		return json.RawMessage(`{"error":"failed to marshal result"}`)
+		return nil, fmt.Errorf("assistant.marshalResult: %w", err)
 	}
-	return b
+	return b, nil
 }

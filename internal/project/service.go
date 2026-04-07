@@ -276,18 +276,23 @@ func (s *Service) Delete(ctx context.Context, userID, projectID string, cascade 
 		id       string
 		filePath string
 	}
-	var notes []noteInfo
-	for rows.Next() {
-		var n noteInfo
-		if scanErr := rows.Scan(&n.id, &n.filePath); scanErr != nil {
-			rows.Close()
-			return fmt.Errorf("project.Service.Delete: scan note: %w", scanErr)
+	notes, scanErr := func() ([]noteInfo, error) {
+		defer rows.Close()
+		var out []noteInfo
+		for rows.Next() {
+			var n noteInfo
+			if err := rows.Scan(&n.id, &n.filePath); err != nil {
+				return nil, fmt.Errorf("project.Service.Delete: scan note: %w", err)
+			}
+			out = append(out, n)
 		}
-		notes = append(notes, n)
-	}
-	rows.Close()
-	if rowsErr := rows.Err(); rowsErr != nil {
-		return fmt.Errorf("project.Service.Delete: rows error: %w", rowsErr)
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("project.Service.Delete: rows error: %w", err)
+		}
+		return out, nil
+	}()
+	if scanErr != nil {
+		return scanErr
 	}
 
 	// I-H12: Perform all DB operations first inside the transaction, then

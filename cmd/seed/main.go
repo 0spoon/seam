@@ -224,18 +224,21 @@ func main() {
 		log.Fatalf("query dangling links: %v", err)
 	}
 	type dl struct{ src, text string }
-	var dangling []dl
-	for rows.Next() {
-		var d dl
-		if err := rows.Scan(&d.src, &d.text); err != nil {
-			log.Fatalf("scan link: %v", err)
+	dangling := func() []dl {
+		defer rows.Close()
+		var out []dl
+		for rows.Next() {
+			var d dl
+			if err := rows.Scan(&d.src, &d.text); err != nil {
+				log.Fatalf("scan link: %v", err)
+			}
+			out = append(out, d)
 		}
-		dangling = append(dangling, d)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		log.Fatalf("iterate dangling links: %v", err)
-	}
+		if err := rows.Err(); err != nil {
+			log.Fatalf("iterate dangling links: %v", err)
+		}
+		return out
+	}()
 
 	resolved := 0
 	for _, d := range dangling {

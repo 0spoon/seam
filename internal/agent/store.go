@@ -310,7 +310,10 @@ func (s *SQLStore) querySessionRows(ctx context.Context, db DBTX, query string, 
 		sess.Findings = findings.String
 
 		if metaJSON != "" {
-			_ = json.Unmarshal([]byte(metaJSON), &sess.Metadata)
+			if uErr := json.Unmarshal([]byte(metaJSON), &sess.Metadata); uErr != nil {
+				slog.Warn("agent.SQLStore.querySessionRows: malformed metadata",
+					"raw", metaJSON, "error", uErr)
+			}
 		}
 
 		if parsed, pErr := time.Parse(time.RFC3339, createdAt); pErr != nil {

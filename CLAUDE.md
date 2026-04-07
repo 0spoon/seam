@@ -123,6 +123,7 @@ make fmt                # gofmt + prettier
 8. **Security first** -- reject `..` in paths, validate all input at handler level, reject private IPs in URL capture.
 9. **Sanitize responses** -- never expose internal error details in HTTP responses.
 10. **Migrations must be idempotent** -- embedded via `go:embed`, run on DB open.
+11. **Read `AGENTS.md` > "Common pitfalls"** before writing Go code -- recurring footguns from prior audit passes (`ulid.MustNew`, byte-slicing UTF-8, non-atomic `.md` writes, missing `RowsAffected`/`rows.Err()`, etc.). `make lint` enforces a subset; the rest is on you.
 
 ## Storage Layout
 

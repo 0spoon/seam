@@ -112,26 +112,27 @@ func (s *Store) ListActions(ctx context.Context, db *sql.DB, conversationID stri
 	return actions, nil
 }
 
-// ListActionsByID returns a single action by its ID.
-func (s *Store) ListActionsByID(ctx context.Context, db *sql.DB, actionID string) (*Action, error) {
+// GetAction returns a single action by its ID. Returns ErrNotFound when
+// no row matches.
+func (s *Store) GetAction(ctx context.Context, db *sql.DB, actionID string) (*Action, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, conversation_id, tool_name, arguments, result, status, created_at, executed_at
 		 FROM assistant_actions
 		 WHERE id = ?`, actionID)
 	if err != nil {
-		return nil, fmt.Errorf("assistant.Store.ListActionsByID: %w", err)
+		return nil, fmt.Errorf("assistant.Store.GetAction: %w", err)
 	}
 	defer rows.Close()
 
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("assistant.Store.ListActionsByID: rows: %w", err)
+			return nil, fmt.Errorf("assistant.Store.GetAction: rows: %w", err)
 		}
-		return nil, nil
+		return nil, ErrNotFound
 	}
 	a, scanErr := scanAction(rows)
 	if scanErr != nil {
-		return nil, fmt.Errorf("assistant.Store.ListActionsByID: scan: %w", scanErr)
+		return nil, fmt.Errorf("assistant.Store.GetAction: scan: %w", scanErr)
 	}
 	return a, nil
 }

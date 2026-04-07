@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -52,22 +53,27 @@ func main() {
 	}
 }
 
+// defaultDailyBriefingID is the stable schedule ID assigned to the
+// auto-provisioned daily briefing. Using a fixed ID (rather than the
+// schedule's name) lets the user rename the schedule via the API
+// without re-provisioning a duplicate on the next server restart.
+const defaultDailyBriefingID = "default_daily_briefing"
+
 // provisionDailyBriefing creates the default daily briefing schedule on
-// startup if no schedule with that name already exists. Idempotent across
-// restarts: a duplicate-name match is treated as already provisioned.
+// startup if it has not been provisioned before. Idempotency is keyed
+// on a fixed schedule ID so subsequent restarts skip provisioning even
+// if the user has renamed the schedule.
 func provisionDailyBriefing(ctx context.Context, svc *scheduler.Service, cfg config.DailyBriefingConfig, logger *slog.Logger) error {
 	const briefingName = "Daily Briefing"
 
-	existing, err := svc.List(ctx, userdb.DefaultUserID, false)
-	if err != nil {
-		return fmt.Errorf("list schedules: %w", err)
+	existing, err := svc.Get(ctx, userdb.DefaultUserID, defaultDailyBriefingID)
+	if err == nil {
+		logger.Debug("daily briefing schedule already provisioned",
+			"id", existing.ID, "name", existing.Name, "next_run", existing.NextRunAt)
+		return nil
 	}
-	for _, sch := range existing {
-		if sch.Name == briefingName {
-			logger.Debug("daily briefing schedule already provisioned",
-				"id", sch.ID, "next_run", sch.NextRunAt)
-			return nil
-		}
+	if !errors.Is(err, scheduler.ErrNotFound) {
+		return fmt.Errorf("lookup default schedule: %w", err)
 	}
 
 	configJSON, err := json.Marshal(briefing.ActionConfig{
@@ -80,6 +86,7 @@ func provisionDailyBriefing(ctx context.Context, svc *scheduler.Service, cfg con
 
 	enabled := true
 	created, err := svc.Create(ctx, userdb.DefaultUserID, scheduler.CreateReq{
+		ID:           defaultDailyBriefingID,
 		Name:         briefingName,
 		CronExpr:     cfg.CronExpr,
 		ActionType:   scheduler.ActionBriefing,
@@ -755,8 +762,14 @@ func run() error {
 	// Create assistant (agentic AI with tool use).
 	var assistantHandler *assistant.Handler
 	if chatCompleter != nil {
-		// All LLM providers implement ai.ToolChatCompleter.
+		// All built-in providers implement ai.ToolChatCompleter, but a
+		// future provider that only satisfies ai.ChatCompleter would
+		// silently disable the assistant. Surface that with a warning
+		// so operators see why /api/assistant routes are missing.
 		toolCompleter, ok := chatCompleter.(ai.ToolChatCompleter)
+		if !ok {
+			logger.Warn("assistant disabled: chat completer does not support tool use")
+		}
 		if ok {
 			assistantStore := assistant.NewStore()
 			memoryStore := assistant.NewMemoryStore()
@@ -799,6 +812,7 @@ func run() error {
 	// jobs (daily briefing today; reminders/automations in later phases).
 	var scheduleHandler *scheduler.Handler
 	var schedSvc *scheduler.Service
+	var schedDone chan struct{}
 	schedulerEnabled := cfg.Scheduler.Enabled == nil || *cfg.Scheduler.Enabled
 	if schedulerEnabled {
 		scheduleStore := scheduler.NewStore()
@@ -831,8 +845,14 @@ func run() error {
 		scheduleHandler = scheduler.NewHandler(schedSvc, logger)
 
 		// Start the scheduler tick loop. Errors are logged inside Run.
+		// schedDone is closed when the scheduler goroutine returns so the
+		// shutdown sequence can wait for an in-flight tick (e.g. a
+		// briefing.Generate writing to the user DB) to finish before the
+		// deferred CloseAll fires.
+		schedDone = make(chan struct{})
 		go func() {
-			if err := schedSvc.Run(ctx); err != nil && err != context.Canceled {
+			defer close(schedDone)
+			if err := schedSvc.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Error("scheduler stopped", "error", err)
 			}
 		}()
@@ -907,6 +927,14 @@ func run() error {
 
 	// 4. Wait for AI queue workers to finish before closing databases.
 	<-aiQueueDone
+
+	// 4a. Wait for the scheduler goroutine to return so any in-flight
+	//     tick (e.g. briefing.Generate writing to the user DB) finishes
+	//     before the deferred CloseAll runs and yields "database is
+	//     closed" errors.
+	if schedDone != nil {
+		<-schedDone
+	}
 
 	// 5. Stop file watcher (deferred w.Close() handles this -- LIFO before DB).
 	// 6. Close database (deferred userDBMgr.CloseAll() handles this).

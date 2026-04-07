@@ -142,6 +142,101 @@ No package imports `internal/server`. The server wires dependencies at startup.
 - Input validation: sanitize note titles, project names, tags for filesystem safety (no `/`, `\`, `..`, `\x00`).
 - SSRF: URL capture must reject private IPs, localhost, `file://` protocol.
 
+## Common pitfalls (lessons from ISSUES.md)
+
+The patterns below have been re-introduced multiple times across audit passes. Treat
+this section as a checklist before opening a PR. `ISSUES.md` carries the full history
+and rationale for each rule.
+
+### Meta-rules
+
+1. **Propagate every fix.** When you fix a buggy pattern, `grep` the entire repo for
+   other instances of the same pattern and fix them all in the same change. A bug fix
+   that touches only the file flagged in the report is incomplete by default. The
+   "Forbidden APIs" and "Required APIs" lists below double as grep targets.
+2. **Never re-introduce a banned pattern in new code.** When adding a new file or
+   package, scan it against the lists below before declaring done.
+3. **After any interface, store-method, schema, or migration change, run
+   `make build && make test` before declaring done.** Search the test tree
+   (`*_test.go`, `mock*.go`, `fake*.go`) for the changed symbol and update mocks. Test
+   mocks falling out of sync with production interfaces is a recurring class of break.
+4. **No fake results on error.** Helpers must not swallow an error and return a
+   plausible-looking dummy value (e.g. `mustMarshal` returning `{"error":"..."}`). The
+   LLM and downstream code cannot distinguish a real result from a fabricated one.
+   Return the error.
+
+### Forbidden APIs
+
+| Pattern | Why | Use instead |
+|---------|-----|-------------|
+| `ulid.MustNew` | Panics if `crypto/rand` entropy fails. Crashes the server in request paths. | `ulid.New(ulid.Now(), rand.Reader)` + return the error |
+| `time.Parse(...)` with discarded error (`_, _ = time.Parse(...)`) | Silently produces zero-value timestamps that propagate into responses. | Capture the error and `slog.Warn(...)` (do not return zero-value times to clients) |
+| `os.WriteFile` on a `.md` file | Non-atomic; a crash mid-write corrupts the source-of-truth file. | `note.AtomicWriteFile` (writes to temp file in same dir + `fsync` + `rename`) |
+| `s[:N]` on text destined for users, LLMs, or HTTP responses | Slices by byte and splits multi-byte UTF-8 (CJK, emoji) producing invalid UTF-8. | `string([]rune(s)[:N])` or a `runeSafeTruncate` helper. Pair with `utf8.RuneCountInString` for budget math, never `len()`. |
+| `err == ErrXxx`, `err == sql.ErrNoRows` | Breaks silently when an upstream wraps the error. | `errors.Is(err, ErrXxx)` |
+| `_ := json.Marshal(...)`, `_ := json.Unmarshal(...)` | Marshal can fail (NaN floats, unsupported types). Unmarshal failures silently produce zero-value structs. | Check the error; `slog.Warn` and propagate or fall through. |
+| `_ := result.RowsAffected()` (or no `RowsAffected` check at all on UPDATE/DELETE) | Updates/deletes against missing rows look like success; not-found bugs hide. | Check `n, err := result.RowsAffected(); ... if n == 0 { return ErrNotFound }` |
+| `close(ch)` outside `sync.Once.Do(...)` in a `Close()` method | Double-`close` panics. Multiple shutdown paths exist. | `closeOnce sync.Once`; `h.closeOnce.Do(func() { close(h.done) })` |
+| `string + "/" + string` for filesystem paths | Inconsistent with codebase, breaks on Windows, easier to introduce traversal. | `filepath.Join(a, b)` |
+| `context.Background()` inside an HTTP handler or any goroutine spawned by one | Leaks request-scoped values and disconnects shutdown signaling. | Derive from request `ctx` (or use `context.WithoutCancel(ctx)` for background work that must outlive the response). For long-lived service goroutines, take a context in the constructor and select on it. |
+| `os.Stat` or `filepath.WalkDir` in a path that crosses user data | Follows symlinks; a malicious or stray symlink leaks files outside the notes dir. | `os.Lstat` and explicit `d.Type()&os.ModeSymlink != 0` skip in `WalkDir` callbacks. |
+| `strings.Contains(err.Error(), "...")` for status mapping | Couples the handler to error message text; fragile across provider changes. | Define typed sentinel errors; map them with `errors.Is`. |
+| `mustMarshal`-style helpers that fabricate fake JSON on error | LLM/caller cannot distinguish real `{"error":...}` from fake. | Return `(json.RawMessage, error)` and propagate. |
+| Returning `(nil, nil)` from a store method when the row is missing | Future callers forget the nil check and dereference. | Return `(nil, ErrNotFound)`. |
+| Goroutine started with no `done` channel / `WaitGroup` for shutdown | Background work continues after `userdb.CloseAll()` and writes to a closed DB. | Constructor takes `done chan struct{}`; `Run` selects on it; shutdown closes the channel and waits. Match the existing `aiQueueDone`/`schedDone` pattern in `cmd/seamd/main.go`. |
+| New `migrations/*.sql` file without an entry in `migrations/migrations.go` | The file is created but never `go:embed`-ed; the migration silently does not run. | When adding a SQL file, also add `//go:embed user/NNN_*.sql` and append to `UserMigrations()`. Verify with a fresh `seam.db`. |
+| `time.Sleep` for synchronization | Flaky tests, masks real ordering bugs. | Channels, `sync.WaitGroup`, or `t.Eventually` patterns. |
+
+### Required APIs and patterns
+
+- **Atomic markdown writes**: every write to a `.md` file goes through
+  `note.AtomicWriteFile` (`internal/note/service.go`). Includes `Create`, `Update`,
+  `Reindex`, the rollback path inside `Update`, the `cmd/seamd/main.go` frontmatter
+  updater closure, and `template/service.go`.
+- **DB-then-file ordering**: any operation that touches both the DB and the filesystem
+  must commit the DB transaction *first*, then perform the filesystem mutation in a
+  post-commit step. See `BulkAction` in `note/service.go` for the canonical pattern
+  (`pendingMoves`/`filesToDelete`). On rollback, also undo any partial filesystem
+  state — the `Update` move path must `os.Remove` the new-path file before reverting
+  the rename.
+- **`Set*` setter functions are mutex-protected**: any `Service.Set*` method that
+  installs a dependency callback after construction must hold a `sync.RWMutex`.
+  Reads go through a `getX()` accessor. See `capture/service.go`'s
+  `getSummarizeFunc()` for the canonical pattern.
+- **`rows.Err()` after every loop**: every `for rows.Next() { ... }` is followed by
+  `if err := rows.Err(); err != nil { ... }`. The `rowserrcheck` linter enforces this.
+- **`http.MaxBytesReader` on every body decode**: every JSON or multipart handler
+  starts with `r.Body = http.MaxBytesReader(w, r.Body, 1<<20)` (or `25<<20` for voice
+  upload). Includes `template/handler.go:apply`, `capture/handler.go` voice path,
+  every assistant handler.
+- **LIKE wildcard escaping**: any user input fed into `LIKE` must go through an
+  escape that handles `\`, `%`, and `_` *in that order* (escape `\` first so the
+  later wildcard escapes are not re-doubled), and the query must include
+  `ESCAPE '\'`. `escapeLIKE` is for `LIKE` only — never apply it to `=` comparisons
+  (it transforms `_` and `%`, which become literal characters in equality match).
+- **FTS5 MATCH sanitization**: every FTS5 `MATCH` on user input goes through
+  `sanitizeMemoryFTSQuery` (or an equivalent that strips operators and quotes terms).
+  Raw user text in `MATCH` causes SQLite errors and a class of injection.
+- **LLM message-history slicing must respect tool-use grouping**: any positional cut
+  of conversation history must use `safeRecentBoundary`-style logic to avoid
+  orphaning a `tool` message from its parent assistant `tool_calls`. OpenAI and
+  Anthropic both reject orphaned tool results with a 400.
+- **Slice copying when extending shared slices**: `append(args, ...)` may share the
+  backing array. If the resulting slice is later mutated independently, copy first:
+  `dst := append(append([]T{}, args...), extra...)`. Especially in SQL arg builders.
+- **Sentinel errors via `errors.New`**, not `fmt.Errorf` (without `%w`). Reserve
+  `fmt.Errorf` for wrapped errors with a `%w` verb.
+- **`filepath.Join` everywhere**, including in tests and in `cmd/`.
+
+### Verification before declaring done
+
+1. `make build && make test` (must include `*_test.go` updates if any interface
+   signature changed).
+2. `make lint` (catches `ulid.MustNew`, missing `rows.Err()`, blank-discarded errors,
+   and a handful of other patterns automatically — see `.golangci.yml`).
+3. For any change that touches a recurring pattern from this section, grep the repo
+   for other instances of the same pattern and fix them in the same change.
+
 ## Frontend style rules (web/)
 
 - React 19 + TypeScript 5 + Vite 7.

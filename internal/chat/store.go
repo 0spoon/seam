@@ -261,8 +261,10 @@ func (s *Store) SearchMessages(ctx context.Context, db DBTX, query string, limit
 	}
 
 	// Use LIKE for basic substring matching. FTS on messages could be added later.
-	// Escape SQL LIKE wildcards in the query.
-	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(query)
+	// Escape SQL LIKE wildcards plus the escape character itself. Order
+	// matters: backslash must be doubled first so the wildcard escapes
+	// inserted next don't get re-escaped.
+	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(query)
 	rows, err := db.QueryContext(ctx,
 		`SELECT m.id, m.conversation_id, m.role, m.content, m.citations, m.created_at
 		 FROM messages m

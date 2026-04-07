@@ -20,15 +20,24 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockNoteService struct {
-	listNotes []*note.Note
-	listTotal int
-	listErr   error
-	created   *note.CreateNoteReq
+	listNotes      []*note.Note
+	listTotal      int
+	listErr        error
+	created        *note.CreateNoteReq
+	updated        *note.UpdateNoteReq
+	updatedNoteID  string
+	dedupeNotes    []*note.Note // returned when filter.ProjectID is set (existing-for-today lookup)
+	dedupeOnce     bool         // serve dedupeNotes only on the first matching call
+	dedupeServed   bool
 }
 
 func (m *mockNoteService) List(ctx context.Context, userID string, filter note.NoteFilter) ([]*note.Note, int, error) {
 	if m.listErr != nil {
 		return nil, 0, m.listErr
+	}
+	if filter.ProjectID != "" && len(m.dedupeNotes) > 0 && (!m.dedupeOnce || !m.dedupeServed) {
+		m.dedupeServed = true
+		return m.dedupeNotes, len(m.dedupeNotes), nil
 	}
 	return m.listNotes, m.listTotal, nil
 }
@@ -41,6 +50,20 @@ func (m *mockNoteService) Create(ctx context.Context, userID string, req note.Cr
 		Body:      req.Body,
 		ProjectID: req.ProjectID,
 		Tags:      req.Tags,
+	}, nil
+}
+func (m *mockNoteService) Update(ctx context.Context, userID, noteID string, req note.UpdateNoteReq) (*note.Note, error) {
+	cp := req
+	m.updated = &cp
+	m.updatedNoteID = noteID
+	body := ""
+	if req.Body != nil {
+		body = *req.Body
+	}
+	return &note.Note{
+		ID:    noteID,
+		Title: "updated",
+		Body:  body,
 	}, nil
 }
 

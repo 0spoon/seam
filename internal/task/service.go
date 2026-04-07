@@ -385,7 +385,7 @@ func (s *Service) toggleCheckboxInFile(ctx context.Context, userID, noteID strin
 	if statErr == nil {
 		perm = info.Mode().Perm()
 	}
-	if err := os.WriteFile(absPath, []byte(newContent), perm); err != nil {
+	if err := note.AtomicWriteFile(absPath, []byte(newContent), perm); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
 

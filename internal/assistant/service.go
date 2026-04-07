@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -263,31 +264,31 @@ func (s *Service) ApproveAction(ctx context.Context, userID, actionID string) (*
 	}
 
 	// Load the pending action.
-	actions, err := s.store.ListActionsByID(ctx, db, actionID)
+	action, err := s.store.GetAction(ctx, db, actionID)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("assistant.Service.ApproveAction: load action: %w", err)
 	}
-	if actions == nil {
-		return nil, ErrNotFound
-	}
-	if actions.Status != ActionStatusPending {
-		return nil, fmt.Errorf("assistant.Service.ApproveAction: action is %s, not pending", actions.Status)
+	if action.Status != ActionStatusPending {
+		return nil, fmt.Errorf("assistant.Service.ApproveAction: action is %s, not pending", action.Status)
 	}
 
 	// Look up the tool.
-	tool, err := s.registry.Get(actions.ToolName)
+	tool, err := s.registry.Get(action.ToolName)
 	if err != nil {
 		return nil, fmt.Errorf("assistant.Service.ApproveAction: %w", err)
 	}
 
 	// Execute the tool.
 	start := time.Now()
-	result, execErr := tool.Func(ctx, userID, json.RawMessage(actions.Arguments))
+	result, execErr := tool.Func(ctx, userID, json.RawMessage(action.Arguments))
 	duration := time.Since(start)
 
 	tr := ToolResult{
-		ToolName:   actions.ToolName,
-		Arguments:  json.RawMessage(actions.Arguments),
+		ToolName:   action.ToolName,
+		Arguments:  json.RawMessage(action.Arguments),
 		DurationMs: duration.Milliseconds(),
 	}
 
@@ -431,7 +432,11 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 
 				// Confirmation check -- for streaming, return a confirmation event.
 				if !tool.ReadOnly && s.confirmation.RequiresConfirmation(tc.Name) {
-					actionID, _ := generateULID()
+					actionID, genErr := generateULID()
+					if genErr != nil {
+						s.logger.Warn("assistant.Service.ChatStream: failed to generate action ID", "error", genErr)
+						actionID = fmt.Sprintf("pending_%d", time.Now().UnixNano())
+					}
 					now := time.Now().UTC()
 					action := &Action{
 						ID:             actionID,
@@ -609,7 +614,12 @@ func (s *Service) recordAction(ctx context.Context, db *sql.DB, conversationID, 
 		Result:         result,
 		Status:         status,
 		CreatedAt:      now,
-		ExecutedAt:     now,
+	}
+	// Only mark execution time on successful runs. Failed actions are
+	// audited with status=failed and a null executed_at so consumers
+	// can distinguish "we tried" from "the side effect actually ran".
+	if status == ActionStatusExecuted {
+		action.ExecutedAt = now
 	}
 	if recordErr := s.store.RecordAction(ctx, db, action); recordErr != nil {
 		s.logger.Warn("assistant.Service.recordAction: failed to record action",
@@ -629,14 +639,15 @@ func (s *Service) applyConversationSummary(ctx context.Context, db *sql.DB, conv
 		return "", history
 	}
 
-	recent := history[len(history)-maxAssistantRecentMessages:]
+	start := safeRecentBoundary(history, len(history)-maxAssistantRecentMessages)
+	recent := history[start:]
 	if conversationID == "" || s.memoryStore == nil {
 		return "", recent
 	}
 
 	summary, err := s.memoryStore.GetConversationSummary(ctx, db, conversationID)
 	if err != nil {
-		if err != ErrNotFound {
+		if !errors.Is(err, ErrNotFound) {
 			s.logger.Debug("assistant.Service.applyConversationSummary: load summary",
 				"error", err, "conversation_id", conversationID)
 		}
@@ -691,7 +702,7 @@ func (s *Service) refreshConversationSummary(userID, conversationID string, olde
 	var existing string
 	if prev, err := s.memoryStore.GetConversationSummary(ctx, db, conversationID); err == nil {
 		existing = prev.Content
-	} else if err != ErrNotFound {
+	} else if !errors.Is(err, ErrNotFound) {
 		s.logger.Debug("assistant.Service.refreshConversationSummary: load existing",
 			"error", err, "conversation_id", conversationID)
 	}
@@ -786,12 +797,18 @@ func (s *Service) loadContext(ctx context.Context, db *sql.DB, userMessage strin
 
 	if s.memoryStore != nil {
 		// Try to find memories relevant to the user's message via FTS.
+		// Only the relevance path bumps last_accessed -- the recency
+		// fallback below must NOT touch, or every chat turn would
+		// inflate decay scores for whatever is newest and starve older
+		// memories regardless of actual recall relevance.
+		fromSearch := false
 		if userMessage != "" {
 			hits, err := s.memoryStore.SearchMemories(ctx, db, userMessage, 5)
 			if err != nil {
 				s.logger.Debug("assistant.Service.loadContext: memory search failed", "error", err)
-			} else {
+			} else if len(hits) > 0 {
 				memories = hits
+				fromSearch = true
 			}
 		}
 		// If no relevant memories found, fall back to recent memories.
@@ -803,10 +820,10 @@ func (s *Service) loadContext(ctx context.Context, db *sql.DB, userMessage strin
 				memories = recent
 			}
 		}
-		// Bump last_accessed on the memories we are about to feed into
-		// the system prompt so frequently-recalled items stay ranked
+		// Bump last_accessed only on memories that came from the
+		// relevance path so frequently-recalled items stay ranked
 		// highly by the decay scoring in future searches.
-		if len(memories) > 0 {
+		if fromSearch && len(memories) > 0 {
 			ids := make([]string, len(memories))
 			for i, m := range memories {
 				ids[i] = m.ID
@@ -876,6 +893,41 @@ func generateULID() (string, error) {
 		return "", err
 	}
 	return id.String(), nil
+}
+
+// safeRecentBoundary adjusts a positional slice boundary so it never
+// lands inside a tool-use group. A tool-use group is an assistant
+// message with ToolCalls followed by one or more "tool" role messages
+// that reference those calls. If the proposed boundary points at a
+// "tool" message, or at an assistant message whose tool result(s) live
+// behind the boundary, walk backwards until both halves of every
+// group are either fully inside or fully outside the recent window.
+//
+// This prevents emitting an orphan tool_call_id with no matching
+// tool_use block, which OpenAI/Anthropic both reject with a 400.
+func safeRecentBoundary(history []ai.ToolMessage, start int) int {
+	if start <= 0 || start >= len(history) {
+		return start
+	}
+	for start > 0 {
+		// If the boundary points at a "tool" message, the corresponding
+		// assistant tool_use lives behind the boundary -- back up.
+		if history[start].Role == "tool" {
+			start--
+			continue
+		}
+		// If the boundary points just past an assistant message that
+		// issued tool calls, the assistant tool_use is behind the
+		// boundary but the "tool" results are inside. Back up so the
+		// assistant message is also inside the window.
+		prev := history[start-1]
+		if prev.Role == "assistant" && len(prev.ToolCalls) > 0 {
+			start--
+			continue
+		}
+		break
+	}
+	return start
 }
 
 func truncateResult(s string) string {

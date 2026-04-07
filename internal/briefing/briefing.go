@@ -42,6 +42,7 @@ type Config struct {
 type NoteService interface {
 	List(ctx context.Context, userID string, filter note.NoteFilter) ([]*note.Note, int, error)
 	Create(ctx context.Context, userID string, req note.CreateNoteReq) (*note.Note, error)
+	Update(ctx context.Context, userID, noteID string, req note.UpdateNoteReq) (*note.Note, error)
 }
 
 // ProjectService captures the subset of project.Service methods we use.
@@ -138,6 +139,22 @@ func (s *Service) Generate(ctx context.Context, userID string, rawConfig json.Ra
 		return nil, fmt.Errorf("briefing.Service.Generate: ensure project: %w", err)
 	}
 
+	// Dedupe by title within today's project. If the cron and a manual
+	// "run now" both fire on the same day, the second invocation
+	// overwrites the existing note instead of producing a duplicate.
+	if existing := s.findExistingForToday(ctx, userID, proj.ID, title); existing != nil {
+		updated, updErr := s.notes.Update(ctx, userID, existing.ID, note.UpdateNoteReq{
+			Body: &body,
+		})
+		if updErr != nil {
+			return nil, fmt.Errorf("briefing.Service.Generate: update note: %w", updErr)
+		}
+		s.publish(userID, updated)
+		s.logger.Info("briefing updated",
+			"user_id", userID, "note_id", updated.ID, "title", updated.Title)
+		return updated, nil
+	}
+
 	created, err := s.notes.Create(ctx, userID, note.CreateNoteReq{
 		Title:     title,
 		Body:      body,
@@ -152,6 +169,29 @@ func (s *Service) Generate(ctx context.Context, userID string, rawConfig json.Ra
 	s.logger.Info("briefing generated",
 		"user_id", userID, "note_id", created.ID, "title", created.Title)
 	return created, nil
+}
+
+// findExistingForToday looks for a briefing note in the configured
+// project that already has today's title. Returns nil on any error or
+// when no match is found -- the caller falls back to creating a fresh
+// note, so this lookup must never block briefing generation.
+func (s *Service) findExistingForToday(ctx context.Context, userID, projectID, title string) *note.Note {
+	notes, _, err := s.notes.List(ctx, userID, note.NoteFilter{
+		ProjectID:   projectID,
+		Limit:       50,
+		ExcludeBody: true,
+	})
+	if err != nil {
+		s.logger.Debug("briefing.Service.findExistingForToday: list failed",
+			"user_id", userID, "error", err)
+		return nil
+	}
+	for _, n := range notes {
+		if n.Title == title {
+			return n
+		}
+	}
+	return nil
 }
 
 // Action returns a scheduler.ActionRunner adapter that calls Generate.
@@ -263,12 +303,19 @@ func (s *Service) publish(userID string, n *note.Note) {
 
 // renderBriefing produces the markdown body of the briefing note. Pure
 // function so it's trivial to unit test.
+//
+// All timestamps are rendered in UTC for consistency. Mixing UTC for
+// the header and server-local time for the per-note line caused notes
+// from before/after midnight UTC to look like they belonged to
+// different days. If timezone-aware rendering is needed later, both
+// the header and per-note timestamps should convert to the same zone.
 func renderBriefing(data briefingData, now time.Time, lookbackHours int) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# Daily Briefing -- %s\n\n", now.Format("Monday, January 2 2006"))
+	nowUTC := now.UTC()
+	fmt.Fprintf(&b, "# Daily Briefing -- %s\n\n", nowUTC.Format("Monday, January 2 2006"))
 	fmt.Fprintf(&b, "_Generated %s. Looking back %d hours._\n\n",
-		now.Format("15:04 MST"), lookbackHours)
+		nowUTC.Format("15:04 MST"), lookbackHours)
 
 	if len(data.RecentErrors) > 0 {
 		b.WriteString("> Note: ")
@@ -282,9 +329,9 @@ func renderBriefing(data briefingData, now time.Time, lookbackHours int) string 
 		b.WriteString("_No notes created or modified in this window._\n\n")
 	} else {
 		fmt.Fprintf(&b, "%d note(s) updated since %s.\n\n",
-			data.NoteCount, now.Add(-time.Duration(lookbackHours)*time.Hour).Format("15:04 MST"))
+			data.NoteCount, nowUTC.Add(-time.Duration(lookbackHours)*time.Hour).Format("15:04 MST"))
 		for _, n := range data.RecentNotes {
-			ts := n.UpdatedAt.Local().Format("15:04")
+			ts := n.UpdatedAt.UTC().Format("15:04")
 			fmt.Fprintf(&b, "- [[%s]] _(updated %s)_\n", n.Title, ts)
 		}
 		b.WriteString("\n")
@@ -298,8 +345,14 @@ func renderBriefing(data briefingData, now time.Time, lookbackHours int) string 
 		fmt.Fprintf(&b, "%d open task(s).\n\n", data.OpenCount)
 		grouped := groupTasksByNote(data.OpenTasks)
 		// Stable order: notes with the most recent task update first.
+		// Tie-break on noteID so the rendered output is deterministic
+		// even when groupTasksByNote returns groups in a different
+		// (map iteration) order across runs.
 		sort.SliceStable(grouped, func(i, j int) bool {
-			return grouped[i].mostRecent.After(grouped[j].mostRecent)
+			if !grouped[i].mostRecent.Equal(grouped[j].mostRecent) {
+				return grouped[i].mostRecent.After(grouped[j].mostRecent)
+			}
+			return grouped[i].noteID < grouped[j].noteID
 		})
 		for _, g := range grouped {
 			fmt.Fprintf(&b, "### Note %s\n", shortNoteRef(g.noteID))
@@ -334,20 +387,25 @@ type taskGroup struct {
 
 func groupTasksByNote(tasks []*task.Task) []taskGroup {
 	byNote := make(map[string]*taskGroup)
+	var order []string
 	for _, t := range tasks {
 		g, ok := byNote[t.NoteID]
 		if !ok {
 			g = &taskGroup{noteID: t.NoteID}
 			byNote[t.NoteID] = g
+			order = append(order, t.NoteID)
 		}
 		g.tasks = append(g.tasks, t)
 		if t.UpdatedAt.After(g.mostRecent) {
 			g.mostRecent = t.UpdatedAt
 		}
 	}
+	// Iterate `order` (insertion order) instead of the map so the
+	// output is deterministic regardless of map randomization. Final
+	// ordering is still applied by the caller's sort.
 	out := make([]taskGroup, 0, len(byNote))
-	for _, g := range byNote {
-		out = append(out, *g)
+	for _, id := range order {
+		out = append(out, *byNote[id])
 	}
 	return out
 }

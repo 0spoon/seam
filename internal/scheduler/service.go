@@ -35,6 +35,10 @@ var (
 // CreateReq is the input for creating a schedule. Either CronExpr or RunAt
 // must be provided, but not both.
 type CreateReq struct {
+	// ID lets callers force a deterministic schedule ID. Leave empty to
+	// auto-generate a ULID. Used by startup provisioning so the default
+	// schedule has a stable identity that survives user renames.
+	ID           string          `json:"-"`
 	Name         string          `json:"name"`
 	CronExpr     string          `json:"cron_expr,omitempty"`
 	RunAt        *time.Time      `json:"run_at,omitempty"`
@@ -148,13 +152,17 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateReq) (*Sc
 	}
 
 	now := s.now()
-	id, err := ulid.New(ulid.Now(), rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("scheduler.Service.Create: generate id: %w", err)
+	schID := strings.TrimSpace(req.ID)
+	if schID == "" {
+		id, err := ulid.New(ulid.Now(), rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler.Service.Create: generate id: %w", err)
+		}
+		schID = id.String()
 	}
 
 	sch := &Schedule{
-		ID:           id.String(),
+		ID:           schID,
 		Name:         name,
 		CronExpr:     cronExpr,
 		RunAt:        req.RunAt,
@@ -254,9 +262,12 @@ func (s *Service) Update(ctx context.Context, userID, id string, req UpdateReq) 
 	if sch.CronExpr == "" && sch.RunAt == nil {
 		return nil, fmt.Errorf("scheduler.Service.Update: %w", ErrCronOrRunAtMissing)
 	}
+	// Mirror Create's validation: cron and run_at are mutually
+	// exclusive. Silently dropping run_at would hide caller mistakes
+	// and surprise the API consumer with a 200 response that lost
+	// fields.
 	if sch.CronExpr != "" && sch.RunAt != nil {
-		// Recurring schedules don't keep run_at; clear it.
-		sch.RunAt = nil
+		return nil, fmt.Errorf("scheduler.Service.Update: %w", ErrCronAndRunAtBoth)
 	}
 
 	sch.UpdatedAt = s.now()

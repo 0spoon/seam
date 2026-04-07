@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -95,7 +96,7 @@ func (s *MemoryStore) GetMemory(ctx context.Context, db *sql.DB, id string) (*Me
 
 	m, err := scanMemoryRow(row)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("assistant.MemoryStore.GetMemory: %w", err)
@@ -348,7 +349,7 @@ func (s *MemoryStore) SaveConversationSummary(ctx context.Context, db *sql.DB, c
 	trimmed := strings.TrimSpace(summary)
 	if trimmed == "" {
 		err := s.DeleteMemory(ctx, db, id)
-		if err != nil && err != ErrNotFound {
+		if err != nil && !errors.Is(err, ErrNotFound) {
 			return fmt.Errorf("assistant.MemoryStore.SaveConversationSummary: %w", err)
 		}
 		return nil

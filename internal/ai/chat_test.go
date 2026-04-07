@@ -23,7 +23,7 @@ func TestBuildChatMessages(t *testing.T) {
 			{Role: "assistant", Content: "previous answer"},
 		}
 
-		messages := BuildChatMessages("What about caching?", contexts, history)
+		messages := BuildChatMessages("What about caching?", contexts, history, "")
 
 		// System message with context.
 		require.Equal(t, "system", messages[0].Role)
@@ -42,23 +42,45 @@ func TestBuildChatMessages(t *testing.T) {
 	})
 
 	t.Run("no_context", func(t *testing.T) {
-		messages := BuildChatMessages("Hello?", nil, nil)
+		messages := BuildChatMessages("Hello?", nil, nil, "")
 		require.Len(t, messages, 2) // system + user
 		require.Contains(t, messages[0].Content, "No relevant notes")
 	})
 
-	t.Run("history_truncation", func(t *testing.T) {
+	t.Run("history_truncation_to_recent_window", func(t *testing.T) {
+		// 30 turns = 60 messages; the recent window keeps only the
+		// last maxRecentMessages of those, so the prompt should be
+		// system + maxRecentMessages history entries + final user msg.
 		var longHistory []ChatMessage
-		for i := 0; i < 20; i++ {
+		for i := 0; i < 30; i++ {
 			longHistory = append(longHistory,
 				ChatMessage{Role: "user", Content: fmt.Sprintf("q%d", i)},
 				ChatMessage{Role: "assistant", Content: fmt.Sprintf("a%d", i)},
 			)
 		}
 
-		messages := BuildChatMessages("new question", nil, longHistory)
-		// System + truncated history (last 10 messages = 5 turns) + user.
-		require.Equal(t, 1+maxConversationTurns*2+1, len(messages))
+		messages := BuildChatMessages("new question", nil, longHistory, "")
+		require.Equal(t, 1+maxRecentMessages+1, len(messages))
+
+		// The retained slice should be the last maxRecentMessages of
+		// longHistory, so messages[1] is the oldest entry that
+		// survived truncation.
+		oldestKept := longHistory[len(longHistory)-maxRecentMessages]
+		require.Equal(t, oldestKept.Content, messages[1].Content)
+	})
+
+	t.Run("summary_included_in_system_prompt", func(t *testing.T) {
+		summary := "User and assistant earlier discussed migrating from MySQL to PostgreSQL."
+		messages := BuildChatMessages("And what about indexing?", nil, nil, summary)
+
+		require.Equal(t, "system", messages[0].Role)
+		require.Contains(t, messages[0].Content, "Summary of earlier conversation turns")
+		require.Contains(t, messages[0].Content, summary)
+	})
+
+	t.Run("blank_summary_omitted", func(t *testing.T) {
+		messages := BuildChatMessages("hi", nil, nil, "   \n\t  ")
+		require.NotContains(t, messages[0].Content, "Summary of earlier conversation turns")
 	})
 }
 
@@ -117,12 +139,72 @@ func TestChatService_Ask(t *testing.T) {
 		"note1", "API Design", "api-design.md", "Caching is important for API performance.", "h1", now, now)
 
 	chat := NewChatService(ollama, ollama, chroma, mockMgr, "embed-model", "chat-model", nil)
-	result, err := chat.Ask(ctx, "user1", "Tell me about caching", nil)
+	result, err := chat.Ask(ctx, "user1", "Tell me about caching", nil, "")
 	require.NoError(t, err)
 	require.Contains(t, result.Response, "caching")
 	require.Len(t, result.Citations, 1)
 	require.Equal(t, "note1", result.Citations[0].ID)
 	require.Equal(t, "API Design", result.Citations[0].Title)
+}
+
+func TestChatService_SummarizeHistory(t *testing.T) {
+	t.Run("empty_history_returns_existing", func(t *testing.T) {
+		chat := &ChatService{}
+		got, err := chat.SummarizeHistory(context.Background(), nil, "  prior summary  ")
+		require.NoError(t, err)
+		require.Equal(t, "prior summary", got)
+	})
+
+	t.Run("invalid_role_rejected", func(t *testing.T) {
+		chat := &ChatService{}
+		_, err := chat.SummarizeHistory(context.Background(),
+			[]ChatMessage{{Role: "system", Content: "x"}}, "")
+		require.ErrorIs(t, err, ErrInvalidRole)
+	})
+
+	t.Run("calls_llm_with_summarization_prompt", func(t *testing.T) {
+		var capturedMessages []ChatMessage
+		var capturedModel string
+		ollamaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/chat" {
+				return
+			}
+			var req ollamaChatRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			capturedModel = req.Model
+			capturedMessages = req.Messages
+
+			resp := ollamaChatResponse{Done: true}
+			resp.Message.Role = "assistant"
+			resp.Message.Content = "  Refreshed summary text.  "
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		}))
+		defer ollamaServer.Close()
+
+		ollama := NewOllamaClient(ollamaServer.URL, 30*time.Second, 120*time.Second)
+		chat := NewChatService(ollama, ollama, nil, nil, "embed", "summary-model", nil)
+
+		history := []ChatMessage{
+			{Role: "user", Content: "Tell me about goroutines."},
+			{Role: "assistant", Content: "They are lightweight threads."},
+			{Role: "user", Content: "And channels?"},
+			{Role: "assistant", Content: "They synchronize goroutines."},
+		}
+
+		got, err := chat.SummarizeHistory(context.Background(), history, "Earlier: user is learning Go.")
+		require.NoError(t, err)
+		require.Equal(t, "Refreshed summary text.", got)
+		require.Equal(t, "summary-model", capturedModel)
+		require.Len(t, capturedMessages, 2)
+		require.Equal(t, "system", capturedMessages[0].Role)
+		require.Contains(t, capturedMessages[0].Content, "compress conversations")
+		require.Equal(t, "user", capturedMessages[1].Role)
+		// Both the existing summary and the new transcript must reach the model.
+		require.Contains(t, capturedMessages[1].Content, "Earlier: user is learning Go.")
+		require.Contains(t, capturedMessages[1].Content, "goroutines")
+		require.Contains(t, capturedMessages[1].Content, "channels")
+	})
 }
 
 func TestChatService_HandleChatTask(t *testing.T) {

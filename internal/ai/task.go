@@ -91,6 +91,11 @@ type AutolinkPayload struct {
 type ChatPayload struct {
 	Query   string        `json:"query"`
 	History []ChatMessage `json:"history,omitempty"`
+	// Summary, when non-empty, is a digest of older conversation
+	// turns that have been folded out of the verbatim history window.
+	// It is included in the system prompt for long conversations so
+	// the model retains context beyond the recent-message cap.
+	Summary string `json:"summary,omitempty"`
 }
 
 // SummarizeTranscriptPayload is the JSON payload for summarize_transcript tasks.

@@ -173,6 +173,7 @@ func (h *Handler) ask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Query   string        `json:"query"`
 		History []ChatMessage `json:"history,omitempty"`
+		Summary string        `json:"summary,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -186,6 +187,10 @@ func (h *Handler) ask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "query is required")
 		return
 	}
+	if len(req.Summary) > maxInputLen {
+		writeError(w, http.StatusBadRequest, "summary exceeds maximum length")
+		return
+	}
 
 	// Validate history message roles to prevent prompt injection.
 	for _, msg := range req.History {
@@ -195,7 +200,7 @@ func (h *Handler) ask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result, err := h.chatSvc.Ask(r.Context(), userID, req.Query, req.History)
+	result, err := h.chatSvc.Ask(r.Context(), userID, req.Query, req.History, req.Summary)
 	if err != nil {
 		h.logger.Error("ai.Handler.ask: chat failed", "error", err)
 		if !writeProviderError(w, err) {

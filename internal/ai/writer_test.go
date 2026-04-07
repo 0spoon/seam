@@ -47,16 +47,10 @@ func TestWriter_Assist_Expand(t *testing.T) {
 		}
 		require.True(t, found)
 
-		json.NewEncoder(w).Encode(ollamaChatResponse{
-			Message: struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			}{
-				Role:    "assistant",
-				Content: "The expanded text with more details and paragraphs.",
-			},
-			Done: true,
-		})
+		resp := ollamaChatResponse{Done: true}
+		resp.Message.Role = "assistant"
+		resp.Message.Content = "The expanded text with more details and paragraphs."
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -80,16 +74,10 @@ func TestWriter_Assist_Expand(t *testing.T) {
 
 func TestWriter_Assist_Summarize(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaChatResponse{
-			Message: struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			}{
-				Role:    "assistant",
-				Content: "- Key point 1\n- Key point 2",
-			},
-			Done: true,
-		})
+		resp := ollamaChatResponse{Done: true}
+		resp.Message.Role = "assistant"
+		resp.Message.Content = "- Key point 1\n- Key point 2"
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -104,16 +92,10 @@ func TestWriter_Assist_Summarize(t *testing.T) {
 
 func TestWriter_Assist_ExtractActions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaChatResponse{
-			Message: struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			}{
-				Role:    "assistant",
-				Content: "- [ ] Complete the review\n- [ ] Send the report by Friday",
-			},
-			Done: true,
-		})
+		resp := ollamaChatResponse{Done: true}
+		resp.Message.Role = "assistant"
+		resp.Message.Content = "- [ ] Complete the review\n- [ ] Send the report by Friday"
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -138,16 +120,10 @@ func TestWriter_Assist_InvalidAction(t *testing.T) {
 
 func TestWriter_Assist_EmptySelection_LoadsNote(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ollamaChatResponse{
-			Message: struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			}{
-				Role:    "assistant",
-				Content: "summarized body content",
-			},
-			Done: true,
-		})
+		resp := ollamaChatResponse{Done: true}
+		resp.Message.Role = "assistant"
+		resp.Message.Content = "summarized body content"
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 

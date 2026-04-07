@@ -14,7 +14,12 @@ import (
 // ErrInvalidRole is returned when a chat history message has an invalid role.
 var ErrInvalidRole = errors.New("invalid message role in history: only 'user' and 'assistant' are allowed")
 
-const maxConversationTurns = 5
+// maxRecentMessages is the maximum number of raw history messages
+// (user + assistant combined) included verbatim in the chat prompt.
+// Older turns are expected to be folded into a conversation summary
+// passed alongside the history. This replaces the previous hard cap of
+// 5 turns and is the upper bound when no summary is supplied.
+const maxRecentMessages = 20
 
 // Default chat retrieval parameters.
 const (
@@ -107,8 +112,12 @@ func validateHistoryRoles(history []ChatMessage) error {
 }
 
 // Ask handles a chat question by retrieving relevant notes and generating
-// a response grounded in the user's knowledge base.
-func (c *ChatService) Ask(ctx context.Context, userID, query string, history []ChatMessage) (*ChatResult, error) {
+// a response grounded in the user's knowledge base. The summary
+// argument, if non-empty, is a previously-generated summary of older
+// conversation turns that no longer fit in the recent-message window;
+// it is included in the system prompt so the model retains long-form
+// context across long conversations.
+func (c *ChatService) Ask(ctx context.Context, userID, query string, history []ChatMessage, summary string) (*ChatResult, error) {
 	if err := validateHistoryRoles(history); err != nil {
 		return nil, fmt.Errorf("ai.ChatService.Ask: %w", err)
 	}
@@ -118,7 +127,7 @@ func (c *ChatService) Ask(ctx context.Context, userID, query string, history []C
 		return nil, err
 	}
 
-	messages := BuildChatMessages(query, contexts, history)
+	messages := BuildChatMessages(query, contexts, history, summary)
 
 	resp, err := c.chat.ChatCompletion(ctx, c.chatModel, messages)
 	if err != nil {
@@ -133,7 +142,7 @@ func (c *ChatService) Ask(ctx context.Context, userID, query string, history []C
 
 // AskStream is like Ask but returns a streaming response.
 // Returns token channel, citations list, and error channel.
-func (c *ChatService) AskStream(ctx context.Context, userID, query string, history []ChatMessage) (<-chan string, []Citation, <-chan error) {
+func (c *ChatService) AskStream(ctx context.Context, userID, query string, history []ChatMessage, summary string) (<-chan string, []Citation, <-chan error) {
 	tokenCh := make(chan string, 64)
 	errCh := make(chan error, 1)
 
@@ -152,7 +161,7 @@ func (c *ChatService) AskStream(ctx context.Context, userID, query string, histo
 		return tokenCh, nil, errCh
 	}
 
-	messages := BuildChatMessages(query, contexts, history)
+	messages := BuildChatMessages(query, contexts, history, summary)
 
 	llmTokenCh, llmErrCh := c.chat.ChatCompletionStream(ctx, c.chatModel, messages)
 
@@ -264,10 +273,15 @@ func (c *ChatService) retrieveContext(ctx context.Context, userID, query string)
 }
 
 // BuildChatMessages constructs the messages for the RAG chat prompt.
+// The summary argument, if non-empty, is a digest of older
+// conversation turns that have been folded out of the verbatim history
+// window; it is appended to the system prompt so the model retains
+// long-form context. The recent-message window is capped at
+// maxRecentMessages entries (combined user + assistant messages).
 // Exported for testing.
-func BuildChatMessages(query string, noteContexts []noteSnippet, history []ChatMessage) []ChatMessage {
-	systemPrompt := `You are Seam, an AI assistant that answers questions using the user's personal notes. 
-You ONLY answer based on the provided note context. If the notes do not contain relevant information, 
+func BuildChatMessages(query string, noteContexts []noteSnippet, history []ChatMessage, summary string) []ChatMessage {
+	systemPrompt := `You are Seam, an AI assistant that answers questions using the user's personal notes.
+You ONLY answer based on the provided note context. If the notes do not contain relevant information,
 say so clearly. Do not make up information.
 
 When referencing a note, mention its title. Be concise and helpful.`
@@ -284,16 +298,22 @@ When referencing a note, mention its title. Be concise and helpful.`
 		contextStr = "\n\nNo relevant notes were found in the user's knowledge base."
 	}
 
+	systemContent := systemPrompt + contextStr
+	if strings.TrimSpace(summary) != "" {
+		systemContent += "\n\nSummary of earlier conversation turns (older context that no longer fits the verbatim window):\n" + summary
+	}
+
 	var messages []ChatMessage
 	messages = append(messages, ChatMessage{
 		Role:    "system",
-		Content: systemPrompt + contextStr,
+		Content: systemContent,
 	})
 
-	// Add conversation history (limited to last N turns).
+	// Add the most recent N raw history messages. Older turns are
+	// expected to have been folded into the summary above.
 	historyStart := 0
-	if len(history) > maxConversationTurns*2 {
-		historyStart = len(history) - maxConversationTurns*2
+	if len(history) > maxRecentMessages {
+		historyStart = len(history) - maxRecentMessages
 	}
 	for _, h := range history[historyStart:] {
 		messages = append(messages, h)
@@ -307,6 +327,64 @@ When referencing a note, mention its title. Be concise and helpful.`
 	return messages
 }
 
+// SummarizeHistory produces a concise digest of older conversation
+// turns suitable for inclusion in a future chat prompt as the summary
+// argument to BuildChatMessages. When existingSummary is non-empty,
+// the model is asked to extend it incrementally rather than start
+// from scratch, so summaries can be refreshed cheaply over time.
+//
+// The history slice should contain the messages being folded out of
+// the recent-message window, in chronological order. Returns an empty
+// string with no error if history is empty.
+func (c *ChatService) SummarizeHistory(ctx context.Context, history []ChatMessage, existingSummary string) (string, error) {
+	if len(history) == 0 {
+		return strings.TrimSpace(existingSummary), nil
+	}
+	if err := validateHistoryRoles(history); err != nil {
+		return "", fmt.Errorf("ai.ChatService.SummarizeHistory: %w", err)
+	}
+
+	var transcriptB strings.Builder
+	for _, m := range history {
+		transcriptB.WriteString(strings.ToUpper(m.Role))
+		transcriptB.WriteString(": ")
+		transcriptB.WriteString(m.Content)
+		transcriptB.WriteString("\n\n")
+	}
+	transcript := strings.TrimSpace(transcriptB.String())
+
+	systemPrompt := `You compress conversations between a user and an AI assistant.
+Produce a concise running summary that preserves: the user's goals,
+decisions made, facts established, open questions, and any commitments.
+Use neutral past-tense prose. Avoid copying long verbatim quotes. Aim
+for 5-12 sentences total. Do not invent details that are not in the
+source material.`
+
+	var userContent strings.Builder
+	if strings.TrimSpace(existingSummary) != "" {
+		userContent.WriteString("Existing summary of earlier turns:\n")
+		userContent.WriteString(strings.TrimSpace(existingSummary))
+		userContent.WriteString("\n\nNew transcript to fold in:\n")
+		userContent.WriteString(transcript)
+		userContent.WriteString("\n\nProduce an updated combined summary.")
+	} else {
+		userContent.WriteString("Transcript to summarize:\n")
+		userContent.WriteString(transcript)
+		userContent.WriteString("\n\nProduce a summary.")
+	}
+
+	messages := []ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userContent.String()},
+	}
+
+	resp, err := c.chat.ChatCompletion(ctx, c.chatModel, messages)
+	if err != nil {
+		return "", fmt.Errorf("ai.ChatService.SummarizeHistory: chat completion: %w", err)
+	}
+	return strings.TrimSpace(resp.Content), nil
+}
+
 // HandleChatTask is a TaskHandler for chat tasks.
 func (c *ChatService) HandleChatTask(ctx context.Context, task *Task) (json.RawMessage, error) {
 	var payload ChatPayload
@@ -314,7 +392,7 @@ func (c *ChatService) HandleChatTask(ctx context.Context, task *Task) (json.RawM
 		return nil, fmt.Errorf("ai.ChatService.HandleChatTask: unmarshal payload: %w", err)
 	}
 
-	result, err := c.Ask(ctx, task.UserID, payload.Query, payload.History)
+	result, err := c.Ask(ctx, task.UserID, payload.Query, payload.History, payload.Summary)
 	if err != nil {
 		return nil, err
 	}

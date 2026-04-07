@@ -56,6 +56,29 @@ type anthropicMessage struct {
 	Content string `json:"content"`
 }
 
+// anthropicToolMessage is a message with structured content blocks for tool use.
+type anthropicToolMessage struct {
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"` // string or []anthropicContentBlock
+}
+
+// anthropicToolRequest is the request body with tool definitions.
+type anthropicToolRequest struct {
+	Model     string                 `json:"model"`
+	MaxTokens int                    `json:"max_tokens"`
+	System    string                 `json:"system,omitempty"`
+	Messages  []anthropicToolMessage `json:"messages"`
+	Tools     []anthropicToolDef     `json:"tools,omitempty"`
+	Stream    bool                   `json:"stream"`
+}
+
+// anthropicToolDef is a tool definition in Anthropic format.
+type anthropicToolDef struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"input_schema"`
+}
+
 // anthropicRequest is the request body for POST /v1/messages.
 type anthropicRequest struct {
 	Model     string             `json:"model"`
@@ -67,8 +90,11 @@ type anthropicRequest struct {
 
 // anthropicContentBlock is a content block in the response.
 type anthropicContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	ID    string          `json:"id,omitempty"`    // present for tool_use blocks
+	Name  string          `json:"name,omitempty"`  // present for tool_use blocks
+	Input json.RawMessage `json:"input,omitempty"` // present for tool_use blocks
 }
 
 // anthropicResponse is the response from POST /v1/messages.
@@ -174,6 +200,139 @@ func (c *AnthropicClient) ChatCompletion(ctx context.Context, model string, mess
 	}
 
 	return &ChatResponse{Content: strings.Join(textParts, "")}, nil
+}
+
+// ChatCompletionWithTools sends messages with tool definitions to the Anthropic
+// Messages endpoint and returns a response that may contain tool calls.
+func (c *AnthropicClient) ChatCompletionWithTools(ctx context.Context, model string, messages []ToolMessage, tools []ToolDefinition) (*ToolChatResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.chatTimeout)
+	defer cancel()
+
+	// Convert tool definitions.
+	var anthropicTools []anthropicToolDef
+	for _, t := range tools {
+		anthropicTools = append(anthropicTools, anthropicToolDef{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.Parameters,
+		})
+	}
+
+	// Extract system prompt and convert messages.
+	var systemParts []string
+	var converted []anthropicToolMessage
+	for _, m := range messages {
+		if m.Role == "system" {
+			systemParts = append(systemParts, m.Content)
+			continue
+		}
+		if m.Role == "tool" {
+			// Anthropic expects tool results as user messages with tool_result content blocks.
+			// tool_result blocks use "tool_use_id" and "content" fields, not the standard
+			// anthropicContentBlock fields.
+			converted = append(converted, anthropicToolMessage{
+				Role: "user",
+				Content: []map[string]interface{}{
+					{
+						"type":        "tool_result",
+						"tool_use_id": m.ToolCallID,
+						"content":     m.Content,
+					},
+				},
+			})
+			continue
+		}
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			// Assistant message with tool calls uses content blocks.
+			var blocks []anthropicContentBlock
+			if m.Content != "" {
+				blocks = append(blocks, anthropicContentBlock{Type: "text", Text: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				blocks = append(blocks, anthropicContentBlock{
+					Type:  "tool_use",
+					ID:    tc.ID,
+					Name:  tc.Name,
+					Input: json.RawMessage(tc.Arguments),
+				})
+			}
+			converted = append(converted, anthropicToolMessage{
+				Role:    "assistant",
+				Content: blocks,
+			})
+			continue
+		}
+		converted = append(converted, anthropicToolMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		})
+	}
+
+	system := strings.Join(systemParts, "\n\n")
+	if len(converted) == 0 {
+		return nil, fmt.Errorf("ai.AnthropicClient.ChatCompletionWithTools: %w", ErrEmptyMessages)
+	}
+
+	reqBody := anthropicToolRequest{
+		Model:     model,
+		MaxTokens: c.maxTokens,
+		System:    system,
+		Messages:  converted,
+		Tools:     anthropicTools,
+		Stream:    false,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("ai.AnthropicClient.ChatCompletionWithTools: marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/messages", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("ai.AnthropicClient.ChatCompletionWithTools: new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", anthropicAPIVersion)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ai.AnthropicClient.ChatCompletionWithTools: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkResponse(resp); err != nil {
+		return nil, fmt.Errorf("ai.AnthropicClient.ChatCompletionWithTools: %w", err)
+	}
+
+	var result anthropicResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("ai.AnthropicClient.ChatCompletionWithTools: decode: %w", err)
+	}
+
+	tcr := &ToolChatResponse{
+		FinishReason: "stop",
+	}
+	if result.StopReason == "tool_use" {
+		tcr.FinishReason = "tool_calls"
+	}
+
+	var textParts []string
+	for _, block := range result.Content {
+		switch block.Type {
+		case "text":
+			textParts = append(textParts, block.Text)
+		case "tool_use":
+			tcr.ToolCalls = append(tcr.ToolCalls, ToolCall{
+				ID:        block.ID,
+				Name:      block.Name,
+				Arguments: string(block.Input),
+			})
+		}
+	}
+	tcr.Content = strings.Join(textParts, "")
+
+	return tcr, nil
 }
 
 // ChatCompletionStream sends messages to the Anthropic Messages endpoint with

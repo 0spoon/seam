@@ -116,11 +116,48 @@ type ollamaChatRequest struct {
 	Stream   bool          `json:"stream"`
 }
 
+// ollamaToolChatRequest is the request body with tool definitions.
+type ollamaToolChatRequest struct {
+	Model    string              `json:"model"`
+	Messages []ollamaToolMessage `json:"messages"`
+	Stream   bool                `json:"stream"`
+	Tools    []ollamaTool        `json:"tools,omitempty"`
+}
+
+// ollamaTool is an Ollama function tool definition.
+type ollamaTool struct {
+	Type     string             `json:"type"` // "function"
+	Function ollamaToolFunction `json:"function"`
+}
+
+// ollamaToolFunction describes a function the model can call.
+type ollamaToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+// ollamaToolMessage is a message in the Ollama format with tool support.
+type ollamaToolMessage struct {
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
+}
+
+// ollamaToolCall represents a tool call in Ollama's response.
+type ollamaToolCall struct {
+	Function struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	} `json:"function"`
+}
+
 // ollamaChatResponse is a single response object from POST /api/chat.
 type ollamaChatResponse struct {
 	Message struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role      string           `json:"role"`
+		Content   string           `json:"content"`
+		ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
 	} `json:"message"`
 	Done bool `json:"done"`
 }
@@ -242,6 +279,103 @@ func (c *OllamaClient) ChatCompletionStream(ctx context.Context, model string, m
 	}()
 
 	return tokenCh, errCh
+}
+
+// ChatCompletionWithTools sends messages with tool definitions to the Ollama
+// chat endpoint and returns a response that may contain tool calls.
+func (c *OllamaClient) ChatCompletionWithTools(ctx context.Context, model string, messages []ToolMessage, tools []ToolDefinition) (*ToolChatResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.chatTimeout)
+	defer cancel()
+
+	// Convert tool definitions to Ollama format.
+	var ollamaTools []ollamaTool
+	for _, t := range tools {
+		ollamaTools = append(ollamaTools, ollamaTool{
+			Type: "function",
+			Function: ollamaToolFunction{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.Parameters,
+			},
+		})
+	}
+
+	// Convert messages to Ollama format.
+	var ollamaMessages []ollamaToolMessage
+	for _, m := range messages {
+		msg := ollamaToolMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		}
+		for _, tc := range m.ToolCalls {
+			argsRaw := json.RawMessage(tc.Arguments)
+			msg.ToolCalls = append(msg.ToolCalls, ollamaToolCall{
+				Function: struct {
+					Name      string          `json:"name"`
+					Arguments json.RawMessage `json:"arguments"`
+				}{
+					Name:      tc.Name,
+					Arguments: argsRaw,
+				},
+			})
+		}
+		ollamaMessages = append(ollamaMessages, msg)
+	}
+
+	reqBody := ollamaToolChatRequest{
+		Model:    model,
+		Messages: ollamaMessages,
+		Stream:   false,
+		Tools:    ollamaTools,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("ai.OllamaClient.ChatCompletionWithTools: marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/chat", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("ai.OllamaClient.ChatCompletionWithTools: new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ai.OllamaClient.ChatCompletionWithTools: %w: %w", ErrOllamaUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkResponse(resp); err != nil {
+		return nil, fmt.Errorf("ai.OllamaClient.ChatCompletionWithTools: %w", err)
+	}
+
+	var result ollamaChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("ai.OllamaClient.ChatCompletionWithTools: decode: %w", err)
+	}
+
+	tcr := &ToolChatResponse{
+		Content:      result.Message.Content,
+		FinishReason: "stop",
+	}
+
+	if len(result.Message.ToolCalls) > 0 {
+		tcr.FinishReason = "tool_calls"
+		for _, tc := range result.Message.ToolCalls {
+			argsJSON, marshalErr := json.Marshal(tc.Function.Arguments)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("ai.OllamaClient.ChatCompletionWithTools: marshal tool args for %s: %w", tc.Function.Name, marshalErr)
+			}
+			tcr.ToolCalls = append(tcr.ToolCalls, ToolCall{
+				ID:        fmt.Sprintf("call_%s_%d", tc.Function.Name, len(tcr.ToolCalls)),
+				Name:      tc.Function.Name,
+				Arguments: string(argsJSON),
+			})
+		}
+	}
+
+	return tcr, nil
 }
 
 // checkResponse handles non-2xx responses from Ollama.

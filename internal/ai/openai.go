@@ -47,6 +47,46 @@ type openaiChatRequest struct {
 	Stream   bool          `json:"stream"`
 }
 
+// openaiToolChatRequest is the request body with tool definitions.
+type openaiToolChatRequest struct {
+	Model    string              `json:"model"`
+	Messages []openaiToolMessage `json:"messages"`
+	Stream   bool                `json:"stream"`
+	Tools    []openaiTool        `json:"tools,omitempty"`
+}
+
+// openaiTool is an OpenAI function tool definition.
+type openaiTool struct {
+	Type     string             `json:"type"` // always "function"
+	Function openaiToolFunction `json:"function"`
+}
+
+// openaiToolFunction describes a function the model can call.
+type openaiToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+// openaiToolMessage is a message in the OpenAI format with tool support.
+type openaiToolMessage struct {
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Name       string           `json:"name,omitempty"`
+}
+
+// openaiToolCall represents a tool call in the response.
+type openaiToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
 // openaiChatChoice is a single choice in the response.
 type openaiChatChoice struct {
 	Message struct {
@@ -212,6 +252,114 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, model string, m
 	}()
 
 	return tokenCh, errCh
+}
+
+// ChatCompletionWithTools sends messages with tool definitions to the OpenAI
+// chat endpoint and returns a response that may contain tool calls.
+func (c *OpenAIClient) ChatCompletionWithTools(ctx context.Context, model string, messages []ToolMessage, tools []ToolDefinition) (*ToolChatResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.chatTimeout)
+	defer cancel()
+
+	// Convert tool definitions.
+	var oaiTools []openaiTool
+	for _, t := range tools {
+		oaiTools = append(oaiTools, openaiTool{
+			Type: "function",
+			Function: openaiToolFunction{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.Parameters,
+			},
+		})
+	}
+
+	// Convert messages.
+	var oaiMessages []openaiToolMessage
+	for _, m := range messages {
+		msg := openaiToolMessage{
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolCallID: m.ToolCallID,
+			Name:       m.Name,
+		}
+		for _, tc := range m.ToolCalls {
+			msg.ToolCalls = append(msg.ToolCalls, openaiToolCall{
+				ID:   tc.ID,
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+				},
+			})
+		}
+		oaiMessages = append(oaiMessages, msg)
+	}
+
+	reqBody := openaiToolChatRequest{
+		Model:    model,
+		Messages: oaiMessages,
+		Stream:   false,
+		Tools:    oaiTools,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("ai.OpenAIClient.ChatCompletionWithTools: marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("ai.OpenAIClient.ChatCompletionWithTools: new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ai.OpenAIClient.ChatCompletionWithTools: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkResponse(resp); err != nil {
+		return nil, fmt.Errorf("ai.OpenAIClient.ChatCompletionWithTools: %w", err)
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Role      string           `json:"role"`
+				Content   string           `json:"content"`
+				ToolCalls []openaiToolCall `json:"tool_calls,omitempty"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Error *openaiError `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("ai.OpenAIClient.ChatCompletionWithTools: decode: %w", err)
+	}
+
+	if len(result.Choices) == 0 {
+		return nil, fmt.Errorf("ai.OpenAIClient.ChatCompletionWithTools: empty response (no choices)")
+	}
+
+	choice := result.Choices[0]
+	tcr := &ToolChatResponse{
+		Content:      choice.Message.Content,
+		FinishReason: choice.FinishReason,
+	}
+	for _, tc := range choice.Message.ToolCalls {
+		tcr.ToolCalls = append(tcr.ToolCalls, ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: tc.Function.Arguments,
+		})
+	}
+
+	return tcr, nil
 }
 
 // checkResponse handles non-2xx responses from the OpenAI API.

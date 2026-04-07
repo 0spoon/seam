@@ -115,10 +115,13 @@ export function SlashMenu({
   const listRef = useRef<HTMLUListElement>(null);
   const filtered = filterCommands(query);
 
-  // Reset selection when query changes
+  // Reset selection when query changes. Selection index is reset when the
+  // (external) query input changes.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Scroll the active item into view
   useEffect(() => {

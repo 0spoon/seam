@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { sanitizeHtml } from '../../lib/sanitize';
 import { useNavigate } from 'react-router-dom';
 import { Send, Loader2, FileText, Plus, Trash2, ChevronDown } from 'lucide-react';

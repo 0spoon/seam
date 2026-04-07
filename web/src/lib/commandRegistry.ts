@@ -33,7 +33,7 @@ class CommandRegistry {
     );
   }
 
-  getFiltered(query: string, mode: 'command' | 'all'): Command[] {
+  getFiltered(query: string): Command[] {
     const available = this.getAll();
     if (!query) return available;
 

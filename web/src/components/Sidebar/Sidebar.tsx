@@ -119,7 +119,9 @@ export function Sidebar() {
 
   useKeyboard(keyBindings);
 
-  // Debounced inline search as user types.
+  // Debounced inline search as user types. Effect synchronizes search result
+  // state with the external debounced FTS request lifecycle.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -149,6 +151,7 @@ export function Sidebar() {
       }
     };
   }, [searchQuery]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Close dropdown when clicking outside.
   useEffect(() => {

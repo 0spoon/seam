@@ -4,7 +4,19 @@ import { render, screen, fireEvent } from '@testing-library/react';
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
-    div: ({ children, className, onClick, onKeyDown, ...props }: any) => (
+    div: ({
+      children,
+      className,
+      onClick,
+      onKeyDown,
+      ...props
+    }: {
+      children?: React.ReactNode;
+      className?: string;
+      onClick?: React.MouseEventHandler;
+      onKeyDown?: React.KeyboardEventHandler;
+      [key: string]: unknown;
+    }) => (
       <div
         className={className}
         onClick={onClick}

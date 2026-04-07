@@ -14,6 +14,9 @@ interface ToastState {
   removeToast: (id: string) => void;
 }
 
+// Store is co-located with its consuming component; 23 imports across the app
+// rely on this re-export, splitting it out is not worth the churn.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   addToast: (message, type = 'info') => {

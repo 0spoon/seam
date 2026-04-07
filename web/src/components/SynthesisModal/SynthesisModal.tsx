@@ -71,7 +71,7 @@ export function SynthesisModal({
       e.preventDefault();
       first.focus();
     }
-  }, []);
+  }, [onClose]);
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {

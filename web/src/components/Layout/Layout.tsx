@@ -64,9 +64,11 @@ export function Layout() {
 
   useKeyboard(keyBindings);
 
-  // Route change announcer for screen readers.
+  // Route change announcer for screen readers. Effect syncs the SR
+  // announcement with the external (router) location change.
   const [routeAnnouncement, setRouteAnnouncement] = useState('');
   const mainRef = useRef<HTMLElement>(null);
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const pathToName: Record<string, string> = {
       '/': 'Inbox',
@@ -84,6 +86,7 @@ export function Layout() {
     // Move focus to main content on navigation.
     mainRef.current?.focus();
   }, [location.pathname]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <div className={`${styles.layout} ${zenMode ? styles.zenMode : ''}`}>

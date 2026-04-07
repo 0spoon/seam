@@ -9,7 +9,6 @@ import {
   subMonths,
   addDays,
   isSameMonth,
-  isSameDay,
   isToday,
 } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';

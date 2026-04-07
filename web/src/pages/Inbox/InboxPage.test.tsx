@@ -23,7 +23,13 @@ vi.mock('@tanstack/react-virtual', () => ({
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
-    div: ({ children, ...props }: any) => {
+    div: ({
+      children,
+      ...props
+    }: {
+      children?: React.ReactNode;
+      [key: string]: unknown;
+    }) => {
       const safe = Object.fromEntries(
         Object.entries(props).filter(
           ([k]) =>

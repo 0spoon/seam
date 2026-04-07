@@ -35,7 +35,13 @@ vi.mock('./Sidebar.module.css', () => ({
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
-    div: ({ children, className, ...props }: any) => {
+    div: ({
+      children,
+      className,
+    }: {
+      children?: React.ReactNode;
+      className?: string;
+    }) => {
       const safeProps: Record<string, unknown> = {};
       if (className) safeProps.className = className;
       return <div {...safeProps}>{children}</div>;

@@ -5,7 +5,6 @@ import {
   EditorView,
   type ViewUpdate,
   MatchDecorator,
-  WidgetType,
 } from '@codemirror/view';
 import {
   autocompletion,

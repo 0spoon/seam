@@ -217,7 +217,8 @@ export function NoteEditorPage() {
         }, 100);
       }
     }
-  }, [currentNote?.id]); // Only reset content on note change, not on every update
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset content on note change, not on every update
+  }, [currentNote?.id]);
 
   // Check for a local draft that is newer than the server version.
   useEffect(() => {
@@ -312,7 +313,7 @@ export function NoteEditorPage() {
         }
       }
     };
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally uses refs
+  }, [id]);
 
   const handleDeleteClick = () => {
     setShowMenu(false);

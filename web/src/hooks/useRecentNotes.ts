@@ -7,5 +7,7 @@ export function useRecentNote(id: string | undefined, title: string | undefined)
     if (id && title) {
       addRecentNote(id, title);
     }
+    // Only re-run on id change so a typed-rename doesn't churn the recents list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 }

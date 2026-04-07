@@ -110,7 +110,7 @@ export function SearchPage() {
         abortRef.current.abort();
       }
     };
-  }, [query, mode]);
+  }, [query, mode, addToast]);
 
   const handleModeChange = (newMode: SearchMode) => {
     setMode(newMode);

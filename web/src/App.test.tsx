@@ -29,8 +29,10 @@ vi.mock('./pages/Settings/SettingsPage', () => ({
 }));
 
 // Mock Layout to just render children via Outlet
-vi.mock('./components/Layout/Layout', () => {
-  const { Outlet } = require('react-router-dom');
+vi.mock('./components/Layout/Layout', async () => {
+  const { Outlet } = await vi.importActual<typeof import('react-router-dom')>(
+    'react-router-dom',
+  );
   return {
     Layout: () => (
       <div data-testid="layout">

@@ -25,10 +25,10 @@ import {
 } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useProjectStore } from '../../stores/projectStore';
-import { commandRegistry, type Command } from '../../lib/commandRegistry';
+import { commandRegistry } from '../../lib/commandRegistry';
 import { navigate } from '../../lib/navigation';
 import { fuzzyMatch } from '../../lib/fuzzyMatch';
-import { getRecentNotes, type RecentNote } from '../../lib/recentNotes';
+import { getRecentNotes } from '../../lib/recentNotes';
 import { searchFTS } from '../../api/client';
 import { timeAgo } from '../../lib/dates';
 import type { FTSResult, TagCount } from '../../api/types';
@@ -182,7 +182,9 @@ export function CommandPalette() {
     }
   }, [mode]);
 
-  // Debounced FTS search for note mode.
+  // Debounced FTS search for note mode. The effect synchronizes local result
+  // state with the external (debounced) FTS request lifecycle.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (mode !== 'notes' || !searchQuery) {
       setFtsResults([]);
@@ -336,7 +338,8 @@ export function CommandPalette() {
     setSelectedIndex(0);
   }, [resultItems.length, query]);
 
-  // Open/close handling.
+  // Open/close handling: reset internal state when the palette opens, syncing
+  // with the external open/close lifecycle.
   useEffect(() => {
     if (isOpen) {
       previousFocusRef.current = document.activeElement as HTMLElement | null;
@@ -346,6 +349,7 @@ export function CommandPalette() {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Scroll selected item into view.
   useEffect(() => {

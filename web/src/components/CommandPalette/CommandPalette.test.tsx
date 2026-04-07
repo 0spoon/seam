@@ -1,11 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
-    div: ({ children, className, onClick, onKeyDown, role, ...props }: any) => {
+    div: ({
+      children,
+      className,
+      onClick,
+      onKeyDown,
+      role,
+      ...props
+    }: {
+      children?: React.ReactNode;
+      className?: string;
+      onClick?: React.MouseEventHandler;
+      onKeyDown?: React.KeyboardEventHandler;
+      role?: string;
+      [key: string]: unknown;
+    }) => {
       const safeProps: Record<string, unknown> = {};
       if (className) safeProps.className = className;
       if (onClick) safeProps.onClick = onClick;

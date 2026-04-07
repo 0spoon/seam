@@ -83,7 +83,7 @@ function findSlashOffset(lineText: string, cursorOffset: number): number {
 // ViewPlugin that detects '/' trigger and manages slash menu lifecycle.
 const slashMenuPlugin = ViewPlugin.fromClass(
   class {
-    constructor(_view: EditorView) {}
+    constructor() {}
 
     update(update: ViewUpdate) {
       const state = update.state.field(slashMenuField);

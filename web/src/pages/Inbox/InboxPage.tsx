@@ -102,6 +102,9 @@ export function InboxPage() {
   const hasMore = loadedNotes.length < total;
   const itemCount = loadedNotes.length + (hasMore ? 1 : 0);
 
+  // TanStack Virtual returns getters that intentionally cannot be memoized;
+  // React Compiler skip is expected.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: itemCount,
     getScrollElement: () => scrollRef.current,

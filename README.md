@@ -79,4 +79,4 @@ See [Getting Started](docs/getting-started.md) for prerequisites and full config
 
 ## License
 
-TBD
+[MIT](LICENSE)

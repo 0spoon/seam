@@ -57,7 +57,7 @@ echo
 
 # -- LLM provider -------------------------------------------------------------
 
-info "LLM provider for chat completions (embeddings always run on local Ollama)"
+info "LLM provider for chat completions"
 echo "  1) ollama    -- fully local, no API costs"
 echo "  2) openai    -- GPT-4o, or any OpenAI-compatible API"
 echo "  3) anthropic -- Claude"
@@ -93,14 +93,6 @@ elif [ "$LLM_PROVIDER" = "anthropic" ]; then
     read -r ANTHROPIC_API_KEY
     echo
 fi
-
-# -- Ollama URL ---------------------------------------------------------------
-
-DEFAULT_OLLAMA_URL="http://localhost:11434"
-ask "Ollama URL [$DEFAULT_OLLAMA_URL]:"
-read -r OLLAMA_URL
-OLLAMA_URL="${OLLAMA_URL:-$DEFAULT_OLLAMA_URL}"
-echo
 
 # -- ChromaDB -----------------------------------------------------------------
 
@@ -242,6 +234,25 @@ if [ -n "$CHROMA_URL" ]; then
     fi
 fi
 
+# -- Ollama URL ---------------------------------------------------------------
+#
+# Only prompt when Ollama is actually being used -- either as the chat
+# provider or as the embedding provider. Otherwise leave the default in
+# place silently so a future opt-in still works without re-running init.
+
+DEFAULT_OLLAMA_URL="http://localhost:11434"
+OLLAMA_URL="$DEFAULT_OLLAMA_URL"
+USES_OLLAMA="no"
+if [ "$LLM_PROVIDER" = "ollama" ]; then USES_OLLAMA="yes"; fi
+if [ -n "$CHROMA_URL" ] && [ "$EMBED_PROVIDER" = "ollama" ]; then USES_OLLAMA="yes"; fi
+
+if [ "$USES_OLLAMA" = "yes" ]; then
+    ask "Ollama URL [$DEFAULT_OLLAMA_URL]:"
+    read -r OLLAMA_URL_INPUT
+    OLLAMA_URL="${OLLAMA_URL_INPUT:-$DEFAULT_OLLAMA_URL}"
+    echo
+fi
+
 # -- listen address -----------------------------------------------------------
 
 DEFAULT_LISTEN=":8080"
@@ -367,7 +378,9 @@ info "Configuration summary:"
 echo "  Listen:        ${LISTEN}"
 echo "  Data dir:      ${DATA_DIR}"
 echo "  LLM provider:  ${LLM_PROVIDER}"
-echo "  Ollama:        ${OLLAMA_URL}"
+if [ "$USES_OLLAMA" = "yes" ]; then
+    echo "  Ollama:        ${OLLAMA_URL}"
+fi
 echo "  ChromaDB:      ${CHROMA_SUMMARY}"
 echo "  Chat model:    ${CHAT_MODEL}"
 echo "  Bg model:      ${BG_MODEL}"

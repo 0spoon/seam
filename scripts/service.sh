@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+#
+# Day-to-day management for the seamd user-level service installed by
+# install-service.sh. Wraps launchctl (macOS) and systemctl --user (Linux)
+# so the Makefile targets stay portable.
+#
+# Usage: scripts/service.sh <status|start|stop|restart|logs>
+#
+# When the optional Chroma supervisor service is also installed, every
+# action applies to it as well, so a single 'make service-restart' brings
+# both halves back together.
+
+set -euo pipefail
+
+ACTION="${1:-}"
+OS="$(uname -s)"
+
+SEAMD_LABEL="com.seam.seamd"
+CHROMA_LABEL="com.seam.chroma"
+SEAMD_UNIT="seamd.service"
+CHROMA_UNIT="seamd-chroma.service"
+
+LAUNCHD_DIR="$HOME/Library/LaunchAgents"
+SYSTEMD_DIR="$HOME/.config/systemd/user"
+MAC_LOG_DIR="$HOME/Library/Logs/seam"
+
+info() { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
+ok()   { printf "\033[1;32m==>\033[0m %s\n" "$1"; }
+warn() { printf "\033[1;33m==>\033[0m %s\n" "$1"; }
+err()  { printf "\033[1;31m==>\033[0m %s\n" "$1" >&2; }
+
+usage() {
+    cat <<EOF
+Usage: scripts/service.sh <action>
+
+Actions:
+  status     Show status for seamd (and Chroma supervisor if installed)
+  start      Start the services
+  stop       Stop the services
+  restart    Stop then start
+  logs       Follow seamd stdout + stderr logs
+
+Install with: make install-service
+Remove with:  make uninstall-service
+EOF
+}
+
+if [ -z "$ACTION" ]; then
+    usage
+    exit 1
+fi
+
+# -- launchd helpers (macOS) --------------------------------------------------
+
+ld_target() { echo "gui/$(id -u)/$1"; }
+ld_plist()  { echo "$LAUNCHD_DIR/$1.plist"; }
+
+ld_loaded() {
+    launchctl print "$(ld_target "$1")" >/dev/null 2>&1
+}
+
+ld_status() {
+    local label="$1"
+    local target
+    target="$(ld_target "$label")"
+    if ! ld_loaded "$label"; then
+        printf "  %-18s not loaded\n" "$label"
+        return 0
+    fi
+    # 'launchctl print' is verbose; pull out the few fields people care about.
+    local state pid exit_code
+    state=$(launchctl print "$target" 2>/dev/null | awk -F'= ' '/^\tstate / {print $2; exit}')
+    pid=$(launchctl print "$target" 2>/dev/null | awk -F'= ' '/^\tpid / {print $2; exit}')
+    exit_code=$(launchctl print "$target" 2>/dev/null | awk -F'= ' '/^\tlast exit code / {print $2; exit}')
+    printf "  %-18s state=%s pid=%s last_exit=%s\n" "$label" "${state:-?}" "${pid:-none}" "${exit_code:-?}"
+}
+
+ld_start() {
+    local label="$1"
+    local plist
+    plist="$(ld_plist "$label")"
+    if [ ! -f "$plist" ]; then
+        warn "$label: plist not found at $plist (run 'make install-service')"
+        return 0
+    fi
+    if ld_loaded "$label"; then
+        info "$label: already running"
+        return 0
+    fi
+    if launchctl bootstrap "gui/$(id -u)" "$plist"; then
+        ok "$label: started"
+    else
+        err "$label: bootstrap failed"
+        return 1
+    fi
+}
+
+ld_stop() {
+    local label="$1"
+    if ! ld_loaded "$label"; then
+        info "$label: not running"
+        return 0
+    fi
+    launchctl bootout "$(ld_target "$label")" 2>/dev/null || true
+    # bootout returns before the process is fully gone; wait briefly.
+    for _ in 1 2 3 4 5; do
+        ld_loaded "$label" || break
+        sleep 0.2
+    done
+    ok "$label: stopped"
+}
+
+# -- systemd --user helpers (Linux) -------------------------------------------
+
+sd_installed() {
+    [ -f "$SYSTEMD_DIR/$1" ]
+}
+
+sd_status() {
+    local unit="$1"
+    if ! sd_installed "$unit"; then
+        printf "  %-22s not installed\n" "$unit"
+        return 0
+    fi
+    # --no-pager keeps output flat for the make wrapper.
+    systemctl --user status "$unit" --no-pager || true
+}
+
+sd_start()   { systemctl --user start "$1"   && ok "$1: started"; }
+sd_stop()    { systemctl --user stop "$1"    && ok "$1: stopped"; }
+sd_restart() { systemctl --user restart "$1" && ok "$1: restarted"; }
+
+# -- macOS dispatch -----------------------------------------------------------
+
+run_darwin() {
+    local has_chroma="no"
+    [ -f "$(ld_plist "$CHROMA_LABEL")" ] && has_chroma="yes"
+
+    case "$ACTION" in
+        status)
+            info "Service status"
+            ld_status "$SEAMD_LABEL"
+            [ "$has_chroma" = "yes" ] && ld_status "$CHROMA_LABEL"
+            ;;
+        start)
+            # Start Chroma first so seamd can reach it on its first probe.
+            [ "$has_chroma" = "yes" ] && ld_start "$CHROMA_LABEL"
+            ld_start "$SEAMD_LABEL"
+            ;;
+        stop)
+            # Stop seamd first so it doesn't log connection errors against
+            # a Chroma supervisor that's tearing down underneath it.
+            ld_stop "$SEAMD_LABEL"
+            [ "$has_chroma" = "yes" ] && ld_stop "$CHROMA_LABEL"
+            ;;
+        restart)
+            ld_stop "$SEAMD_LABEL"
+            [ "$has_chroma" = "yes" ] && ld_stop "$CHROMA_LABEL"
+            [ "$has_chroma" = "yes" ] && ld_start "$CHROMA_LABEL"
+            ld_start "$SEAMD_LABEL"
+            ;;
+        logs)
+            if [ ! -d "$MAC_LOG_DIR" ]; then
+                err "Log directory not found at $MAC_LOG_DIR"
+                err "Has the service ever run? Try 'make install-service'."
+                exit 1
+            fi
+            info "Tailing $MAC_LOG_DIR/seamd.log + seamd.err.log (Ctrl-C to exit)"
+            exec tail -F "$MAC_LOG_DIR/seamd.log" "$MAC_LOG_DIR/seamd.err.log"
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+# -- Linux dispatch -----------------------------------------------------------
+
+run_linux() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        err "systemctl not found. Only systemd-based Linux is supported."
+        exit 1
+    fi
+
+    local has_chroma="no"
+    sd_installed "$CHROMA_UNIT" && has_chroma="yes"
+
+    case "$ACTION" in
+        status)
+            info "Service status"
+            sd_status "$SEAMD_UNIT"
+            [ "$has_chroma" = "yes" ] && sd_status "$CHROMA_UNIT"
+            ;;
+        start)
+            [ "$has_chroma" = "yes" ] && sd_start "$CHROMA_UNIT"
+            sd_start "$SEAMD_UNIT"
+            ;;
+        stop)
+            sd_stop "$SEAMD_UNIT"
+            [ "$has_chroma" = "yes" ] && sd_stop "$CHROMA_UNIT"
+            ;;
+        restart)
+            sd_restart "$SEAMD_UNIT"
+            [ "$has_chroma" = "yes" ] && sd_restart "$CHROMA_UNIT"
+            ;;
+        logs)
+            info "Tailing journal for $SEAMD_UNIT (Ctrl-C to exit)"
+            exec journalctl --user -u "$SEAMD_UNIT" -f
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+case "$OS" in
+    Darwin) run_darwin ;;
+    Linux)  run_linux  ;;
+    *)
+        err "Unsupported OS: $OS"
+        exit 1
+        ;;
+esac

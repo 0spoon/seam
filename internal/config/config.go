@@ -391,16 +391,55 @@ func applyDefaults(cfg *Config) {
 	if cfg.Whisper.ModelPath != "" && cfg.Whisper.BinaryPath == "" {
 		cfg.Whisper.BinaryPath = "whisper-cli"
 	}
-	if cfg.WebDistDir == "" && cfg.DataDir != "" {
-		cfg.WebDistDir = filepath.Join(filepath.Dir(cfg.DataDir), "web", "dist")
+	if cfg.WebDistDir == "" {
+		cfg.WebDistDir = defaultWebDistDir()
 	}
-	// Warn if the computed WebDistDir does not exist.
+	// Warn if the configured WebDistDir does not exist. Empty is fine
+	// (autodetect failed) -- the server simply won't mount the SPA.
 	if cfg.WebDistDir != "" {
 		if _, err := os.Stat(cfg.WebDistDir); os.IsNotExist(err) {
 			slog.Warn("web dist directory does not exist, SPA will not be served",
 				"path", cfg.WebDistDir)
 		}
 	}
+}
+
+// defaultWebDistDir tries to locate the built React SPA without relying on
+// the user's data_dir, which may live anywhere on disk. The candidates,
+// in priority order, are:
+//
+//  1. <dir of running binary>/web/dist          -- bundled deploys
+//  2. <parent of bin dir>/web/dist              -- repo layout: bin/seamd + web/dist siblings
+//  3. <cwd>/web/dist                            -- `go run ./cmd/seamd` from the repo root
+//
+// The first candidate that resolves to an existing directory wins. When
+// nothing matches, the function returns "" so the server skips the SPA
+// handler entirely (the API still works).
+func defaultWebDistDir() string {
+	var candidates []string
+
+	if exe, err := os.Executable(); err == nil {
+		// Resolve symlinks so a launchd plist pointing at bin/seamd
+		// still walks up to the real repo, not the symlink farm.
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "web", "dist"),
+			filepath.Join(filepath.Dir(exeDir), "web", "dist"),
+		)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "web", "dist"))
+	}
+
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			return c
+		}
+	}
+	return ""
 }
 
 // normalizePaths strips trailing slashes from paths and URLs, and resolves

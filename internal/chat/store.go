@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -247,6 +248,54 @@ func (s *Store) UpdateConversationTitle(ctx context.Context, db DBTX, id, title 
 		return fmt.Errorf("chat.Store.UpdateConversationTitle: %w", err)
 	}
 	return nil
+}
+
+// SearchMessages searches across all conversation messages using LIKE.
+// Returns matching messages with their conversation IDs.
+func (s *Store) SearchMessages(ctx context.Context, db DBTX, query string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Use LIKE for basic substring matching. FTS on messages could be added later.
+	// Escape SQL LIKE wildcards in the query.
+	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(query)
+	rows, err := db.QueryContext(ctx,
+		`SELECT m.id, m.conversation_id, m.role, m.content, m.citations, m.created_at
+		 FROM messages m
+		 WHERE m.content LIKE ? ESCAPE '\'
+		 ORDER BY m.created_at DESC
+		 LIMIT ?`,
+		"%"+escaped+"%", limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("chat.Store.SearchMessages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		var citations sql.NullString
+		if scanErr := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role,
+			&msg.Content, &citations, &msg.CreatedAt); scanErr != nil {
+			return nil, fmt.Errorf("chat.Store.SearchMessages: scan: %w", scanErr)
+		}
+		if citations.Valid && citations.String != "" {
+			var citList []Citation
+			if jsonErr := json.Unmarshal([]byte(citations.String), &citList); jsonErr == nil {
+				msg.Citations = citList
+			}
+		}
+		messages = append(messages, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("chat.Store.SearchMessages: rows: %w", err)
+	}
+	return messages, nil
 }
 
 // GetFirstUserMessage returns the content of the first user message in a conversation.

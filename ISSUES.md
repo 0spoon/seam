@@ -2573,4 +2573,345 @@ is a minor resource leak.
 | Fourth full scan | 38 | 38 | 0 |
 | Migration flattening + single-DB | 6 | 6 | 0 |
 | Fifth full scan | 35 | 35 | 0 |
-| **All** | **212** | **212** | **0** |
+| Phase 1 assistant review | 18 | 18 | 0 |
+| Phase 2 memory/profile review | 9 | 9 | 0 |
+| **All** | **239** | **239** | **0** |
+
+---
+
+## Phase 1: Agentic Assistant Implementation Review (2026-03-16)
+
+Code review of the agentic assistant implementation (Phase 1 of AGENTIC_PLAN.md).
+New package `internal/assistant/` plus tool-calling support added to all LLM providers.
+
+**[Fix pass 2026-03-16]** All 18 issues fixed. Build and tests pass.
+
+**[Second fix pass 2026-03-16]** Remaining 3 issues (P1-C2, P1-H2, P1-L2) fully resolved:
+- P1-C2: Implemented real confirmation workflow with approve/reject endpoints.
+- P1-H2: Rewrote ChatStream to run the agentic loop inline, emitting events as they happen.
+- P1-L2: Added listActions handler test.
+- P1-L9: Replaced real ws.Hub with nil in all tests.
+
+### CRITICAL (all fixed)
+
+#### P1-C1. Agentic loop exit condition uses `||` instead of checking tool calls only -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/service.go:113`
+**Description:** `if len(resp.ToolCalls) == 0 || resp.FinishReason == "stop"` exits the
+loop when either condition is true. Some LLM providers can return `FinishReason == "stop"`
+alongside tool calls, causing those tool calls to be silently dropped.
+**Fix:** Changed to `if len(resp.ToolCalls) == 0` -- only exit when there are no tool calls.
+
+---
+
+#### P1-C2. Confirmation system is a no-op -- write operations never blocked -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/service.go`
+**Description:** The confirmation check logged a message but never blocked execution. Write
+operations (create_note, update_note, create_project) executed without user approval despite
+being in the default `confirmation_required` list.
+**Fix:** Implemented real confirmation workflow. When a tool requires confirmation, the agentic
+loop records a pending action in the DB and returns a `ConfirmationPrompt` to the client
+containing the action ID, tool name, and arguments. The client can then call
+`POST /api/assistant/actions/{id}/approve` to execute the action, or
+`POST /api/assistant/actions/{id}/reject` to reject it. The ChatStream endpoint emits a
+`confirmation` event type. Added `ApproveAction` and `RejectAction` service methods,
+`ListActionsByID` store method, and handler endpoints for approve/reject.
+
+---
+
+#### P1-C3. Ollama `ChatCompletionWithTools` silently discards marshal errors -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/ai/ollama.go:366`
+**Description:** `argsJSON, _ := json.Marshal(tc.Function.Arguments)` discards the error.
+On failure, the tool call gets empty arguments, leading to confusing downstream errors.
+**Fix:** Added error handling: returns a wrapped error instead of silently corrupting data.
+
+---
+
+### HIGH (all fixed)
+
+#### P1-H1. Race condition in `ConfirmationManager.SetRequired` -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/confirmation.go`
+**Description:** `SetRequired` replaces `m.required` with a new map without
+synchronization. Concurrent reads from `RequiresConfirmation` would be a data race.
+**Fix:** Added `sync.RWMutex` protecting reads and writes of the `required` field.
+
+---
+
+#### P1-H2. `ChatStream` is not actual streaming -- runs full loop then replays -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/service.go`
+**Description:** `ChatStream` called `Chat()` which blocked until the full multi-tool
+interaction completed, then emitted events after the fact. The client saw nothing until
+the entire interaction finished.
+**Fix:** Rewrote `ChatStream` to run the agentic loop inline within its goroutine. Tool
+use events are now emitted immediately as each tool executes, and the final text response
+event is emitted as soon as the LLM produces it. Confirmation events are also streamed
+inline. The test `TestService_ChatStream_EmitsToolEventsInline` verifies that tool_use
+events arrive before the text and done events.
+
+---
+
+#### P1-H3. `mustMarshal` swallows errors without logging -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/tool_impls.go`
+**Description:** Marshal errors silently returned a static error JSON. The LLM receives
+incorrect data without any diagnostic trail.
+**Fix:** Added `slog.Error` logging when marshaling fails.
+
+---
+
+#### P1-H5. `json.NewEncoder(w).Encode(resp)` errors not checked in handler -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/handler.go:96, 182`
+**Description:** If encoding fails, the client gets a truncated response with 200 status.
+**Fix:** Added error checking and logging for all `json.NewEncoder(w).Encode()` calls.
+
+---
+
+#### P1-H6. Missing `ConversationID` validation in handler -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/handler.go:57-96`
+**Description:** Empty `ConversationID` causes orphaned records in `assistant_actions`
+table due to FK constraint on `conversations(id)`.
+**Fix:** Added validation returning 400 for empty `conversation_id` in both `chat` and
+`chatStream` handlers.
+
+---
+
+### MEDIUM (all fixed)
+
+#### P1-M1. `ToolResult.Duration` JSON tag says `duration_ms` but stores nanoseconds -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/tools.go:91`
+**Description:** `time.Duration` serializes to nanoseconds, not milliseconds. Tag misleads
+API consumers.
+**Fix:** Changed to `DurationMs int64` field, set via `duration.Milliseconds()`.
+
+---
+
+#### P1-M5. Anthropic tool result uses wrong field name (`text` instead of `content`) -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/ai/anthropic.go:235`
+**Description:** Anthropic `tool_result` content blocks use `content` field, not `text`.
+Using the `anthropicContentBlock` struct with its `Text` field would send `"text": "..."`
+instead of `"content": "..."`, causing tool results to be silently lost.
+**Fix:** Changed to use `map[string]interface{}` with correct Anthropic field names
+(`type`, `tool_use_id`, `content`).
+
+---
+
+#### P1-M6. Tool definitions returned in non-deterministic order -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/tools.go:64-74`
+**Description:** Map iteration produces random order. Tool definition ordering can affect
+LLM behavior.
+**Fix:** Added `sort.Slice` to sort definitions by name.
+
+---
+
+#### P1-M7. SSE stream doesn't handle client disconnection -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/handler.go:147-154`
+**Description:** If the client closes the connection, the handler continues writing.
+**Fix:** Added `r.Context().Done()` check in the event loop.
+
+---
+
+#### P1-M8. Error wrapping uses `%v` instead of `%w` -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/tool_impls.go` (11 locations)
+**Description:** `fmt.Errorf("%w: %v", ErrInvalidArguments, err)` loses the inner error
+chain. Go 1.25+ supports multiple `%w` verbs.
+**Fix:** Changed all instances to `fmt.Errorf("%w: %w", ErrInvalidArguments, err)`.
+
+---
+
+#### P1-M9. `ToolChatCompleter` type assertion at runtime with no compile-time check -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `cmd/seamd/main.go:714`, `internal/ai/tool_types.go`
+**Description:** Runtime type assertion means a new LLM provider that implements
+`ChatCompleter` but not `ToolChatCompleter` silently disables the assistant.
+**Fix:** Added compile-time interface assertions in `tool_types.go`.
+
+---
+
+### LOW (documented, not fixed -- not impacting functionality)
+
+#### P1-L2. Missing test for `listActions` endpoint -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/handler_test.go`
+**Description:** No test for `GET /api/assistant/conversations/{conversationID}/actions`.
+**Fix:** Added `TestHandler_ListActions_Success` and `TestHandler_ListActions_Unauthorized`
+tests. Also added `TestHandler_ApproveAction` and `TestHandler_RejectAction` for the new
+approve/reject endpoints.
+
+---
+
+#### P1-L8. WebSocket message types declared but not used in Phase 1
+
+**Status:** BY DESIGN (2026-03-16)
+**File:** `internal/ws/protocol.go:15-18`
+**Description:** Assistant WS message types are declared for forward-compatibility but
+the current implementation uses SSE for streaming, not WebSocket.
+
+---
+
+#### P1-L9. Tests use real `ws.Hub` which starts background goroutines -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/service_test.go`
+**Description:** Creating a real `ws.Hub` in unit tests started goroutines that could leak.
+**Fix:** Replaced all `ws.NewHub(slog.Default())` with `nil` in test `ServiceDeps`. The
+service does not use the hub in the current implementation, so nil is safe. Extracted
+`newTestService` helper that centralizes the nil hub pattern.
+
+---
+
+### Summary: Phase 1 Assistant Review
+
+| Severity | Count | Fixed | By Design | Status |
+|----------|-------|-------|-----------|--------|
+| Critical | 3 | 3 | 0 | All resolved |
+| High | 5 | 5 | 0 | All resolved |
+| Medium | 5 | 5 | 0 | All resolved |
+| Low | 5 | 4 | 1 (L8) | All resolved |
+| **Total** | **18** | **17** | **1** | **All resolved** |
+
+---
+
+## Phase 2: User Profile and Long-Term Memory Review (2026-03-16)
+
+Code review of the Phase 2 implementation (User Profile + Long-Term Memory).
+New files: `memory.go`, `profile.go`, memory/profile tests. Modified: service, handler,
+tool_impls, chat/store, chat/service, migrations, main.go.
+
+**[Fix pass 2026-03-16]** All 9 issues fixed. Build and tests pass.
+
+### CRITICAL (all fixed)
+
+#### P2-C1. FTS5 MATCH injection in SearchMemories -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/memory.go`
+**Description:** User input passed directly to FTS5 `MATCH` clause. FTS5 special chars
+(`"`, `*`, `AND`, `NOT`, parentheses) cause SQLite errors. Also triggered on every chat
+message via `loadContext()` which passes the raw user message as a search query.
+**Fix:** Added `sanitizeMemoryFTSQuery()` function that strips FTS5 operators, removes
+boolean keywords, and quotes each term for literal matching. Applied before MATCH.
+
+---
+
+### HIGH (all fixed)
+
+#### P2-H3. errors.Is instead of == for sentinel comparison -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/handler.go`
+**Description:** `if err == ErrNotFound` instead of `errors.Is(err, ErrNotFound)`.
+**Fix:** Changed to `errors.Is`.
+
+#### P2-H4. TouchMemory silently succeeds on nonexistent IDs -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/memory.go`
+**Description:** UPDATE without RowsAffected check. Touching a nonexistent memory
+returns nil (success) instead of ErrNotFound.
+**Fix:** Added RowsAffected check returning ErrNotFound when zero.
+
+#### P2-H5. RFC3339Nano vs RFC3339 format mismatch -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/store.go`
+**Description:** `nullableTime` formatted with `RFC3339Nano` but scanners parsed with
+`RFC3339`. Times with nanosecond precision would fail to parse back.
+**Fix:** Changed `nullableTime` to format with `time.RFC3339`.
+
+#### P2-H7. LIKE wildcards not escaped in chat SearchMessages -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/chat/store.go`
+**Description:** `%` and `_` in search query interpreted as SQL LIKE wildcards.
+**Fix:** Added `strings.NewReplacer` escaping and `ESCAPE '\'` clause.
+
+#### P2-H9. update_profile tool clears unspecified fields -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/profile.go`
+**Description:** `SaveProfile` deleted fields with empty values, meaning the LLM setting
+only one field would wipe all others.
+**Fix:** Changed `SaveProfile` to skip empty fields (preserve existing). Explicit clearing
+uses `UpdateProfileField` with empty value.
+
+---
+
+### MEDIUM (all fixed)
+
+#### P2-M8. Hardcoded limit/offset in listMemories handler -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/handler.go`
+**Description:** Limit and offset hardcoded to 50/0, making pagination impossible.
+**Fix:** Added `intQueryParam` helper that parses `limit` and `offset` from query params
+with sensible defaults.
+
+#### P2-M15. Unchecked json.Encode errors in updateProfile handler -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/handler.go`
+**Description:** Two handlers did not check `json.NewEncoder(w).Encode()` errors.
+**Fix:** Added error checking and logging, consistent with all other handlers.
+
+#### P2-M16. Unchecked json.Encode errors in createMemory handler -- FIXED
+
+**Status:** FIXED (2026-03-16)
+**File:** `internal/assistant/handler.go`
+**Description:** Same as M15 but in `createMemory`.
+**Fix:** Added error checking and logging.
+
+---
+
+### Summary: Phase 2 Review
+
+| Severity | Count | Fixed | Status |
+|----------|-------|-------|--------|
+| Critical | 1 | 1 | All resolved |
+| High | 5 | 5 | All resolved |
+| Medium | 3 | 3 | All resolved |
+| **Total** | **9** | **9** | **All resolved** |
+
+### Updated Grand Total
+
+| Category | Total | Resolved | Open |
+|----------|-------|----------|------|
+| Original audit | 27 | 27 | 0 |
+| Post-fix review | 7 | 7 | 0 |
+| Test issues | 4 | 4 | 0 |
+| Pre-existing | 16 | 16 | 0 |
+| First full scan | 13 | 13 | 0 |
+| Second full scan | 39 | 39 | 0 |
+| Third full scan | 17 | 17 | 0 |
+| LLM provider review | 10 | 10 | 0 |
+| Fourth full scan | 38 | 38 | 0 |
+| Migration flattening + single-DB | 6 | 6 | 0 |
+| Fifth full scan | 35 | 35 | 0 |
+| Phase 1 assistant review | 18 | 18 | 0 |
+| Phase 2 memory/profile review | 9 | 9 | 0 |
+| **All** | **239** | **239** | **0** |

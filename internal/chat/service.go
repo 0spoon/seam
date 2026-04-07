@@ -174,6 +174,15 @@ func (s *Service) AddMessage(ctx context.Context, userID string, msg Message) er
 	return nil
 }
 
+// SearchMessages searches across conversation messages.
+func (s *Service) SearchMessages(ctx context.Context, userID, query string, limit int) ([]Message, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("chat.Service.SearchMessages: open db: %w", err)
+	}
+	return s.store.SearchMessages(ctx, db, query, limit)
+}
+
 // truncateToWord truncates s to at most maxLen runes (not bytes),
 // trimming to the last word boundary. If the string is short enough,
 // returns it as-is. This is safe for multi-byte UTF-8 (CJK, emoji).

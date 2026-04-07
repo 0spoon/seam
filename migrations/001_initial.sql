@@ -282,3 +282,74 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook ON webhook_deliveries(webhook_id);
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_created ON webhook_deliveries(created_at);
+
+-- ============================================================
+-- Assistant actions (agentic tool-use audit log)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS assistant_actions (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    tool_name       TEXT NOT NULL,
+    arguments       TEXT NOT NULL,
+    result          TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    executed_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_assistant_actions_conversation ON assistant_actions(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_assistant_actions_tool ON assistant_actions(tool_name, created_at);
+
+-- ============================================================
+-- User profile (structured key-value pairs)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS user_profile (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+-- ============================================================
+-- Assistant long-term memories
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS memories (
+    id            TEXT PRIMARY KEY,
+    category      TEXT NOT NULL DEFAULT 'fact',
+    content       TEXT NOT NULL,
+    source        TEXT,
+    confidence    REAL NOT NULL DEFAULT 1.0,
+    last_accessed TEXT,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    expires_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
+CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
+
+-- FTS for memory content search.
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    content,
+    content='memories',
+    content_rowid='rowid',
+    tokenize='porter'
+);
+
+CREATE TRIGGER IF NOT EXISTS memories_fts_insert AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, content)
+    VALUES (new.rowid, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memories_fts_delete AFTER DELETE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content)
+    VALUES('delete', old.rowid, old.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memories_fts_update AFTER UPDATE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content)
+    VALUES('delete', old.rowid, old.content);
+    INSERT INTO memories_fts(rowid, content)
+    VALUES (new.rowid, new.content);
+END;

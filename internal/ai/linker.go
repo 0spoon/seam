@@ -268,10 +268,12 @@ func (l *AutoLinker) HandleAutolinkTask(ctx context.Context, task *Task) (json.R
 			"note_id":     payload.NoteID,
 			"suggestions": suggestions,
 		})
-		l.hub.Send(task.UserID, ws.Message{
+		if err := l.hub.Send(task.UserID, ws.Message{
 			Type:    ws.MsgTypeLinkSuggestions,
 			Payload: wsPayload,
-		})
+		}); err != nil {
+			l.logger.Warn("ai.AutoLinker.HandleAutolinkTask: ws send", "error", err)
+		}
 	}
 
 	return resultJSON, nil

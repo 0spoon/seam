@@ -9,7 +9,6 @@ var (
 	colorSecondary = lipgloss.Color("#a68a6e") // muted amber
 	colorMuted     = lipgloss.Color("#9992a6") // muted lavender
 	colorFg        = lipgloss.Color("#e8e2d9") // warm off-white
-	colorBg        = lipgloss.Color("#1a1816") // dark background
 	colorHeaderBg  = lipgloss.Color("#242120") // slightly lighter bg
 	colorSelected  = lipgloss.Color("#3a3330") // warm dark selection
 	colorError     = lipgloss.Color("#c46b6b") // muted red
@@ -53,9 +52,6 @@ var (
 	styleNormal = lipgloss.NewStyle().
 			Foreground(colorFg).
 			Padding(0, 1)
-
-	styleBorder = lipgloss.NewStyle().
-			BorderForeground(colorBorder)
 
 	stylePane = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).

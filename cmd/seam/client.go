@@ -530,16 +530,6 @@ func (c *APIClient) RefreshCtx(ctx context.Context) (*TokenPair, error) {
 	return &resp, nil
 }
 
-func (c *APIClient) doRequest(method, path string, params url.Values, reqBody interface{}, out interface{}) (int, error) {
-	return c.doRequestCtx(context.Background(), method, path, params, reqBody, out, 0)
-}
-
-// doRequestWithTimeout performs an HTTP request. If timeout > 0, a per-request
-// context with that deadline is used instead of mutating the shared client.
-func (c *APIClient) doRequestWithTimeout(method, path string, params url.Values, reqBody interface{}, out interface{}, timeout time.Duration) (int, error) {
-	return c.doRequestCtx(context.Background(), method, path, params, reqBody, out, timeout)
-}
-
 // doRequestCtx performs an HTTP request with the given context. If timeout > 0,
 // a child context with that deadline is derived. On a 401 response, it
 // automatically attempts a token refresh and retries the request once.
@@ -563,7 +553,7 @@ func (c *APIClient) doRequestCtx(ctx context.Context, method, path string, param
 // Returns (total, statusCode, error).
 func (c *APIClient) doSingleRequest(ctx context.Context, method, path string, params url.Values, reqBody interface{}, out interface{}, timeout time.Duration) (int, int, error) {
 	u := strings.TrimRight(c.BaseURL, "/") + path
-	if params != nil && len(params) > 0 {
+	if len(params) > 0 {
 		u += "?" + params.Encode()
 	}
 

@@ -248,6 +248,7 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 		defer dialCancel()
 		conn, _, err := websocket.Dial(dialCtx, wsURL, nil)
 		if err != nil {
+			ctxCancel()
 			return askFallbackHTTP(client, query, history)
 		}
 
@@ -257,11 +258,13 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 			"payload": map[string]string{"token": client.AccessToken},
 		})
 		if marshalErr != nil {
-			conn.CloseNow()
+			_ = conn.CloseNow()
+			ctxCancel()
 			return askStreamErrMsg{err: fmt.Errorf("marshal auth: %w", marshalErr)}
 		}
 		if err := conn.Write(ctx, websocket.MessageText, authPayload); err != nil {
-			conn.CloseNow()
+			_ = conn.CloseNow()
+			ctxCancel()
 			return askFallbackHTTP(client, query, history)
 		}
 
@@ -277,11 +280,13 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 			"payload": askPayload,
 		})
 		if marshalErr2 != nil {
-			conn.CloseNow()
+			_ = conn.CloseNow()
+			ctxCancel()
 			return askStreamErrMsg{err: fmt.Errorf("marshal chat: %w", marshalErr2)}
 		}
 		if err := conn.Write(ctx, websocket.MessageText, chatPayload); err != nil {
-			conn.CloseNow()
+			_ = conn.CloseNow()
+			ctxCancel()
 			return askFallbackHTTP(client, query, history)
 		}
 
@@ -291,7 +296,7 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 		ch := make(chan tea.Msg, 64)
 		go func() {
 			defer ctxCancel()
-			defer conn.CloseNow()
+			defer func() { _ = conn.CloseNow() }()
 			defer close(ch)
 
 			for {
@@ -323,8 +328,8 @@ func askViaWebSocket(client *APIClient, query string, history []ChatMessage) tea
 					var dp struct {
 						Citations []string `json:"citations"`
 					}
-					json.Unmarshal(wsMsg.Payload, &dp)
-					conn.Close(websocket.StatusNormalClosure, "done")
+					_ = json.Unmarshal(wsMsg.Payload, &dp)
+					_ = conn.Close(websocket.StatusNormalClosure, "done")
 					ch <- askStreamDoneMsg{citations: dp.Citations}
 					return
 				}

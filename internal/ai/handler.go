@@ -298,7 +298,7 @@ func (h *Handler) synthesizeStream(w http.ResponseWriter, r *http.Request) {
 	// Disable the global WriteTimeout for this SSE stream. Each write
 	// resets the deadline so idle connections still get cleaned up.
 	rc := http.NewResponseController(w)
-	rc.SetWriteDeadline(time.Time{})
+	_ = rc.SetWriteDeadline(time.Time{})
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -311,7 +311,7 @@ func (h *Handler) synthesizeStream(w http.ResponseWriter, r *http.Request) {
 	for token := range tokenCh {
 		// Reset write deadline for each token to allow long-running streams
 		// while still detecting dead connections.
-		rc.SetWriteDeadline(time.Now().Add(30 * time.Second))
+		_ = rc.SetWriteDeadline(time.Now().Add(30 * time.Second))
 		data, _ := json.Marshal(map[string]string{"token": token})
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
@@ -674,7 +674,9 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": msg}); err != nil {
+		slog.Warn("ai.writeError: encode error", "error", err)
+	}
 }
 
 // writeProviderError maps provider-specific sentinel errors to appropriate

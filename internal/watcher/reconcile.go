@@ -111,22 +111,20 @@ func Reconcile(ctx context.Context, userID string, notesDir string, handler File
 	// Detect deleted files: DB rows with no corresponding file on disk.
 	// C-22: Check for context cancellation in each iteration so the loop
 	// does not block shutdown when there are many orphaned DB entries.
-	if dbTimes != nil {
-		for relPath := range dbTimes {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-			if diskFiles[relPath] {
-				continue
-			}
-			// File is in DB but not on disk. Call the handler which will
-			// detect the missing file and delete the DB row.
-			if handlerErr := handler(ctx, userID, relPath); handlerErr != nil {
-				slog.Warn("watcher.Reconcile: handler error for deleted file",
-					"file_path", relPath, "error", handlerErr)
-			}
+	for relPath := range dbTimes {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if diskFiles[relPath] {
+			continue
+		}
+		// File is in DB but not on disk. Call the handler which will
+		// detect the missing file and delete the DB row.
+		if handlerErr := handler(ctx, userID, relPath); handlerErr != nil {
+			slog.Warn("watcher.Reconcile: handler error for deleted file",
+				"file_path", relPath, "error", handlerErr)
 		}
 	}
 

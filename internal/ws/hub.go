@@ -131,7 +131,7 @@ func (h *Hub) Send(userID string, msg Message) error {
 	// Clean up dead connections outside the write loop.
 	for _, c := range dead {
 		h.Unregister(userID, c)
-		c.CloseNow()
+		_ = c.CloseNow()
 	}
 
 	return nil
@@ -174,7 +174,7 @@ func (h *Hub) Broadcast(msg Message) error {
 
 	for _, t := range dead {
 		h.Unregister(t.userID, t.conn)
-		t.conn.CloseNow()
+		_ = t.conn.CloseNow()
 	}
 
 	return nil

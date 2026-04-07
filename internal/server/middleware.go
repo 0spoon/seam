@@ -123,7 +123,11 @@ func (sw *statusWriter) Flush() {
 
 func generateRequestID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failures are catastrophic; fall back to a fixed marker
+		// so logs remain parseable instead of crashing the request.
+		return "rand-error"
+	}
 	return hex.EncodeToString(b)
 }
 

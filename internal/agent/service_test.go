@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -473,15 +472,6 @@ func TestService_SessionEnd_AlreadyCompleted(t *testing.T) {
 	// Ending again should fail.
 	err = svc.SessionEnd(ctx, testUserID, "double-end", "Second end")
 	require.ErrorIs(t, err, ErrSessionNotActive)
-}
-
-// --- Helpers to verify DB state ---
-
-func openTestDB(t *testing.T, svc *Service, userID string) *sql.DB {
-	t.Helper()
-	db, err := svc.cfg.UserDBManager.Open(context.Background(), userID)
-	require.NoError(t, err)
-	return db
 }
 
 // Ensure the unused import is consumed.

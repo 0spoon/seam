@@ -200,7 +200,9 @@ func (q *Queue) LoadPending(ctx context.Context) error {
 
 	// Perform status resets outside the lock.
 	for _, r := range resets {
-		q.store.UpdateStatus(ctx, r.db, r.taskID, TaskStatusPending, nil, "")
+		if err := q.store.UpdateStatus(ctx, r.db, r.taskID, TaskStatusPending, nil, ""); err != nil {
+			q.logger.Warn("ai.Queue.LoadPending: reset status", "task_id", r.taskID, "error", err)
+		}
 	}
 
 	// Now acquire the lock and push items, respecting maxQueueSize (SCAN4-M8).
@@ -463,10 +465,12 @@ func (q *Queue) sendEvent(userID string, event TaskEvent) {
 		msgType = ws.MsgTypeTaskFailed
 	}
 
-	q.hub.Send(userID, ws.Message{
+	if err := q.hub.Send(userID, ws.Message{
 		Type:    msgType,
 		Payload: payload,
-	})
+	}); err != nil {
+		q.logger.Warn("ai.Queue: ws send", "user_id", userID, "type", msgType, "error", err)
+	}
 }
 
 func mustJSON(v interface{}) json.RawMessage {

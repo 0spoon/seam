@@ -167,7 +167,11 @@ func run() error {
 	// NOTE: userDBMgr.CloseAll is deferred here but watcher.Close and
 	// aiQueue shutdown are deferred AFTER this (below), so in LIFO order
 	// the watcher and AI queue stop before the DB is closed.
-	defer userDBMgr.CloseAll()
+	defer func() {
+		if err := userDBMgr.CloseAll(); err != nil {
+			logger.Warn("userDBMgr.CloseAll", "error", err)
+		}
+	}()
 
 	// Set up context with signal handling for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -475,7 +479,9 @@ func run() error {
 			logger.Warn("failed to marshal note changed payload", "error", marshalErr)
 			return nil
 		}
-		hub.Send(uid, ws.Message{Type: ws.MsgTypeNoteChanged, Payload: payload})
+		if err := hub.Send(uid, ws.Message{Type: ws.MsgTypeNoteChanged, Payload: payload}); err != nil {
+			logger.Debug("hub.Send note.changed", "user_id", uid, "error", err)
+		}
 
 		// Enqueue embedding tasks if AI is enabled.
 		// C-32: Log enqueue errors instead of silently discarding them.
@@ -620,7 +626,7 @@ func run() error {
 							Payload: errPayload,
 						})
 						writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-						conn.Write(writeCtx, websocket.MessageText, data)
+						_ = conn.Write(writeCtx, websocket.MessageText, data)
 						cancel()
 						return
 					}
@@ -667,7 +673,7 @@ func run() error {
 						Payload: donePayload,
 					})
 					writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					conn.Write(writeCtx, websocket.MessageText, data)
+					_ = conn.Write(writeCtx, websocket.MessageText, data)
 					cancel()
 				}()
 
@@ -718,7 +724,7 @@ func run() error {
 						Payload: donePayload,
 					})
 					writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					conn.Write(writeCtx, websocket.MessageText, data)
+					_ = conn.Write(writeCtx, websocket.MessageText, data)
 					cancel()
 				}()
 

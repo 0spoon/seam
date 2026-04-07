@@ -54,8 +54,8 @@ type AgentService interface {
 
 // Default rate limit: 60 requests per minute per user with burst of 20.
 const (
-	defaultMCPRateLimit = rate.Limit(60.0 / 60.0) // 60 per minute
-	defaultMCPRateBurst = 20                      // allow short bursts
+	defaultMCPRateLimit = rate.Limit(1) // 60 per minute = 1 per second
+	defaultMCPRateBurst = 20            // allow short bursts
 )
 
 // TaskService defines the interface for the task service used by MCP tools.

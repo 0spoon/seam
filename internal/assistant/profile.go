@@ -75,7 +75,7 @@ func (s *ProfileStore) SaveProfile(ctx context.Context, db *sql.DB, p *UserProfi
 	if err != nil {
 		return fmt.Errorf("assistant.ProfileStore.SaveProfile: begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for key, value := range fields {
 		// Skip empty values -- they are left unchanged.

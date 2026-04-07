@@ -44,7 +44,7 @@ func ServeWS(hub *Hub, jwtManager *auth.JWTManager, handler MessageHandler, allo
 			logger.Error("ws.ServeWS: accept failed", "error", err)
 			return
 		}
-		defer conn.CloseNow()
+		defer func() { _ = conn.CloseNow() }()
 
 		// Set an explicit read limit (64KB) to prevent oversized messages.
 		conn.SetReadLimit(64 * 1024)

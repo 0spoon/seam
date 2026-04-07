@@ -439,7 +439,9 @@ func convertHistory(messages []historyMessage) []ai.ToolMessage {
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+		slog.Warn("assistant.writeError: encode error", "error", err)
+	}
 }
 
 func intQueryParam(r *http.Request, key string, defaultVal int) int {

@@ -264,12 +264,8 @@ func (c *OpenAIClient) ChatCompletionWithTools(ctx context.Context, model string
 	var oaiTools []openaiTool
 	for _, t := range tools {
 		oaiTools = append(oaiTools, openaiTool{
-			Type: "function",
-			Function: openaiToolFunction{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  t.Parameters,
-			},
+			Type:     "function",
+			Function: openaiToolFunction(t),
 		})
 	}
 

@@ -291,12 +291,8 @@ func (c *OllamaClient) ChatCompletionWithTools(ctx context.Context, model string
 	var ollamaTools []ollamaTool
 	for _, t := range tools {
 		ollamaTools = append(ollamaTools, ollamaTool{
-			Type: "function",
-			Function: ollamaToolFunction{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  t.Parameters,
-			},
+			Type:     "function",
+			Function: ollamaToolFunction(t),
 		})
 	}
 

@@ -167,7 +167,7 @@ func (c *ChromaClient) AddDocuments(ctx context.Context, collectionID string, id
 	}
 
 	// Drain response body for HTTP connection reuse.
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return nil
 }
@@ -336,7 +336,7 @@ func (c *ChromaClient) UpsertDocuments(ctx context.Context, collectionID string,
 	}
 
 	// Drain response body for HTTP connection reuse.
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return nil
 }
@@ -377,7 +377,7 @@ func (c *ChromaClient) DeleteDocuments(ctx context.Context, collectionID string,
 	}
 
 	// Drain response body for HTTP connection reuse.
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return nil
 }
@@ -413,7 +413,7 @@ func (c *ChromaClient) DeleteByMetadata(ctx context.Context, collectionID string
 		return fmt.Errorf("ai.ChromaClient.DeleteByMetadata: status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
 

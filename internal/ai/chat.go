@@ -315,9 +315,7 @@ When referencing a note, mention its title. Be concise and helpful.`
 	if len(history) > maxRecentMessages {
 		historyStart = len(history) - maxRecentMessages
 	}
-	for _, h := range history[historyStart:] {
-		messages = append(messages, h)
-	}
+	messages = append(messages, history[historyStart:]...)
 
 	messages = append(messages, ChatMessage{
 		Role:    "user",

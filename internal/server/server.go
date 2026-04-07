@@ -96,7 +96,7 @@ func New(cfg Config) *Server {
 	// Health check (no auth required).
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	// Auth routes: public (no auth) and protected (auth required) are

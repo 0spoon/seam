@@ -153,11 +153,7 @@ func TestContextGather_WithScope(t *testing.T) {
 // resultText extracts the first TextContent from a CallToolResult.
 func resultText(t *testing.T, result interface{}) string {
 	t.Helper()
-	// Use type assertion on the concrete MCP type.
-	type textContent struct {
-		Text string `json:"text"`
-	}
-	// Marshal and re-parse to extract text.
+	// Marshal and re-parse to extract text from the concrete MCP type.
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 	var parsed struct {

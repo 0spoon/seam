@@ -128,10 +128,7 @@ func convertMessages(messages []ChatMessage) (string, []anthropicMessage) {
 			systemParts = append(systemParts, m.Content)
 			continue
 		}
-		converted = append(converted, anthropicMessage{
-			Role:    m.Role,
-			Content: m.Content,
-		})
+		converted = append(converted, anthropicMessage(m))
 	}
 
 	system := strings.Join(systemParts, "\n\n")

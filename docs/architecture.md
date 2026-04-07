@@ -18,7 +18,7 @@ graph TD
         Queue["AI task queue"]
     end
 
-    Backend --> SQLite["SQLite (per-user)<br/>Metadata + FTS5"]
+    Backend --> SQLite["SQLite<br/>Metadata + FTS5"]
     Backend --> Chroma["ChromaDB<br/>Vector embeddings"]
     Backend --> LLM["LLM Provider<br/>Ollama / OpenAI / Anthropic"]
     Backend --> FS["Filesystem<br/>Plain .md files"]
@@ -39,7 +39,7 @@ graph TD
     style FS fill:#161922,stroke:#c4915c,color:#e8e2d9
 ```
 
-**Multi-user, single machine.** Each user gets isolated storage -- their own SQLite database, notes directory, and ChromaDB collection. Edit your `.md` files with vim, VS Code, or whatever you want -- Seam watches for changes via `fsnotify` and re-indexes automatically.
+**Single-user, single machine.** Seam consolidated to a single-owner model on 2026-03-15 (see [SECURITY.md](../SECURITY.md) for the rationale): one shared `seam.db`, one notes directory, one ChromaDB collection, registration closed after the first owner. Service and store APIs still take a `userID` parameter so the architecture can return to multi-tenant later, but in production the constant `userdb.DefaultUserID` is wired in throughout. Edit your `.md` files with vim, VS Code, or whatever you want -- Seam watches for changes via `fsnotify` and re-indexes automatically.
 
 **ChromaDB is the only external runtime dependency for AI features.** seamd treats it as a remote HTTP service (always, even when it lives on `localhost`) and tolerates it being unreachable -- a 2-second startup probe logs a Warn but never blocks boot, and the AI task queue retries naturally once Chroma comes up. The recommended deployment is the Seam-managed Docker container in `docker/chroma-compose.yml`, started via `make chroma-up` or kept alive by the optional supervisor service installed by `make install-service`. See [Getting Started](getting-started.md#chromadb) for the full setup story.
 
@@ -49,7 +49,7 @@ graph TD
 |---|---|---|
 | **Backend** | Go + chi router | Single binary, low memory, strong concurrency. No CGO |
 | **Storage** | Plain `.md` files on disk | Portable, human-readable, yours forever. Source of truth |
-| **Metadata** | SQLite per-user (`modernc.org/sqlite`) | ACID, FTS5, zero infrastructure. Pure Go |
+| **Metadata** | SQLite (`modernc.org/sqlite`) | ACID, FTS5, zero infrastructure. Pure Go |
 | **Vector store** | ChromaDB (optionally containerized) | Per-user collections, HTTP API. Seam can manage it via `docker/chroma-compose.yml` |
 | **AI** | Ollama / OpenAI / Anthropic | Local by default, cloud when you want it |
 | **TUI** | Bubble Tea | Elm architecture for your terminal |
@@ -81,13 +81,13 @@ Your notes here, with [[wikilinks]] and #tags inline.
 
 ```
 {data_dir}/
-  server.db                        # shared: user accounts, refresh tokens
-  users/
-    {user_id}/
-      notes/                       # your markdown files -- edit with anything
-        inbox/                     # unsorted captures
-        {project-slug}/            # one directory per project
-      seam.db                      # per-user: metadata, FTS, links, AI tasks
+  server.db                        # owner account, refresh tokens
+  seam.db                          # notes metadata, FTS, links, AI tasks, agent memory
+  notes/                           # your markdown files -- edit with anything
+    inbox/                         # unsorted captures
+    {project-slug}/                # one directory per project
+  templates/                       # built-in note templates
+  chromadb/                        # ChromaDB persistent volume (only when run via docker/chroma-compose.yml)
 ```
 
 Files live on disk. Edit them with whatever you want. Seam watches and re-indexes.

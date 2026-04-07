@@ -8,7 +8,7 @@ seamd
 *.dylib
 
 # Data / runtime state
-data/users/
+data/notes/
 data/chromadb/
 data/seam.db
 data/server.db

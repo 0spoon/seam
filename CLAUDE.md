@@ -37,7 +37,7 @@ internal/           Core domain packages (strict layering, no circular imports)
   ws/               WebSocket hub (per-user)
 migrations/
   server/           server.db migrations (users, refresh tokens)
-  user/             per-user seam.db migrations (notes, projects, links, FTS, agent)
+  user/             seam.db migrations (notes, projects, links, FTS, agent)
 web/                React SPA (TypeScript, Vite, Zustand)
   src/api/          REST + WebSocket client with JWT auto-refresh
   src/components/   UI components (CSS Modules)
@@ -99,7 +99,7 @@ make fmt                # gofmt + prettier
 
 ## Architecture Essentials
 
-- **Per-user isolation**: each user gets their own SQLite DB (`seam.db`), notes directory, and ChromaDB collection. User ID comes from JWT middleware, never from request body.
+- **Single-user system** (since 2026-03-15, see `SECURITY.md`): one owner per instance, identified via JWT middleware. All data lives at the top level of `data_dir` (no per-user subdirs). User ID is the constant `userdb.DefaultUserID`. Service and store APIs still take a `userID` parameter as a forward path back to multi-tenant; in production it is always `DefaultUserID`. Registration is closed after the first owner.
 - **Notes are files**: `.md` files on disk are source of truth. `notes.body` in SQLite is a denormalized copy for FTS. fsnotify detects external edits.
 - **Strict layering**: `cmd/` -> `internal/server` -> `internal/{domain}` -> `internal/userdb`, `ws`, `ai`. No package imports `internal/server`.
 - **Domain package layout**: `handler.go`, `service.go`, `store.go`, `{feature}.go`, `*_test.go`.
@@ -136,12 +136,13 @@ make fmt                # gofmt + prettier
 
 ```
 {data_dir}/
-  server.db                 # Shared: users, refresh tokens
-  users/{user_id}/
-    notes/
-      inbox/                # Unsorted captures
-      {project-slug}/       # One dir per project
-    seam.db                 # Per-user: metadata, FTS, links, AI tasks
+  server.db                 # Owner account, refresh tokens
+  seam.db                   # Notes metadata, FTS, links, AI tasks, agent memory
+  notes/                    # Markdown files on disk (source of truth)
+    inbox/                  # Unsorted captures
+    {project-slug}/         # One dir per project
+  templates/                # Built-in note templates
+  chromadb/                 # ChromaDB persistent volume (only when run via docker/chroma-compose.yml)
 ```
 
 ## Note Format

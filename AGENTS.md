@@ -152,11 +152,10 @@ No package imports `internal/server`. The server wires dependencies at startup.
 - Input validation: sanitize note titles, project names, tags for filesystem safety (no `/`, `\`, `..`, `\x00`).
 - SSRF: URL capture must reject private IPs, localhost, `file://` protocol.
 
-## Common pitfalls (lessons from ISSUES.md)
+## Common pitfalls
 
 The patterns below have been re-introduced multiple times across audit passes. Treat
-this section as a checklist before opening a PR. `ISSUES.md` carries the full history
-and rationale for each rule.
+this section as a checklist before opening a PR.
 
 ### Meta-rules
 
@@ -246,6 +245,36 @@ and rationale for each rule.
    and a handful of other patterns automatically — see `.golangci.yml`).
 3. For any change that touches a recurring pattern from this section, grep the repo
    for other instances of the same pattern and fix them in the same change.
+
+## Accepted designs (don't "fix")
+
+These look like bugs and have been flagged by past audits as bugs. They are
+intentional. Don't "fix" them without first reading the rationale and changing
+the rationale.
+
+- **`task.Service.ToggleDone` holds a DB transaction across file I/O.** The
+  task and its parent note must be updated atomically with the file write
+  to the source-of-truth `.md`. Splitting the write out of the tx
+  re-introduces an orphan window.
+- **`task.Service.SyncNote` matches duplicate-content tasks by order, not
+  by content hash.** When a note has two tasks with the same body text, we
+  preserve their state by position rather than by collision-prone hashing.
+  Fragile-looking but deliberate.
+- **Deep semantic-search pagination + recency returns empty past
+  `limit*3`.** The fallback recency layer is bounded so a pathological
+  client cannot pin a request walking the full notes table. Empty results
+  past that boundary are the intended signal.
+- **Path-traversal validation does not resolve symlinks.** `FilePath`
+  values come from the internal `notes` table, never from request input,
+  so the source is already trusted. Adding `filepath.EvalSymlinks` here
+  would create an unrelated TOCTOU race.
+- **`note.toggleCheckboxInFile` has no file-level lock.** Single-user
+  invariant: only one writer at a time. Adding a per-file mutex here
+  buys nothing today and would have to be torn out if the architecture
+  ever returns to multi-tenant.
+- **Service / store APIs still take a `userID` parameter even though it
+  is always `userdb.DefaultUserID` in production.** This is the forward
+  path back to multi-tenant. Don't strip it.
 
 ## Frontend style rules (web/)
 

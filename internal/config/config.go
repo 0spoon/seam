@@ -82,8 +82,11 @@ type AssistantConfig struct {
 	// (create_note, update_note, append_to_note, create_project,
 	// save_memory, update_profile). Anything that can affect future
 	// system prompts -- in particular update_profile and save_memory --
-	// MUST be in this list to defend against prompt injection from
-	// untrusted note content (see SECURITY.md H-5).
+	// MUST be in this list to defend against persistent prompt injection:
+	// an attacker-controlled note can otherwise pivot the assistant into
+	// writing malicious "instructions" into the user profile or memory,
+	// which then get injected verbatim into every subsequent system
+	// prompt. See docs/security.md > "Assistant safety".
 	ConfirmationRequired []string `yaml:"confirmation_required"`
 
 	// Model overrides the chat model for the assistant.

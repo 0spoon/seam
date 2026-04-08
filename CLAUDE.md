@@ -99,7 +99,7 @@ make fmt                # gofmt + prettier
 
 ## Architecture Essentials
 
-- **Single-user system** (since 2026-03-15, see `SECURITY.md`): one owner per instance, identified via JWT middleware. All data lives at the top level of `data_dir` (no per-user subdirs). User ID is the constant `userdb.DefaultUserID`. Service and store APIs still take a `userID` parameter as a forward path back to multi-tenant; in production it is always `DefaultUserID`. Registration is closed after the first owner.
+- **Single-user system** (since 2026-03-15, see `docs/security.md`): one owner per instance, identified via JWT middleware. All data lives at the top level of `data_dir` (no per-user subdirs). User ID is the constant `userdb.DefaultUserID`. Service and store APIs still take a `userID` parameter as a forward path back to multi-tenant; in production it is always `DefaultUserID`. Registration is closed after the first owner.
 - **Notes are files**: `.md` files on disk are source of truth. `notes.body` in SQLite is a denormalized copy for FTS. fsnotify detects external edits.
 - **Strict layering**: `cmd/` -> `internal/server` -> `internal/{domain}` -> `internal/userdb`, `ws`, `ai`. No package imports `internal/server`.
 - **Domain package layout**: `handler.go`, `service.go`, `store.go`, `{feature}.go`, `*_test.go`.
@@ -184,5 +184,5 @@ Content with [[wikilinks]] and #tags.
 | `docker/chroma-compose.yml` | Seam-managed ChromaDB container (pinned image, bind-mounted volume) |
 | `scripts/chroma-supervisor.sh` | Wakes Docker, waits for daemon, runs `compose up`. Run by the optional supervisor service. |
 | `scripts/install-service.sh` | Installs seamd as launchd/systemd; optionally installs the chroma supervisor too |
-| `AGENTS.md` | Detailed coding conventions |
-| `SECURITY.md` | Security policies |
+| `AGENTS.md` | Detailed coding conventions and accepted designs |
+| `docs/security.md` | Security invariants, assistant safety, known gaps |

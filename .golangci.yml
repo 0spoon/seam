@@ -1,13 +1,13 @@
 # Lint configuration. Enforces a subset of the rules in AGENTS.md > "Common
-# pitfalls (lessons from ISSUES.md)". The rest of those rules are policy-only --
-# `make lint` cannot catch every pattern (e.g. `os.WriteFile` on a `.md` file,
-# byte-position slicing of UTF-8 text). Treat AGENTS.md as the source of truth
-# and this file as a backstop for the patterns that grep can detect.
+# pitfalls". The rest of those rules are policy-only -- `make lint` cannot
+# catch every pattern (e.g. `os.WriteFile` on a `.md` file, byte-position
+# slicing of UTF-8 text). Treat AGENTS.md as the source of truth and this
+# file as a backstop for the patterns that grep can detect.
 #
 # Pre-existing baseline lint failures (errcheck on conn.CloseNow / json.Encode,
 # unused symbols in cmd/seam, etc.) are not enforced here -- they pre-date this
 # config and a separate cleanup pass is needed. The goal of this file is to
-# ensure NEW code does not introduce ISSUES.md patterns that lint can detect.
+# ensure NEW code does not introduce banned patterns that lint can detect.
 
 run:
   timeout: 5m
@@ -18,24 +18,23 @@ linters:
   # unused, gosimple) and adds a curated set on top.
   enable:
     - forbidigo       # bans specific symbols (ulid.MustNew, time.Sleep)
-    - rowserrcheck    # missing rows.Err() after rows.Next() (ISSUES.md SCAN5-M5/M6)
+    - rowserrcheck    # missing rows.Err() after rows.Next()
     - sqlclosecheck   # missing rows.Close() / stmt.Close()
-    - errorlint       # err == ErrXxx instead of errors.Is (ISSUES.md SCAN6-M3, P2-H3)
+    - errorlint       # err == ErrXxx instead of errors.Is
 
 linters-settings:
   forbidigo:
     # Patterns are matched against call expression text (e.g. "ulid.MustNew").
     forbid:
       - p: ^ulid\.MustNew$
-        msg: "use ulid.New + error handling. ulid.MustNew panics on entropy failure (AGENTS.md > Common pitfalls; ISSUES.md M10, NEW-C1, SCAN2-C1, SCAN3-L1)."
+        msg: "use ulid.New + error handling. ulid.MustNew panics on entropy failure (AGENTS.md > Common pitfalls)."
       - p: ^time\.Sleep$
         msg: "no time.Sleep for synchronization. Use channels, sync.WaitGroup, or t.Eventually (AGENTS.md > Testing)."
     analyze-types: true
 
   errorlint:
-    # Catches `err == ErrXxx` and `err == sql.ErrNoRows` -- the recurring P2-H3 /
-    # SCAN6-M3 anti-pattern. Also catches `fmt.Errorf("%w: %v", ...)` which
-    # should use double `%w` per Go 1.20+ (P1-M8).
+    # Catches `err == ErrXxx` and `err == sql.ErrNoRows`. Also catches
+    # `fmt.Errorf("%w: %v", ...)` which should use double `%w` per Go 1.20+.
     errorf: true
     errorf-multi: true
     asserts: true

@@ -17,10 +17,10 @@ linters:
   # Keeps the golangci-lint defaults (errcheck, govet, ineffassign, staticcheck,
   # unused, gosimple) and adds a curated set on top.
   enable:
-    - forbidigo       # bans specific symbols (ulid.MustNew, time.Sleep)
-    - rowserrcheck    # missing rows.Err() after rows.Next()
-    - sqlclosecheck   # missing rows.Close() / stmt.Close()
-    - errorlint       # err == ErrXxx instead of errors.Is
+    - forbidigo # bans specific symbols (ulid.MustNew, time.Sleep)
+    - rowserrcheck # missing rows.Err() after rows.Next()
+    - sqlclosecheck # missing rows.Close() / stmt.Close()
+    - errorlint # err == ErrXxx instead of errors.Is
 
 linters-settings:
   forbidigo:
@@ -51,12 +51,6 @@ issues:
     # Tests legitimately use time.Sleep for timing-sensitive scenarios and
     # may construct fixtures with patterns we ban in production code.
     - path: _test\.go
-      linters:
-        - forbidigo
-        - errcheck
-
-    # Dev/seed tools have lower hygiene standards than the production server.
-    - path: cmd/seed/
       linters:
         - forbidigo
         - errcheck

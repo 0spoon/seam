@@ -75,8 +75,9 @@ func NewSQLManagerWithDB(db *sql.DB, dataDir string, logger *slog.Logger) *SQLMa
 }
 
 // NewSQLManager creates a Manager that opens the database at dataDir/seam.db.
-// This constructor is used by tests and the seed command. For the server,
-// prefer NewSQLManagerWithDB to share the DB handle with the auth store.
+// This constructor is used by tests that need a freshly opened DB. For the
+// server, prefer NewSQLManagerWithDB to share the DB handle with the auth
+// store.
 func NewSQLManager(dataDir string, logger *slog.Logger) *SQLManager {
 	if logger == nil {
 		logger = slog.Default()

@@ -166,11 +166,52 @@ func TestService_AddMessage_InvalidRole(t *testing.T) {
 
 	err := svc.AddMessage(context.Background(), "user1", Message{
 		ConversationID: "conv1",
-		Role:           "system",
+		Role:           "banana",
 		Content:        "bad",
 	})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrInvalidRole)
+}
+
+func TestService_AddMessage_AllRolesAccepted(t *testing.T) {
+	mgr := newMockDBManager()
+	defer mgr.CloseAll()
+	svc := NewService(NewStore(), mgr, nil)
+	ctx := context.Background()
+
+	conv, err := svc.CreateConversation(ctx, "user1")
+	require.NoError(t, err)
+
+	cases := []struct {
+		role    string
+		content string
+	}{
+		{"user", "the user question"},
+		{"assistant", "the assistant reply"},
+		{"tool", `{"result":"ok"}`},
+		{"system", "a system marker"},
+	}
+	for _, tc := range cases {
+		msg := Message{
+			ConversationID: conv.ID,
+			Role:           tc.role,
+			Content:        tc.content,
+		}
+		if tc.role == "tool" {
+			msg.ToolCallID = "call_1"
+			msg.ToolName = "search_notes"
+		}
+		require.NoError(t, svc.AddMessage(ctx, "user1", msg),
+			"role %q should be accepted", tc.role)
+	}
+
+	_, msgs, err := svc.GetConversation(ctx, "user1", conv.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, len(cases))
+	for i, tc := range cases {
+		require.Equal(t, tc.role, msgs[i].Role)
+		require.Equal(t, tc.content, msgs[i].Content)
+	}
 }
 
 func TestService_AddMessage_AutoTitle(t *testing.T) {

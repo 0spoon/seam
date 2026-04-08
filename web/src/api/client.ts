@@ -37,6 +37,9 @@ import type {
   TagSuggestion,
   ProjectSuggestion,
   BulkActionResult,
+  AssistantMessage,
+  AssistantStreamEvent,
+  AssistantToolResult,
 } from './types';
 
 const BASE_URL = '/api';
@@ -578,6 +581,138 @@ export async function addChatMessage(
   await request<void>(`/chat/conversations/${conversationId}/messages`, {
     method: 'POST',
     body: JSON.stringify(message),
+  });
+}
+
+// Agentic assistant endpoints
+
+// streamAssistantChat POSTs to /assistant/chat/stream and dispatches each
+// parsed SSE event via onEvent. The request honors the caller's AbortSignal
+// so the stream can be cancelled. On a 401 it will refresh once and retry.
+export async function streamAssistantChat(
+  conversationId: string,
+  message: string,
+  history: AssistantMessage[],
+  onEvent: (e: AssistantStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const body = JSON.stringify({
+    conversation_id: conversationId,
+    message,
+    history,
+  });
+
+  const doFetch = async (): Promise<Response> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    };
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+    return fetch(`${BASE_URL}/assistant/chat/stream`, {
+      method: 'POST',
+      headers,
+      body,
+      signal,
+    });
+  };
+
+  let res = await doFetch();
+  if (res.status === 401 && getRefreshToken()) {
+    const refreshed = await tryRefresh();
+    if (!refreshed) {
+      onAuthFailure?.();
+      throw new ApiError(401, 'Authentication failed');
+    }
+    res = await doFetch();
+    if (res.status === 401) {
+      onAuthFailure?.();
+      throw new ApiError(401, 'Authentication failed');
+    }
+  }
+
+  if (!res.ok) {
+    let errMsg = res.statusText;
+    try {
+      const errBody = await res.json();
+      errMsg = errBody.error || errBody.message || errMsg;
+    } catch {
+      // Use statusText.
+    }
+    throw new ApiError(res.status, errMsg);
+  }
+
+  if (!res.body) {
+    throw new ApiError(500, 'Missing response body');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+
+  try {
+    // Loop reading chunks from the stream. Chunks can arrive split across
+    // SSE frame boundaries, so we buffer until we see a "\n\n" delimiter.
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf('\n\n');
+
+        if (!frame.startsWith('data: ')) continue;
+        const payload = frame.slice('data: '.length);
+        if (payload === '[DONE]') {
+          return;
+        }
+        try {
+          const evt = JSON.parse(payload) as AssistantStreamEvent;
+          onEvent(evt);
+        } catch {
+          // Ignore malformed frames rather than blowing up the stream.
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export async function approveAssistantAction(
+  actionId: string,
+): Promise<AssistantToolResult> {
+  return request<AssistantToolResult>(
+    `/assistant/actions/${actionId}/approve`,
+    { method: 'POST' },
+  );
+}
+
+export async function rejectAssistantAction(actionId: string): Promise<void> {
+  await request<void>(`/assistant/actions/${actionId}/reject`, {
+    method: 'POST',
+  });
+}
+
+// Stubs for future profile / memory management UIs. Typed wrappers only.
+export async function getAssistantProfile(): Promise<unknown> {
+  return request<unknown>('/assistant/profile');
+}
+
+export async function updateAssistantProfile(
+  profile: unknown,
+): Promise<unknown> {
+  return request<unknown>('/assistant/profile', {
+    method: 'PUT',
+    body: JSON.stringify(profile),
   });
 }
 

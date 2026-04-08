@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -289,18 +290,6 @@ type SemanticSearchResult struct {
 	Snippet string  `json:"snippet"`
 }
 
-// ChatResult is the response from the Ask Seam endpoint.
-type ChatResult struct {
-	Response  string   `json:"response"`
-	Citations []string `json:"citations"`
-}
-
-// ChatMessage is a single message in a chat history.
-type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
 // -- AI methods --------------------------------------------------------------
 
 // SearchSemantic performs a semantic search.
@@ -317,21 +306,6 @@ func (c *APIClient) SearchSemantic(query string) ([]SemanticSearchResult, error)
 		results = []SemanticSearchResult{}
 	}
 	return results, nil
-}
-
-// AskSeam sends a question to the Ask Seam RAG chat endpoint.
-func (c *APIClient) AskSeam(query string, history []ChatMessage) (*ChatResult, error) {
-	body := map[string]interface{}{
-		"query": query,
-	}
-	if len(history) > 0 {
-		body["history"] = history
-	}
-	var result ChatResult
-	if err := c.postAI("/api/ai/ask", body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
 }
 
 // -- Capture types -----------------------------------------------------------
@@ -501,21 +475,6 @@ func (c *APIClient) AssistCtx(ctx context.Context, noteID, action, selection str
 	return &result, nil
 }
 
-// AskSeamCtx sends a question to the Ask Seam RAG chat endpoint with a context.
-func (c *APIClient) AskSeamCtx(ctx context.Context, query string, history []ChatMessage) (*ChatResult, error) {
-	body := map[string]interface{}{
-		"query": query,
-	}
-	if len(history) > 0 {
-		body["history"] = history
-	}
-	var result ChatResult
-	if err := c.PostAICtx(ctx, "/api/ai/ask", body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
 // RefreshCtx obtains a new access token with a context for timeout control.
 func (c *APIClient) RefreshCtx(ctx context.Context) (*TokenPair, error) {
 	body := map[string]string{
@@ -620,4 +579,230 @@ func (c *APIClient) doSingleRequest(ctx context.Context, method, path string, pa
 	}
 
 	return total, resp.StatusCode, nil
+}
+
+// -- Assistant (SSE) types ---------------------------------------------------
+
+// AssistantStreamEvent mirrors internal/assistant.StreamEvent on the wire.
+type AssistantStreamEvent struct {
+	Type       string `json:"type"`
+	Content    string `json:"content,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Iterations int    `json:"iterations,omitempty"`
+}
+
+// AssistantToolCall mirrors ai.ToolCall on the wire.
+type AssistantToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// AssistantHistoryMessage is what we send back to the server in `history`.
+type AssistantHistoryMessage struct {
+	Role       string              `json:"role"`
+	Content    string              `json:"content"`
+	ToolCalls  []AssistantToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string              `json:"tool_call_id,omitempty"`
+	Name       string              `json:"name,omitempty"`
+}
+
+// AssistantToolResult is the response from the approve endpoint.
+type AssistantToolResult struct {
+	ToolName   string          `json:"tool_name"`
+	Arguments  json.RawMessage `json:"arguments,omitempty"`
+	Result     json.RawMessage `json:"result,omitempty"`
+	Error      string          `json:"error,omitempty"`
+	DurationMs int64           `json:"duration_ms"`
+}
+
+// AssistantConversation is the lightweight row returned by the
+// /api/chat/conversations endpoint, reused as a handle for the assistant.
+type AssistantConversation struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// assistantChatRequest is the POST body for /api/assistant/chat/stream.
+type assistantChatRequest struct {
+	ConversationID string                    `json:"conversation_id"`
+	Message        string                    `json:"message"`
+	History        []AssistantHistoryMessage `json:"history,omitempty"`
+}
+
+// -- Assistant methods -------------------------------------------------------
+
+// CreateAssistantConversation creates a chat conversation row so the
+// assistant has a conversation_id to attach turns to. Reuses
+// /api/chat/conversations.
+func (c *APIClient) CreateAssistantConversation(ctx context.Context) (*AssistantConversation, error) {
+	var conv AssistantConversation
+	if err := c.PostCtx(ctx, "/api/chat/conversations", struct{}{}, &conv); err != nil {
+		return nil, err
+	}
+	return &conv, nil
+}
+
+// ApproveAssistantAction approves a pending tool action and returns the
+// execution result. POSTs to /api/assistant/actions/{id}/approve with an
+// empty body.
+func (c *APIClient) ApproveAssistantAction(ctx context.Context, actionID string) (*AssistantToolResult, error) {
+	var result AssistantToolResult
+	path := "/api/assistant/actions/" + url.PathEscape(actionID) + "/approve"
+	if err := c.PostAICtx(ctx, path, struct{}{}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RejectAssistantAction rejects a pending tool action. 204 on success.
+func (c *APIClient) RejectAssistantAction(ctx context.Context, actionID string) error {
+	path := "/api/assistant/actions/" + url.PathEscape(actionID) + "/reject"
+	return c.PostCtx(ctx, path, struct{}{}, nil)
+}
+
+// AssistantChatStream POSTs to /api/assistant/chat/stream and reads the
+// SSE response, calling onEvent for each event. Returns when the stream
+// completes, ctx is cancelled, or [DONE] is received. On a 401 response,
+// one token refresh is attempted before returning an error.
+func (c *APIClient) AssistantChatStream(
+	ctx context.Context,
+	conversationID, message string,
+	history []AssistantHistoryMessage,
+	onEvent func(AssistantStreamEvent),
+) error {
+	reqBody := assistantChatRequest{
+		ConversationID: conversationID,
+		Message:        message,
+		History:        history,
+	}
+
+	resp, err := c.doAssistantStreamRequest(ctx, reqBody)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return readAssistantSSE(ctx, resp.Body, onEvent)
+}
+
+// doAssistantStreamRequest performs the POST with a single 401 retry.
+func (c *APIClient) doAssistantStreamRequest(ctx context.Context, reqBody assistantChatRequest) (*http.Response, error) {
+	resp, err := c.assistantStreamPOST(ctx, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && c.RefreshToken != "" {
+		_ = resp.Body.Close()
+		if _, refreshErr := c.RefreshCtx(ctx); refreshErr == nil {
+			resp, err = c.assistantStreamPOST(ctx, reqBody)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		var apiErr APIError
+		if json.Unmarshal(body, &apiErr) == nil && apiErr.Message != "" {
+			return nil, &apiErr
+		}
+		return nil, fmt.Errorf("assistant stream HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return resp, nil
+}
+
+// assistantStreamPOST issues a single streaming POST request. The caller
+// must close resp.Body on success.
+func (c *APIClient) assistantStreamPOST(ctx context.Context, reqBody assistantChatRequest) (*http.Response, error) {
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal assistant request: %w", err)
+	}
+
+	u := strings.TrimRight(c.BaseURL, "/") + "/api/assistant/chat/stream"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create assistant request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Cache-Control", "no-cache")
+	if c.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AccessToken)
+	}
+
+	// Bypass the default 30s client timeout for streaming. We rely on ctx
+	// for cancellation instead of swapping the shared HTTPClient Timeout.
+	streamClient := &http.Client{
+		Transport: c.HTTPClient.Transport,
+	}
+	resp, err := streamClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("assistant stream request failed: %w", err)
+	}
+	return resp, nil
+}
+
+// readAssistantSSE consumes an SSE stream and dispatches each event to
+// onEvent. Events are terminated by an empty line. A "data: [DONE]" line
+// ends the stream cleanly. JSON parse errors are logged via fmt.Fprintln
+// and skipped, not returned.
+func readAssistantSSE(ctx context.Context, body io.Reader, onEvent func(AssistantStreamEvent)) error {
+	reader := bufio.NewReader(body)
+	var dataLines []string
+
+	flush := func() bool {
+		if len(dataLines) == 0 {
+			return true
+		}
+		joined := strings.Join(dataLines, "\n")
+		dataLines = dataLines[:0]
+		if joined == "[DONE]" {
+			return false
+		}
+		var ev AssistantStreamEvent
+		if err := json.Unmarshal([]byte(joined), &ev); err != nil {
+			fmt.Fprintln(io.Discard, "assistant sse parse:", err)
+			return true
+		}
+		onEvent(ev)
+		return true
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			// Strip trailing CRLF.
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				// End of event.
+				if !flush() {
+					return nil
+				}
+				continue
+			}
+			if strings.HasPrefix(line, "data: ") {
+				dataLines = append(dataLines, line[len("data: "):])
+			} else if strings.HasPrefix(line, "data:") {
+				dataLines = append(dataLines, line[len("data:"):])
+			}
+			// Ignore comment and field lines (event:, id:, retry:, :comment).
+		}
+		if err != nil {
+			if err == io.EOF {
+				// Flush any trailing event without a terminating blank line.
+				_ = flush()
+				return nil
+			}
+			return fmt.Errorf("assistant sse read: %w", err)
+		}
+	}
 }

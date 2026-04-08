@@ -1,24 +1,27 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { sanitizeHtml } from '../../lib/sanitize';
-import { useNavigate } from 'react-router-dom';
-import { Send, Loader2, FileText, Plus, Trash2, ChevronDown } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Send, Loader2, Plus, Trash2, ChevronDown, Square } from 'lucide-react';
 import {
   createConversation,
   listConversations,
   getConversation,
-  addChatMessage,
   deleteConversation,
+  streamAssistantChat,
+  approveAssistantAction,
+  rejectAssistantAction,
 } from '../../api/client';
-import { useWebSocket } from '../../hooks/useWebSocket';
-import { send as wsSend, isConnected } from '../../api/ws';
+import { sanitizeHtml } from '../../lib/sanitize';
 import { renderMarkdown } from '../../lib/markdown';
 import { useToastStore } from '../../components/Toast/ToastContainer';
-import type { ChatCitation, ChatMessage, Conversation, WSMessage } from '../../api/types';
+import { ToolCallCard } from '../../components/ToolCallCard/ToolCallCard';
+import { ToolConfirmationCard } from '../../components/ToolConfirmationCard/ToolConfirmationCard';
+import type {
+  AssistantMessage,
+  AssistantStreamEvent,
+  ChatHistoryMessage,
+  Conversation,
+  ToolCallView,
+} from '../../api/types';
 import styles from './AskPage.module.css';
-
-const STREAM_TIMEOUT_MS = 60_000;
-// Maximum number of messages to send to the server for context.
-const MAX_HISTORY_MESSAGES = 10;
 
 const STARTER_SUGGESTIONS = [
   'What are my recent notes about?',
@@ -27,101 +30,121 @@ const STARTER_SUGGESTIONS = [
   'What topics do I write about most?',
 ];
 
-interface DisplayMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  citations?: ChatCitation[];
+// Maximum number of prior messages to send as history context.
+const MAX_HISTORY_MESSAGES = 20;
+
+type StreamStatus = 'idle' | 'streaming' | 'awaiting_approval' | 'error';
+
+interface PendingConfirmation {
+  actionId: string;
+  toolName: string;
+}
+
+// Generate a local short ID for ToolCallView entries. Not a ULID, but the
+// field is purely for React keys on client-side cards.
+function localId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// historyToAssistant converts persisted ChatHistoryMessages (as returned by
+// getConversation) into the wire-format AssistantMessage shape the server
+// expects in the `history` field of /assistant/chat/stream.
+//
+// Tool messages are flattened into user-prefixed system notes. We cannot
+// pass them through with role='tool' because LLM providers reject orphan
+// tool messages that don't pair with a preceding assistant tool_call
+// envelope by tool_call_id. The persisted history may contain such
+// orphans (e.g., the tool result row that the approve flow synthesizes,
+// or a reloaded conversation where the original tool_call_id was lost),
+// so we collapse them into a benign user note. Assistant rows that DO
+// have tool_calls are passed through unchanged so the LLM still sees
+// the proper envelope when both halves of a pair are present.
+function toAssistantHistory(
+  msgs: ChatHistoryMessage[],
+): AssistantMessage[] {
+  return msgs.map((m) => {
+    if (m.role === 'tool' || m.role === 'system') {
+      const label = m.tool_name ? `tool ${m.tool_name}` : 'system';
+      return {
+        role: 'user',
+        content: `[system note: ${label}] ${m.content}`,
+      };
+    }
+    return {
+      role: m.role,
+      content: m.content,
+      tool_calls: m.tool_calls,
+      tool_call_id: m.tool_call_id,
+      tool_name: m.tool_name,
+    };
+  });
 }
 
 export function AskPage() {
-  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
+
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingContent, setStreamingContent] = useState('');
+  const [messages, setMessages] = useState<ChatHistoryMessage[]>([]);
+  const [streamingTools, setStreamingTools] = useState<ToolCallView[]>([]);
+  const [streamingText, setStreamingText] = useState('');
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>('idle');
+  const [pendingConfirmation, setPendingConfirmation] =
+    useState<PendingConfirmation | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [recentConversations, setRecentConversations] = useState<
+    Conversation[]
+  >([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [recentConversations, setRecentConversations] = useState<Conversation[]>([]);
   const [showConvDropdown, setShowConvDropdown] = useState(false);
-  const convDropdownRef = useRef<HTMLDivElement>(null);
+  const [approvalLoading, setApprovalLoading] = useState(false);
+
+  const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const streamingRef = useRef('');
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const isStreamingRef = useRef(false);
-  const conversationIdRef = useRef<string | null>(null);
-  const [renderedStreaming, setRenderedStreaming] = useState('');
-  const renderThrottleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const convDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Keep ref in sync for use in callbacks.
-  useEffect(() => {
-    conversationIdRef.current = conversationId;
-  }, [conversationId]);
-
-  // Throttle markdown rendering of streaming content (~100ms).
-  // Always register a cleanup to clear any pending timeout, even when
-  // returning early because a throttle is already in progress.
-  useEffect(() => {
-    if (!streamingContent) {
-      setRenderedStreaming('');
-      return;
-    }
-    if (renderThrottleRef.current === undefined) {
-      renderThrottleRef.current = setTimeout(() => {
-        renderThrottleRef.current = undefined;
-        setRenderedStreaming(sanitizeHtml(renderMarkdown(streamingRef.current)));
-      }, 100);
-    }
-    return () => {
-      if (renderThrottleRef.current !== undefined) {
-        clearTimeout(renderThrottleRef.current);
-        renderThrottleRef.current = undefined;
-      }
-    };
-  }, [streamingContent]);
-
-  // Auto-scroll to bottom when messages change.
+  // Scroll to bottom whenever anything in the visible stream changes.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
+  }, [messages, streamingText, streamingTools, pendingConfirmation]);
 
-  // Load most recent conversation on mount and populate conversation list.
+  // Load the most recent conversation on mount.
   useEffect(() => {
     let cancelled = false;
-    async function loadRecentConversation() {
+    async function loadRecent() {
       try {
         const { conversations } = await listConversations(10, 0);
         if (cancelled) return;
         setRecentConversations(conversations);
         if (conversations.length > 0) {
           const recent = conversations[0];
-          const { conversation, messages: msgs } = await getConversation(recent.id);
+          const { conversation, messages: msgs } = await getConversation(
+            recent.id,
+          );
           if (cancelled) return;
           setConversationId(conversation.id);
-          setMessages(
-            msgs.map((m) => ({
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              citations: m.citations,
-            })),
-          );
+          setMessages(msgs);
         }
       } catch {
-        // Silently fail -- show empty state.
+        // Silently fall through to empty state.
       } finally {
         if (!cancelled) setIsLoading(false);
       }
     }
-    loadRecentConversation();
-    return () => { cancelled = true; };
+    loadRecent();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Close dropdown on outside click.
   useEffect(() => {
     if (!showConvDropdown) return;
     const handleClick = (e: MouseEvent) => {
-      if (convDropdownRef.current && !convDropdownRef.current.contains(e.target as Node)) {
+      if (
+        convDropdownRef.current &&
+        !convDropdownRef.current.contains(e.target as Node)
+      ) {
         setShowConvDropdown(false);
       }
     };
@@ -129,202 +152,297 @@ export function AskPage() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [showConvDropdown]);
 
-  const handleSwitchConversation = useCallback(async (convId: string) => {
-    setShowConvDropdown(false);
-    try {
-      const { conversation, messages: msgs } = await getConversation(convId);
-      setConversationId(conversation.id);
-      setMessages(
-        msgs.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-          citations: m.citations,
-        })),
-      );
-    } catch {
-      addToast('Failed to load conversation', 'error');
-    }
-  }, [addToast]);
-
-  // Focus input once loading is complete.
+  // Focus input once load completes.
   useEffect(() => {
     if (!isLoading) {
       inputRef.current?.focus();
     }
   }, [isLoading]);
 
-  // Clear any active streaming timeout.
-  const clearStreamTimeout = useCallback(() => {
-    if (timeoutRef.current !== undefined) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = undefined;
-    }
+  // Esc cancels an in-flight stream.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && streamStatus === 'streaming') {
+        abortRef.current?.abort();
+        abortRef.current = null;
+        setStreamStatus('idle');
+        setStreamingText('');
+        setStreamingTools([]);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [streamStatus]);
+
+  // Abort any in-flight stream on unmount.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
   }, []);
 
-  // Reset streaming timeout. Called when any streaming data arrives.
-  const resetStreamTimeout = useCallback(() => {
-    clearStreamTimeout();
-    timeoutRef.current = setTimeout(() => {
-      if (!isStreamingRef.current) return;
-      streamingRef.current = '';
-      setStreamingContent('');
-      setIsStreaming(false);
-      isStreamingRef.current = false;
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            'Response timed out. The AI service may be unavailable. Please try again.',
-        },
-      ]);
-    }, STREAM_TIMEOUT_MS);
-  }, [clearStreamTimeout]);
-
-  // Recover from a streaming error.
-  const recoverFromStreamError = useCallback(
-    (errorMessage: string) => {
-      clearStreamTimeout();
-      streamingRef.current = '';
-      setStreamingContent('');
-      setIsStreaming(false);
-      isStreamingRef.current = false;
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: errorMessage },
-      ]);
-    },
-    [clearStreamTimeout],
-  );
-
-  // Persist a message to the server (fire-and-forget with error toast).
-  const persistMessage = useCallback(
-    async (
-      convId: string,
-      role: string,
-      content: string,
-      citations?: ChatCitation[],
-    ) => {
+  const handleSwitchConversation = useCallback(
+    async (convId: string) => {
+      setShowConvDropdown(false);
       try {
-        await addChatMessage(convId, { role, content, citations });
+        const { conversation, messages: msgs } = await getConversation(convId);
+        setConversationId(conversation.id);
+        setMessages(msgs);
+        setStreamingText('');
+        setStreamingTools([]);
+        setPendingConfirmation(null);
+        setStreamStatus('idle');
       } catch {
-        addToast('Failed to save message', 'error');
+        addToast('Failed to load conversation', 'error');
       }
     },
     [addToast],
   );
 
-  // Handle streaming WebSocket messages.
-  const handleWSMessage = useCallback(
-    (msg: WSMessage) => {
-      if (msg.type === 'chat.stream') {
-        const payload = msg.payload as { token: string };
-        streamingRef.current += payload.token;
-        setStreamingContent((prev) => prev + payload.token);
-        resetStreamTimeout();
-      } else if (msg.type === 'chat.done') {
-        clearStreamTimeout();
-        const payload = msg.payload as { citations?: ChatCitation[] };
-        const completedContent = streamingRef.current;
-        streamingRef.current = '';
-        setMessages((prev) => {
-          const completed: DisplayMessage = {
-            role: 'assistant',
-            content: completedContent,
-            citations: payload.citations,
-          };
-          return [...prev, completed];
-        });
-        setStreamingContent('');
-        setIsStreaming(false);
-        isStreamingRef.current = false;
+  // Kick off a stream from the current state. The caller is responsible for
+  // first pushing any synthetic user/tool messages into `messages`. This
+  // builds the history from the snapshot of messages passed in, not the
+  // stale closure -- the caller supplies the truth.
+  const runStream = useCallback(
+    async (convId: string, message: string, baseHistory: ChatHistoryMessage[]) => {
+      const history = toAssistantHistory(baseHistory).slice(
+        -MAX_HISTORY_MESSAGES,
+      );
 
-        // Persist assistant message.
-        const convId = conversationIdRef.current;
-        if (convId) {
-          persistMessage(convId, 'assistant', completedContent, payload.citations);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setStreamStatus('streaming');
+      setStreamingText('');
+      setStreamingTools([]);
+
+      // Accumulators for the stream so we can finalize from a single place
+      // on `done`. Using refs-via-closures here would lose updates between
+      // events because setState batches.
+      let finalText = '';
+      const finalTools: ToolCallView[] = [];
+      let confirmationPending: PendingConfirmation | null = null;
+
+      const handleEvent = (e: AssistantStreamEvent) => {
+        if (e.type === 'text') {
+          finalText = e.content ?? '';
+          setStreamingText(finalText);
+        } else if (e.type === 'tool_use') {
+          const view: ToolCallView = {
+            id: localId(),
+            toolName: e.tool_name ?? 'tool',
+            status: e.error ? 'error' : 'ok',
+            resultJson: e.content,
+            errorMessage: e.error,
+          };
+          finalTools.push(view);
+          setStreamingTools((prev) => [...prev, view]);
+        } else if (e.type === 'confirmation') {
+          confirmationPending = {
+            actionId: e.content ?? '',
+            toolName: e.tool_name ?? 'tool',
+          };
+        } else if (e.type === 'done') {
+          // Finalize below in the post-stream block.
+        } else if (e.type === 'error') {
+          const msg = e.error ?? 'Stream error';
+          addToast(msg, 'error');
+          setStreamStatus('error');
+          setStreamingText('');
+          setStreamingTools([]);
         }
-      } else if (msg.type === 'chat.error') {
-        const payload = msg.payload as { error?: string } | undefined;
-        const detail = (payload as { error?: string })?.error ?? 'An error occurred';
-        recoverFromStreamError(
-          `Failed to get a response: ${detail}. Please try again.`,
+      };
+
+      try {
+        await streamAssistantChat(
+          convId,
+          message,
+          history,
+          handleEvent,
+          controller.signal,
         );
+      } catch (err) {
+        if (controller.signal.aborted) {
+          // User cancelled -- treat as idle.
+          setStreamStatus('idle');
+          setStreamingText('');
+          setStreamingTools([]);
+          return;
+        }
+        const msg = err instanceof Error ? err.message : 'Request failed';
+        addToast(msg, 'error');
+        setStreamStatus('error');
+        setStreamingText('');
+        setStreamingTools([]);
+        return;
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+      }
+
+      // Stream ended cleanly (no throw). Finalize by reifying the streaming
+      // scratch state into persistent ChatHistoryMessage rows. These are
+      // synthetic client-side rows; the canonical rows will arrive on next
+      // getConversation reload, which replaces them.
+      const synthTools: ChatHistoryMessage[] = finalTools.map((t) => ({
+        id: t.id,
+        conversation_id: convId,
+        role: 'tool',
+        content: t.resultJson ?? '',
+        tool_name: t.toolName,
+        created_at: new Date().toISOString(),
+      }));
+
+      const synthAssistant: ChatHistoryMessage | null =
+        finalText || finalTools.length > 0
+          ? {
+              id: localId(),
+              conversation_id: convId,
+              role: 'assistant',
+              content: finalText,
+              // Attach a tool_calls envelope for the reload-match logic so
+              // the assistant row absorbs any preceding synth tool messages.
+              tool_calls:
+                finalTools.length > 0
+                  ? finalTools.map((t) => ({
+                      id: t.id,
+                      name: t.toolName,
+                      arguments: '',
+                    }))
+                  : undefined,
+              created_at: new Date().toISOString(),
+            }
+          : null;
+
+      setMessages((prev) => {
+        const next = [...prev, ...synthTools];
+        if (synthAssistant) next.push(synthAssistant);
+        return next;
+      });
+      setStreamingText('');
+      setStreamingTools([]);
+
+      if (confirmationPending) {
+        setPendingConfirmation(confirmationPending);
+        setStreamStatus('awaiting_approval');
+      } else {
+        setStreamStatus('idle');
       }
     },
-    [clearStreamTimeout, resetStreamTimeout, recoverFromStreamError, persistMessage],
+    [addToast],
   );
-
-  useWebSocket(handleWSMessage);
-
-  // Detect WebSocket disconnection while streaming.
-  useEffect(() => {
-    if (!isStreaming) return;
-
-    const interval = setInterval(() => {
-      if (isStreamingRef.current && !isConnected()) {
-        clearInterval(interval);
-        recoverFromStreamError(
-          'Connection lost during response. Please try again.',
-        );
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [isStreaming, recoverFromStreamError]);
-
-  // Clean up timeout on unmount.
-  useEffect(() => {
-    return () => clearStreamTimeout();
-  }, [clearStreamTimeout]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const query = input.trim();
-    if (!query || isStreaming) return;
+    if (!query || streamStatus !== 'idle') return;
 
-    // Ensure we have a conversation.
     let convId = conversationId;
     if (!convId) {
       try {
         const conv = await createConversation();
         convId = conv.id;
         setConversationId(conv.id);
+        setRecentConversations((prev) => [conv, ...prev].slice(0, 10));
       } catch {
         addToast('Failed to create conversation', 'error');
         return;
       }
     }
 
-    // Add user message.
-    const userMsg: DisplayMessage = { role: 'user', content: query };
-    setMessages((prev) => [...prev, userMsg]);
+    // Synthetic user message for instant feedback. The server also persists
+    // the canonical row; on next reload the canonical row replaces this one.
+    const userMsg: ChatHistoryMessage = {
+      id: localId(),
+      conversation_id: convId,
+      role: 'user',
+      content: query,
+      created_at: new Date().toISOString(),
+    };
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
     setInput('');
-    setIsStreaming(true);
-    isStreamingRef.current = true;
 
-    // Persist user message.
-    persistMessage(convId, 'user', query);
+    await runStream(convId, query, messages);
+  };
 
-    // Build history from previous messages (for multi-turn conversation).
-    const allHistory: ChatMessage[] = messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-    const history = allHistory.slice(-MAX_HISTORY_MESSAGES);
+  const handleApprove = async () => {
+    if (!pendingConfirmation || !conversationId) return;
+    setApprovalLoading(true);
+    try {
+      const result = await approveAssistantAction(
+        pendingConfirmation.actionId,
+      );
+      const resultJson = JSON.stringify(
+        result.result ?? { ok: true },
+        null,
+        2,
+      );
+      // KNOWN LIMITATION: the assistant package does not expose a resume
+      // API. We cannot inject a real role='tool' message into the next
+      // turn because that requires the original tool_call_id (which the
+      // approve endpoint does not return) AND a paired assistant
+      // tool_call envelope; orphan tool messages get rejected by the
+      // LLM provider. As a workaround we surface the tool result as a
+      // synthetic role='system' message in the local UI (and as a
+      // user-prefixed system note in the next stream's history) and
+      // send an explicit approval prompt that tells the LLM the action
+      // is already done. Without this hint the LLM keeps redoing the
+      // tool call and re-triggers the confirmation forever.
+      const syntheticTool: ChatHistoryMessage = {
+        id: localId(),
+        conversation_id: conversationId,
+        role: 'system',
+        content: `[tool ${pendingConfirmation.toolName} executed] ${resultJson}`,
+        tool_name: pendingConfirmation.toolName,
+        created_at: new Date().toISOString(),
+      };
+      const nextMessages = [...messages, syntheticTool];
+      setMessages(nextMessages);
+      setPendingConfirmation(null);
 
-    // Check WebSocket connection before sending to avoid stuck "Thinking..." state.
-    if (!isConnected()) {
-      addToast('Not connected to server. Please try again.', 'error');
-      setIsStreaming(false);
-      isStreamingRef.current = false;
-      return;
+      const followUp = result.error
+        ? `I approved the "${pendingConfirmation.toolName}" action but it failed with: ${result.error}. Please report the failure and suggest next steps. Do not retry the same call automatically.`
+        : `I approved the "${pendingConfirmation.toolName}" action and it has been executed successfully. Result: ${resultJson}. Please confirm completion to me in plain language and do NOT call ${pendingConfirmation.toolName} again.`;
+      await runStream(conversationId, followUp, nextMessages);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Approval failed';
+      addToast(msg, 'error');
+      setStreamStatus('error');
+    } finally {
+      setApprovalLoading(false);
     }
+  };
 
-    wsSend('chat.ask', { query, history });
-    streamingRef.current = '';
-    setStreamingContent('');
-    resetStreamTimeout();
+  const handleReject = async () => {
+    if (!pendingConfirmation || !conversationId) return;
+    setApprovalLoading(true);
+    try {
+      await rejectAssistantAction(pendingConfirmation.actionId);
+      const syntheticSystem: ChatHistoryMessage = {
+        id: localId(),
+        conversation_id: conversationId,
+        role: 'system',
+        content: 'Action rejected',
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, syntheticSystem]);
+      setPendingConfirmation(null);
+      setStreamStatus('idle');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Reject failed';
+      addToast(msg, 'error');
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const handleStop = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStreamStatus('idle');
+    setStreamingText('');
+    setStreamingTools([]);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -339,6 +457,10 @@ export function AskPage() {
       const conv = await createConversation();
       setConversationId(conv.id);
       setMessages([]);
+      setStreamingText('');
+      setStreamingTools([]);
+      setPendingConfirmation(null);
+      setStreamStatus('idle');
       setInput('');
       setRecentConversations((prev) => [conv, ...prev].slice(0, 10));
       inputRef.current?.focus();
@@ -357,17 +479,52 @@ export function AskPage() {
     }
     setConversationId(null);
     setMessages([]);
+    setStreamingText('');
+    setStreamingTools([]);
+    setPendingConfirmation(null);
+    setStreamStatus('idle');
     setInput('');
     inputRef.current?.focus();
   };
 
   const handleSuggestionClick = (suggestion: string) => {
     setInput(suggestion);
-    // Auto-submit with a slight delay so the input updates visually.
     setTimeout(() => {
       inputRef.current?.form?.requestSubmit();
     }, 0);
   };
+
+  // Build a set of tool_call_ids that have been absorbed into an assistant
+  // envelope message, so we can skip rendering the raw `tool` message for
+  // them when reconstructing history (avoiding duplicates).
+  const toolByCallId = useMemo(() => {
+    const map = new Map<string, ChatHistoryMessage>();
+    for (const m of messages) {
+      if (m.role === 'tool' && m.tool_call_id) {
+        map.set(m.tool_call_id, m);
+      }
+    }
+    return map;
+  }, [messages]);
+
+  const absorbedToolIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of messages) {
+      if (m.role === 'assistant' && m.tool_calls) {
+        for (const tc of m.tool_calls) {
+          if (tc.id && toolByCallId.has(tc.id)) {
+            s.add(tc.id);
+          }
+        }
+      }
+    }
+    return s;
+  }, [messages, toolByCallId]);
+
+  const renderedStreamingText = useMemo(() => {
+    if (!streamingText) return '';
+    return sanitizeHtml(renderMarkdown(streamingText));
+  }, [streamingText]);
 
   if (isLoading) {
     return (
@@ -380,6 +537,8 @@ export function AskPage() {
     );
   }
 
+  const isBusy = streamStatus !== 'idle';
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -387,8 +546,8 @@ export function AskPage() {
           <div>
             <h1 className={styles.title}>Ask Seam</h1>
             <p className={styles.subtitle}>
-              Ask questions about your notes. Answers are grounded in your knowledge
-              base.
+              Ask anything. The assistant can search, read, create, and update
+              your notes.
             </p>
           </div>
           <div className={styles.headerActions}>
@@ -444,7 +603,7 @@ export function AskPage() {
       </header>
 
       <div className={styles.chatArea}>
-        {messages.length === 0 && !isStreaming && (
+        {messages.length === 0 && !isBusy && (
           <div className={styles.emptyState}>
             <p className={styles.emptyText}>
               Ask anything -- Seam finds the answer in your notes.
@@ -463,57 +622,121 @@ export function AskPage() {
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`${styles.message} ${msg.role === 'user' ? styles.userMessage : styles.assistantMessage}`}
-          >
-            {msg.role === 'assistant' ? (
+        {messages.map((msg) => {
+          if (msg.role === 'user') {
+            return (
               <div
-                className={styles.messageContent}
-                dangerouslySetInnerHTML={{
-                  __html: sanitizeHtml(renderMarkdown(msg.content)),
-                }}
-              />
-            ) : (
-              <div className={styles.messageContent}>{msg.content}</div>
-            )}
-            {msg.citations && msg.citations.length > 0 && (
-              <div className={styles.citations}>
-                <span className={styles.citationsLabel}>Sources:</span>
-                {msg.citations.map((citation) => (
-                  <button
-                    key={citation.id}
-                    className={styles.citationLink}
-                    onClick={() => navigate(`/notes/${citation.id}`)}
-                    title={citation.title}
-                  >
-                    <FileText size={12} />
-                    <span>{citation.title.length > 30 ? citation.title.slice(0, 30) + '...' : citation.title}</span>
-                  </button>
-                ))}
+                key={msg.id}
+                className={`${styles.message} ${styles.userMessage}`}
+              >
+                <div className={styles.messageContent}>{msg.content}</div>
               </div>
-            )}
-          </div>
-        ))}
+            );
+          }
+
+          if (msg.role === 'system') {
+            return (
+              <div key={msg.id} className={styles.systemMessage}>
+                {msg.content}
+              </div>
+            );
+          }
+
+          if (msg.role === 'tool') {
+            // Skip if this tool message was absorbed into an assistant
+            // tool_calls envelope earlier in the message list.
+            if (msg.tool_call_id && absorbedToolIds.has(msg.tool_call_id)) {
+              return null;
+            }
+            return (
+              <div key={msg.id} className={styles.toolsGroup}>
+                <ToolCallCard
+                  toolName={msg.tool_name ?? 'tool'}
+                  status="ok"
+                  resultJson={msg.content}
+                />
+              </div>
+            );
+          }
+
+          // assistant
+          const hasToolCalls =
+            Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+          return (
+            <div key={msg.id}>
+              {hasToolCalls && (
+                <div className={styles.toolsGroup}>
+                  <p className={styles.toolsLabel}>Used tools:</p>
+                  {msg.tool_calls!.map((tc) => {
+                    const paired = toolByCallId.get(tc.id);
+                    return (
+                      <ToolCallCard
+                        key={tc.id}
+                        toolName={tc.name}
+                        status="ok"
+                        resultJson={paired?.content}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+              {msg.content && (
+                <div
+                  className={`${styles.message} ${styles.assistantMessage}`}
+                >
+                  <div
+                    className={styles.messageContent}
+                    dangerouslySetInnerHTML={{
+                      __html: sanitizeHtml(renderMarkdown(msg.content)),
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
 
         <div aria-live="polite" aria-atomic="false">
-          {isStreaming && streamingContent && (
+          {streamingTools.length > 0 && (
+            <div className={styles.toolsGroup}>
+              {streamingTools.map((t) => (
+                <ToolCallCard
+                  key={t.id}
+                  toolName={t.toolName}
+                  status={t.status}
+                  resultJson={t.resultJson}
+                  errorMessage={t.errorMessage}
+                />
+              ))}
+            </div>
+          )}
+
+          {streamingText && (
             <div className={`${styles.message} ${styles.assistantMessage}`}>
               <div
                 className={styles.messageContent}
-                dangerouslySetInnerHTML={{
-                  __html: renderedStreaming,
-                }}
+                dangerouslySetInnerHTML={{ __html: renderedStreamingText }}
               />
             </div>
           )}
 
-          {isStreaming && !streamingContent && (
-            <div className={`${styles.message} ${styles.assistantMessage}`}>
-              <Loader2 size={16} className={styles.spinner} />
-              <span className={styles.thinkingText}>Thinking...</span>
-            </div>
+          {streamStatus === 'streaming' &&
+            !streamingText &&
+            streamingTools.length === 0 && (
+              <div className={`${styles.message} ${styles.assistantMessage}`}>
+                <Loader2 size={16} className={styles.spinner} />
+                <span className={styles.thinkingText}>Thinking...</span>
+              </div>
+            )}
+
+          {pendingConfirmation && (
+            <ToolConfirmationCard
+              toolName={pendingConfirmation.toolName}
+              arguments=""
+              onApprove={handleApprove}
+              onReject={handleReject}
+              loading={approvalLoading}
+            />
           )}
         </div>
 
@@ -530,17 +753,29 @@ export function AskPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
-            disabled={isStreaming}
+            disabled={isBusy}
             aria-label="Ask a question"
           />
-          <button
-            type="submit"
-            className={styles.sendButton}
-            disabled={!input.trim() || isStreaming}
-            aria-label="Send"
-          >
-            <Send size={16} />
-          </button>
+          {streamStatus === 'streaming' ? (
+            <button
+              type="button"
+              className={styles.stopButton}
+              onClick={handleStop}
+              aria-label="Stop"
+              title="Stop (Esc)"
+            >
+              <Square size={14} />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className={styles.sendButton}
+              disabled={!input.trim() || isBusy}
+              aria-label="Send"
+            >
+              <Send size={16} />
+            </button>
+          )}
         </div>
       </form>
     </div>

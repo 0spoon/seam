@@ -838,7 +838,12 @@ func run() error {
 				ChatModel:     assistantModel,
 				UserDBManager: userDBMgr,
 				Hub:           hub,
-				Logger:        logger,
+				// Reuse the same chat store the /api/chat endpoints
+				// already use so the agentic assistant's turns end up
+				// in the same conversation tables visible to the web
+				// and TUI ask screens.
+				ChatHistory: chatHistoryStore,
+				Logger:      logger,
 				Config: assistant.ServiceConfig{
 					MaxIterations:        cfg.Assistant.MaxIterations,
 					ConfirmationRequired: cfg.Assistant.ConfirmationRequired,

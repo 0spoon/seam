@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/katata/seam/internal/ai"
+	"github.com/katata/seam/internal/chat"
 	"github.com/katata/seam/migrations"
 	"github.com/stretchr/testify/require"
 
@@ -80,6 +81,10 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 // newTestService creates a service with no ws.Hub (nil is safe since the
 // service only uses the hub for optional WebSocket notifications).
+//
+// ChatHistory is always set to a fresh chat.Store so the persistence
+// side-effect in ChatStream can be observed by tests without each test
+// having to wire it up.
 func newTestService(t *testing.T, db *sql.DB, mock *mockToolChatCompleter, registry *ToolRegistry, cfg ServiceConfig) *Service {
 	t.Helper()
 	return NewService(ServiceDeps{
@@ -91,6 +96,7 @@ func newTestService(t *testing.T, db *sql.DB, mock *mockToolChatCompleter, regis
 		ChatModel:     "test-model",
 		UserDBManager: &mockUserDBManager{db: db},
 		Hub:           nil,
+		ChatHistory:   chat.NewStore(),
 		Logger:        slog.Default(),
 		Config:        cfg,
 	})
@@ -768,4 +774,169 @@ func TestService_Chat_LongHistoryEmbedsSummaryInSystemPrompt(t *testing.T) {
 	require.Equal(t,
 		history[len(history)-maxAssistantRecentMessages].Content,
 		sent[1].Content)
+}
+
+// drainEvents collects all events from a ChatStream channel until it closes.
+func drainEvents(t *testing.T, ch <-chan StreamEvent) []StreamEvent {
+	t.Helper()
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+	return events
+}
+
+func TestService_ChatStream_PersistsTurnArtifacts(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	mock := &mockToolChatCompleter{
+		responses: []*ai.ToolChatResponse{
+			{
+				Content:      "",
+				FinishReason: "tool_calls",
+				ToolCalls: []ai.ToolCall{
+					{ID: "call_1", Name: "get_current_time", Arguments: `{}`},
+				},
+			},
+			{Content: "It is Monday.", FinishReason: "stop"},
+		},
+	}
+
+	const toolResult = `{"day":"Monday"}`
+	registry := NewToolRegistry()
+	registry.Register(&Tool{
+		Name:        "get_current_time",
+		Description: "Get the current time",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(toolResult), nil
+		},
+		ReadOnly: true,
+	})
+
+	svc := newTestService(t, db, mock, registry, ServiceConfig{MaxIterations: 10})
+
+	const userMessage = "What day is it?"
+	eventCh, err := svc.ChatStream(context.Background(), ChatRequest{
+		UserID:         "default",
+		ConversationID: "conv1",
+		Message:        userMessage,
+	})
+	require.NoError(t, err)
+
+	// Drain the stream so all persistence side-effects complete.
+	events := drainEvents(t, eventCh)
+	require.NotEmpty(t, events)
+
+	// Read messages straight from the chat store.
+	store := chat.NewStore()
+	_, msgs, err := store.GetConversation(context.Background(), db, "conv1")
+	require.NoError(t, err)
+	require.Len(t, msgs, 4, "expected user, assistant tool-call envelope, tool result, assistant final text")
+
+	// 0: user message.
+	require.Equal(t, "user", msgs[0].Role)
+	require.Equal(t, userMessage, msgs[0].Content)
+	require.Empty(t, msgs[0].ToolCalls)
+	require.Equal(t, 0, msgs[0].Iteration)
+
+	// 1: assistant envelope with one tool call at iteration 0.
+	require.Equal(t, "assistant", msgs[1].Role)
+	require.Equal(t, "", msgs[1].Content)
+	require.Len(t, msgs[1].ToolCalls, 1)
+	require.Equal(t, "call_1", msgs[1].ToolCalls[0].ID)
+	require.Equal(t, "get_current_time", msgs[1].ToolCalls[0].Name)
+	require.Equal(t, 0, msgs[1].Iteration)
+
+	// 2: tool result at iteration 0.
+	require.Equal(t, "tool", msgs[2].Role)
+	require.Equal(t, toolResult, msgs[2].Content)
+	require.Equal(t, "call_1", msgs[2].ToolCallID)
+	require.Equal(t, "get_current_time", msgs[2].ToolName)
+	require.Equal(t, 0, msgs[2].Iteration)
+
+	// 3: final assistant text at iteration 1.
+	require.Equal(t, "assistant", msgs[3].Role)
+	require.Equal(t, "It is Monday.", msgs[3].Content)
+	require.Empty(t, msgs[3].ToolCalls)
+	require.Equal(t, 1, msgs[3].Iteration)
+}
+
+func TestService_ChatStream_PersistsConfirmation(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	mock := &mockToolChatCompleter{
+		responses: []*ai.ToolChatResponse{
+			{
+				Content:      "I will create a note for you.",
+				FinishReason: "tool_calls",
+				ToolCalls: []ai.ToolCall{
+					{ID: "call_1", Name: "create_note", Arguments: `{"title":"Test","body":"hello"}`},
+				},
+			},
+		},
+	}
+
+	registry := NewToolRegistry()
+	registry.Register(&Tool{
+		Name:        "create_note",
+		Description: "Create a note",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"id":"note1"}`), nil
+		},
+		ReadOnly: false,
+	})
+
+	svc := newTestService(t, db, mock, registry, ServiceConfig{
+		MaxIterations:        10,
+		ConfirmationRequired: []string{"create_note"},
+	})
+
+	const userMessage = "create a note please"
+	eventCh, err := svc.ChatStream(context.Background(), ChatRequest{
+		UserID:         "default",
+		ConversationID: "conv1",
+		Message:        userMessage,
+	})
+	require.NoError(t, err)
+
+	events := drainEvents(t, eventCh)
+
+	// Capture the action ID from the confirmation stream event so we can
+	// assert the persisted system marker includes it.
+	var actionID string
+	for _, ev := range events {
+		if ev.Type == StreamEventConfirmation {
+			actionID = ev.Content
+			break
+		}
+	}
+	require.NotEmpty(t, actionID, "expected a confirmation event with an action ID")
+
+	store := chat.NewStore()
+	_, msgs, err := store.GetConversation(context.Background(), db, "conv1")
+	require.NoError(t, err)
+	require.Len(t, msgs, 3, "expected user, assistant tool-call envelope, system confirmation marker")
+
+	// 0: user message.
+	require.Equal(t, "user", msgs[0].Role)
+	require.Equal(t, userMessage, msgs[0].Content)
+
+	// 1: assistant envelope with the pending tool call.
+	require.Equal(t, "assistant", msgs[1].Role)
+	require.Equal(t, "I will create a note for you.", msgs[1].Content)
+	require.Len(t, msgs[1].ToolCalls, 1)
+	require.Equal(t, "create_note", msgs[1].ToolCalls[0].Name)
+	require.Equal(t, "call_1", msgs[1].ToolCalls[0].ID)
+
+	// 2: system row marking the pending confirmation.
+	require.Equal(t, "system", msgs[2].Role)
+	require.Contains(t, msgs[2].Content, "create_note")
+	require.Contains(t, msgs[2].Content, actionID)
+	require.Equal(t, "create_note", msgs[2].ToolName)
 }

@@ -11,21 +11,13 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('../../api/client', () => ({
-  askSeam: vi.fn(),
   createConversation: vi.fn(),
   listConversations: vi.fn(),
   getConversation: vi.fn(),
-  addChatMessage: vi.fn(),
   deleteConversation: vi.fn(),
-}));
-
-vi.mock('../../api/ws', () => ({
-  send: vi.fn(),
-  isConnected: vi.fn(() => true),
-}));
-
-vi.mock('../../hooks/useWebSocket', () => ({
-  useWebSocket: vi.fn(),
+  streamAssistantChat: vi.fn(),
+  approveAssistantAction: vi.fn(),
+  rejectAssistantAction: vi.fn(),
 }));
 
 vi.mock('../../lib/markdown', () => ({
@@ -39,7 +31,7 @@ vi.mock('../../lib/sanitize', () => ({
 import {
   createConversation,
   listConversations,
-  addChatMessage,
+  streamAssistantChat,
 } from '../../api/client';
 
 /**
@@ -73,7 +65,12 @@ describe('AskPage', () => {
       created_at: '',
       updated_at: '',
     } as never);
-    vi.mocked(addChatMessage).mockResolvedValue(undefined as never);
+    // Default: keep the stream open so the page sits in the streaming
+    // state. Tests that need a completed stream can override this with
+    // a mockImplementationOnce that calls the onEvent callback.
+    vi.mocked(streamAssistantChat).mockImplementation(
+      () => new Promise(() => {}),
+    );
 
     // jsdom does not implement scrollIntoView.
     Element.prototype.scrollIntoView = vi.fn();
@@ -86,8 +83,11 @@ describe('AskPage', () => {
   it('renders title and subtitle', async () => {
     await renderAskPage();
     expect(screen.getByText('Ask Seam')).toBeInTheDocument();
+    // The subtitle text was rewritten when the page moved to the
+    // agentic assistant. Match a substring instead of the full string
+    // so future copy tweaks don't break this test.
     expect(
-      screen.getByText(/Ask questions about your notes/),
+      screen.getByText(/assistant can search, read, create/i),
     ).toBeInTheDocument();
   });
 

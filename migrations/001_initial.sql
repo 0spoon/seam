@@ -166,9 +166,18 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
     id              TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    role            TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    role            TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool', 'system')),
     content         TEXT NOT NULL,
     citations       TEXT,
+    -- Extended columns for the agentic assistant. tool_calls is a JSON
+    -- array of {id, name, arguments} envelopes attached to assistant
+    -- turns; tool_call_id / tool_name identify the call this message
+    -- replies to (for role='tool'); iteration is the loop index in the
+    -- agentic chat that produced the message.
+    tool_calls      TEXT,
+    tool_call_id    TEXT,
+    tool_name       TEXT,
+    iteration       INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 

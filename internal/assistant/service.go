@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/katata/seam/internal/ai"
+	"github.com/katata/seam/internal/chat"
 	"github.com/katata/seam/internal/userdb"
 	"github.com/katata/seam/internal/ws"
 	"github.com/oklog/ulid/v2"
@@ -32,8 +33,14 @@ type ServiceDeps struct {
 	ChatModel     string
 	UserDBManager userdb.Manager
 	Hub           *ws.Hub
-	Logger        *slog.Logger
-	Config        ServiceConfig
+	// ChatHistory persists each turn of the agentic loop (user message,
+	// assistant tool-call envelopes, tool results, final assistant text)
+	// into the chat conversation tables so the same conversation history
+	// is visible to the web/TUI ask screens. Optional: when nil, the
+	// service runs without persistence (used by some tests).
+	ChatHistory *chat.Store
+	Logger      *slog.Logger
+	Config      ServiceConfig
 }
 
 // ServiceConfig holds configurable assistant parameters.
@@ -53,6 +60,7 @@ type Service struct {
 	chatModel     string
 	userDBManager userdb.Manager
 	hub           *ws.Hub
+	chatHistory   *chat.Store
 	logger        *slog.Logger
 	config        ServiceConfig
 	confirmation  *ConfirmationManager
@@ -76,6 +84,7 @@ func NewService(deps ServiceDeps) *Service {
 		chatModel:     deps.ChatModel,
 		userDBManager: deps.UserDBManager,
 		hub:           deps.Hub,
+		chatHistory:   deps.ChatHistory,
 		logger:        deps.Logger,
 		config:        deps.Config,
 		confirmation:  NewConfirmationManager(deps.Config.ConfirmationRequired),
@@ -346,6 +355,13 @@ func (s *Service) executeTool(ctx context.Context, userID string, db *sql.DB, co
 // ChatStream executes the agentic loop and streams events as they happen.
 // Tool use events are emitted as each tool executes; text events are emitted
 // when the LLM produces its final response.
+//
+// Side effect: every turn artifact (the user message, each assistant
+// tool-call envelope, each tool result, the final assistant text, and any
+// confirmation/error markers) is persisted into the chat conversation
+// store via s.chatHistory so the same conversation can be reloaded by the
+// web/TUI ask screens. Persistence is best-effort: failures are logged
+// but never abort the stream.
 func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error) {
 	eventCh := make(chan StreamEvent, 64)
 
@@ -370,6 +386,15 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 			Content: req.Message,
 		})
 
+		// Persist the incoming user message before any tool use, so the
+		// chat history reflects the turn even if the LLM call below
+		// fails or the client cancels mid-stream.
+		s.persistChatMessage(ctx, db, chat.Message{
+			ConversationID: req.ConversationID,
+			Role:           "user",
+			Content:        req.Message,
+		})
+
 		// Schedule background summary refresh after the stream
 		// completes so the next call benefits from a fresh digest.
 		defer s.maybeRefreshConversationSummary(req.UserID, req.ConversationID, req.History)
@@ -386,13 +411,26 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 
 			resp, llmErr := s.llm.ChatCompletionWithTools(ctx, s.chatModel, messages, toolDefs)
 			if llmErr != nil {
-				eventCh <- StreamEvent{Type: StreamEventError, Error: fmt.Sprintf("llm call failed: %s", llmErr)}
+				errMsg := fmt.Sprintf("llm call failed: %s", llmErr)
+				s.persistChatMessage(ctx, db, chat.Message{
+					ConversationID: req.ConversationID,
+					Role:           "system",
+					Content:        errMsg,
+					Iteration:      iteration,
+				})
+				eventCh <- StreamEvent{Type: StreamEventError, Error: errMsg}
 				return
 			}
 
 			// No tool calls -- final response.
 			if len(resp.ToolCalls) == 0 {
 				if resp.Content != "" {
+					s.persistChatMessage(ctx, db, chat.Message{
+						ConversationID: req.ConversationID,
+						Role:           "assistant",
+						Content:        resp.Content,
+						Iteration:      iteration,
+					})
 					eventCh <- StreamEvent{
 						Type:    StreamEventText,
 						Content: resp.Content,
@@ -405,11 +443,21 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 				return
 			}
 
-			// Add assistant message with tool calls.
+			// Add assistant message with tool calls (for the LLM context
+			// AND for the persistent chat history). The chat history row
+			// uses the Iteration column so a future loader can replay
+			// turns in order even when timestamps collide.
 			messages = append(messages, ai.ToolMessage{
 				Role:      "assistant",
 				Content:   resp.Content,
 				ToolCalls: resp.ToolCalls,
+			})
+			s.persistChatMessage(ctx, db, chat.Message{
+				ConversationID: req.ConversationID,
+				Role:           "assistant",
+				Content:        resp.Content,
+				ToolCalls:      toChatToolCalls(resp.ToolCalls),
+				Iteration:      iteration,
 			})
 
 			// Execute each tool call and stream the events.
@@ -421,6 +469,14 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 						Content:    fmt.Sprintf("Error: tool %q not found", tc.Name),
 						ToolCallID: tc.ID,
 						Name:       tc.Name,
+					})
+					s.persistChatMessage(ctx, db, chat.Message{
+						ConversationID: req.ConversationID,
+						Role:           "tool",
+						Content:        fmt.Sprintf("Error: tool %q not found", tc.Name),
+						ToolCallID:     tc.ID,
+						ToolName:       tc.Name,
+						Iteration:      iteration,
 					})
 					eventCh <- StreamEvent{
 						Type:     StreamEventToolUse,
@@ -450,6 +506,13 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 						s.logger.Warn("assistant.Service.ChatStream: failed to record pending action",
 							"error", recordErr)
 					}
+					s.persistChatMessage(ctx, db, chat.Message{
+						ConversationID: req.ConversationID,
+						Role:           "system",
+						Content:        fmt.Sprintf("Pending confirmation for %s (action %s)", tc.Name, actionID),
+						ToolName:       tc.Name,
+						Iteration:      iteration,
+					})
 					eventCh <- StreamEvent{
 						Type:     StreamEventConfirmation,
 						ToolName: tc.Name,
@@ -467,11 +530,20 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 				tr := s.executeTool(ctx, req.UserID, db, req.ConversationID, tool, tc)
 
 				if tr.Error != "" {
+					content := fmt.Sprintf("Error: %s", tr.Error)
 					messages = append(messages, ai.ToolMessage{
 						Role:       "tool",
-						Content:    fmt.Sprintf("Error: %s", tr.Error),
+						Content:    content,
 						ToolCallID: tc.ID,
 						Name:       tc.Name,
+					})
+					s.persistChatMessage(ctx, db, chat.Message{
+						ConversationID: req.ConversationID,
+						Role:           "tool",
+						Content:        content,
+						ToolCallID:     tc.ID,
+						ToolName:       tc.Name,
+						Iteration:      iteration,
 					})
 					eventCh <- StreamEvent{
 						Type:     StreamEventToolUse,
@@ -486,6 +558,14 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 						ToolCallID: tc.ID,
 						Name:       tc.Name,
 					})
+					s.persistChatMessage(ctx, db, chat.Message{
+						ConversationID: req.ConversationID,
+						Role:           "tool",
+						Content:        resultStr,
+						ToolCallID:     tc.ID,
+						ToolName:       tc.Name,
+						Iteration:      iteration,
+					})
 					eventCh <- StreamEvent{
 						Type:     StreamEventToolUse,
 						ToolName: tc.Name,
@@ -495,10 +575,56 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 			}
 		}
 
+		s.persistChatMessage(ctx, db, chat.Message{
+			ConversationID: req.ConversationID,
+			Role:           "system",
+			Content:        "max iterations reached",
+		})
 		eventCh <- StreamEvent{Type: StreamEventError, Error: "max iterations reached"}
 	}()
 
 	return eventCh, nil
+}
+
+// persistChatMessage writes a chat message to the persistent conversation
+// store. It is best-effort: failures are logged with the role and
+// conversation ID but never propagate. Callers may leave ID and CreatedAt
+// zero-valued; this helper fills them in.
+func (s *Service) persistChatMessage(ctx context.Context, db *sql.DB, msg chat.Message) {
+	if s.chatHistory == nil || msg.ConversationID == "" {
+		return
+	}
+	if msg.ID == "" {
+		id, err := generateULID()
+		if err != nil {
+			s.logger.Warn("assistant.Service.persistChatMessage: generate id",
+				"error", err, "conversation_id", msg.ConversationID)
+			return
+		}
+		msg.ID = id
+	}
+	if msg.CreatedAt == "" {
+		msg.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if err := s.chatHistory.AddMessage(ctx, db, msg); err != nil {
+		s.logger.Warn("assistant.Service.persistChatMessage: write",
+			"error", err, "role", msg.Role, "conversation_id", msg.ConversationID)
+	}
+}
+
+// toChatToolCalls converts the AI package's ToolCall slice to the chat
+// package's mirror type. The two structs are intentionally separate to
+// keep the chat package decoupled from internal/ai (matching the existing
+// chat.Citation / ai.Citation precedent).
+func toChatToolCalls(calls []ai.ToolCall) []chat.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]chat.ToolCall, len(calls))
+	for i, c := range calls {
+		out[i] = chat.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments}
+	}
+	return out
 }
 
 // StreamEvent represents a streaming event from the assistant.

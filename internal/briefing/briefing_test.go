@@ -20,15 +20,15 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockNoteService struct {
-	listNotes      []*note.Note
-	listTotal      int
-	listErr        error
-	created        *note.CreateNoteReq
-	updated        *note.UpdateNoteReq
-	updatedNoteID  string
-	dedupeNotes    []*note.Note // returned when filter.ProjectID is set (existing-for-today lookup)
-	dedupeOnce     bool         // serve dedupeNotes only on the first matching call
-	dedupeServed   bool
+	listNotes     []*note.Note
+	listTotal     int
+	listErr       error
+	created       *note.CreateNoteReq
+	updated       *note.UpdateNoteReq
+	updatedNoteID string
+	dedupeNotes   []*note.Note // returned when filter.ProjectID is set (existing-for-today lookup)
+	dedupeOnce    bool         // serve dedupeNotes only on the first matching call
+	dedupeServed  bool
 }
 
 func (m *mockNoteService) List(ctx context.Context, userID string, filter note.NoteFilter) ([]*note.Note, int, error) {

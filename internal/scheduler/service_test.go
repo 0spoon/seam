@@ -24,11 +24,11 @@ type mockDBManager struct {
 func (m *mockDBManager) Open(ctx context.Context, userID string) (*sql.DB, error) {
 	return m.db, nil
 }
-func (m *mockDBManager) Close(userID string) error             { return nil }
-func (m *mockDBManager) CloseAll() error                       { return nil }
-func (m *mockDBManager) UserNotesDir(userID string) string     { return "" }
-func (m *mockDBManager) UserDataDir(userID string) string      { return "" }
-func (m *mockDBManager) EnsureUserDirs(userID string) error    { return nil }
+func (m *mockDBManager) Close(userID string) error          { return nil }
+func (m *mockDBManager) CloseAll() error                    { return nil }
+func (m *mockDBManager) UserNotesDir(userID string) string  { return "" }
+func (m *mockDBManager) UserDataDir(userID string) string   { return "" }
+func (m *mockDBManager) EnsureUserDirs(userID string) error { return nil }
 func (m *mockDBManager) ListUsers(ctx context.Context) ([]string, error) {
 	return []string{"default"}, nil
 }

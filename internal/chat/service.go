@@ -131,7 +131,9 @@ func (s *Service) DeleteConversation(ctx context.Context, userID, conversationID
 // assistant and the conversation has no title, auto-titles from the first
 // user message (truncated to maxTitleLen at a word boundary).
 func (s *Service) AddMessage(ctx context.Context, userID string, msg Message) error {
-	if msg.Role != "user" && msg.Role != "assistant" {
+	switch msg.Role {
+	case "user", "assistant", "tool", "system":
+	default:
 		return fmt.Errorf("chat.Service.AddMessage: role %q: %w", msg.Role, ErrInvalidRole)
 	}
 

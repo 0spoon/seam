@@ -143,6 +143,131 @@ func TestHandler_AddMessage_Valid(t *testing.T) {
 	require.Equal(t, "hello", capturedMsg.Content)
 }
 
+func TestHandler_AddMessage_AcceptsToolAndSystemRoles(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload map[string]any
+		verify  func(t *testing.T, msg Message)
+	}{
+		{
+			name: "tool_role_with_result",
+			payload: map[string]any{
+				"role":         "tool",
+				"content":      `{"results":[]}`,
+				"tool_call_id": "call_1",
+				"tool_name":    "search_notes",
+				"iteration":    2,
+			},
+			verify: func(t *testing.T, msg Message) {
+				require.Equal(t, "tool", msg.Role)
+				require.Equal(t, `{"results":[]}`, msg.Content)
+				require.Equal(t, "call_1", msg.ToolCallID)
+				require.Equal(t, "search_notes", msg.ToolName)
+				require.Equal(t, 2, msg.Iteration)
+			},
+		},
+		{
+			name: "tool_role_empty_content_allowed",
+			payload: map[string]any{
+				"role":         "tool",
+				"content":      "",
+				"tool_call_id": "call_2",
+				"tool_name":    "get_current_time",
+			},
+			verify: func(t *testing.T, msg Message) {
+				require.Equal(t, "tool", msg.Role)
+				require.Equal(t, "", msg.Content)
+				require.Equal(t, "call_2", msg.ToolCallID)
+			},
+		},
+		{
+			name: "system_role",
+			payload: map[string]any{
+				"role":    "system",
+				"content": "pending confirmation",
+			},
+			verify: func(t *testing.T, msg Message) {
+				require.Equal(t, "system", msg.Role)
+				require.Equal(t, "pending confirmation", msg.Content)
+			},
+		},
+		{
+			name: "assistant_with_tool_calls",
+			payload: map[string]any{
+				"role":    "assistant",
+				"content": "looking it up",
+				"tool_calls": []map[string]string{
+					{"id": "call_1", "name": "search_notes", "arguments": `{"q":"k8s"}`},
+				},
+				"iteration": 1,
+			},
+			verify: func(t *testing.T, msg Message) {
+				require.Equal(t, "assistant", msg.Role)
+				require.Equal(t, "looking it up", msg.Content)
+				require.Len(t, msg.ToolCalls, 1)
+				require.Equal(t, "call_1", msg.ToolCalls[0].ID)
+				require.Equal(t, "search_notes", msg.ToolCalls[0].Name)
+				require.Equal(t, `{"q":"k8s"}`, msg.ToolCalls[0].Arguments)
+				require.Equal(t, 1, msg.Iteration)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured Message
+			svc := &mockChatService{
+				addMessage: func(_ context.Context, _ string, msg Message) error {
+					captured = msg
+					return nil
+				},
+			}
+			r := newTestChatRouter(svc)
+
+			body, err := json.Marshal(tc.payload)
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/chat/conversations/conv1/messages", bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+			tc.verify(t, captured)
+		})
+	}
+}
+
+func TestHandler_AddMessage_RejectsUnknownRole(t *testing.T) {
+	var addMessageCalled bool
+	svc := &mockChatService{
+		addMessage: func(_ context.Context, _ string, _ Message) error {
+			addMessageCalled = true
+			return nil
+		},
+	}
+	r := newTestChatRouter(svc)
+
+	body, err := json.Marshal(map[string]string{"role": "banana", "content": "weird"})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/chat/conversations/conv1/messages", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, addMessageCalled, "service should not be reached for an invalid role")
+}
+
+func TestHandler_AddMessage_RejectsEmptyContentForNonTool(t *testing.T) {
+	r := newTestChatRouter(&mockChatService{})
+
+	body, err := json.Marshal(map[string]string{"role": "user", "content": ""})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/chat/conversations/conv1/messages", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestHandler_Unauthorized(t *testing.T) {
 	h := NewHandler(&mockChatService{}, nil)
 	r := chi.NewRouter()

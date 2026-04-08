@@ -177,21 +177,32 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
-		Role      string     `json:"role"`
-		Content   string     `json:"content"`
-		Citations []Citation `json:"citations,omitempty"`
+		Role       string     `json:"role"`
+		Content    string     `json:"content"`
+		Citations  []Citation `json:"citations,omitempty"`
+		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string     `json:"tool_call_id,omitempty"`
+		ToolName   string     `json:"tool_name,omitempty"`
+		Iteration  int        `json:"iteration,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if req.Role == "" || req.Content == "" {
-		writeError(w, http.StatusBadRequest, "role and content are required")
+	// Tool messages are produced by the agentic assistant; their content
+	// is the tool result string and may be empty when the tool returned
+	// nothing meaningful. Other roles still require a non-empty content.
+	if req.Role == "" {
+		writeError(w, http.StatusBadRequest, "role is required")
 		return
 	}
-	if req.Role != "user" && req.Role != "assistant" {
-		writeError(w, http.StatusBadRequest, "role must be 'user' or 'assistant'")
+	if req.Role != "tool" && req.Content == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	if !validRole(req.Role) {
+		writeError(w, http.StatusBadRequest, "role must be one of: user, assistant, tool, system")
 		return
 	}
 
@@ -200,6 +211,10 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
 		Role:           req.Role,
 		Content:        req.Content,
 		Citations:      req.Citations,
+		ToolCalls:      req.ToolCalls,
+		ToolCallID:     req.ToolCallID,
+		ToolName:       req.ToolName,
+		Iteration:      req.Iteration,
 	}
 
 	if err := h.service.AddMessage(r.Context(), userID, msg); err != nil {
@@ -208,7 +223,7 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, ErrInvalidRole) {
-			writeError(w, http.StatusBadRequest, "invalid message role: must be 'user' or 'assistant'")
+			writeError(w, http.StatusBadRequest, "invalid message role: must be one of user, assistant, tool, system")
 			return
 		}
 		h.logger.Error("add message failed", "error", err)
@@ -217,6 +232,17 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
+}
+
+// validRole reports whether r is one of the four roles the chat store
+// accepts. Kept here so the handler can fast-fail before reaching the
+// service layer; service.AddMessage performs the same check.
+func validRole(r string) bool {
+	switch r {
+	case "user", "assistant", "tool", "system":
+		return true
+	}
+	return false
 }
 
 // writeJSON encodes v as JSON and writes it to the response.

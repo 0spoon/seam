@@ -224,10 +224,66 @@ export interface Conversation {
 export interface ChatHistoryMessage {
   id: string;
   conversation_id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   citations?: ChatCitation[];
+  tool_calls?: AssistantToolCall[];
+  tool_call_id?: string;
+  tool_name?: string;
+  iteration?: number;
   created_at: string;
+}
+
+// Agentic assistant types (SSE chat stream + tool invocations).
+
+export type AssistantStreamEventType =
+  | 'text'
+  | 'tool_use'
+  | 'confirmation'
+  | 'done'
+  | 'error';
+
+export interface AssistantStreamEvent {
+  type: AssistantStreamEventType;
+  content?: string;
+  tool_name?: string;
+  error?: string;
+  iterations?: number;
+}
+
+export interface AssistantToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+// AssistantMessage mirrors the server's chat.Message wire format. It is
+// what the client sends back as `history` and what getConversation returns
+// when reloading an agentic conversation.
+export interface AssistantMessage {
+  role: 'user' | 'assistant' | 'tool' | 'system';
+  content: string;
+  tool_calls?: AssistantToolCall[];
+  tool_call_id?: string;
+  tool_name?: string;
+}
+
+// AssistantToolResult is the response from approve/reject endpoints.
+export interface AssistantToolResult {
+  tool_name: string;
+  arguments?: unknown;
+  result?: unknown;
+  error?: string;
+  duration_ms: number;
+}
+
+// ToolCallView is the local UI state for one tool invocation in the chat.
+export interface ToolCallView {
+  id: string; // local ULID, not the server's tool_call_id
+  toolName: string;
+  status: 'running' | 'ok' | 'error';
+  resultJson?: string; // raw JSON string the renderer parses
+  errorMessage?: string;
 }
 
 // Feature 9: Note version history

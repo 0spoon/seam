@@ -41,13 +41,35 @@ type Citation struct {
 	Title string `json:"title"`
 }
 
+// ToolCall represents a tool invocation an assistant turn requested.
+// NOTE: This type is structurally identical to ai.ToolCall and is kept
+// separate to avoid coupling the chat store to the ai package (matching
+// the Citation precedent above). Any field changes must be mirrored in
+// both packages.
+type ToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
 // Message represents a single message in a conversation.
+//
+// The agentic assistant uses the extended tool fields:
+//   - role='assistant' with non-empty ToolCalls is a request to invoke tools.
+//   - role='tool' with ToolCallID + ToolName is the result of one such call.
+//   - Iteration is the position in the agentic loop that produced the message.
+//
+// RAG chat (chat.ask) leaves the new fields zero-valued.
 type Message struct {
 	ID             string     `json:"id"`
 	ConversationID string     `json:"conversation_id"`
 	Role           string     `json:"role"`
 	Content        string     `json:"content"`
 	Citations      []Citation `json:"citations,omitempty"`
+	ToolCalls      []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID     string     `json:"tool_call_id,omitempty"`
+	ToolName       string     `json:"tool_name,omitempty"`
+	Iteration      int        `json:"iteration,omitempty"`
 	CreatedAt      string     `json:"created_at"`
 }
 
@@ -120,7 +142,8 @@ func (s *Store) GetConversation(ctx context.Context, db DBTX, id string) (*Conve
 	}
 
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, conversation_id, role, content, citations, created_at
+		`SELECT id, conversation_id, role, content, citations,
+		        tool_calls, tool_call_id, tool_name, iteration, created_at
 		 FROM messages
 		 WHERE conversation_id = ?
 		 ORDER BY created_at ASC`,
@@ -133,18 +156,9 @@ func (s *Store) GetConversation(ctx context.Context, db DBTX, id string) (*Conve
 
 	var msgs []Message
 	for rows.Next() {
-		var m Message
-		var citationsJSON sql.NullString
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &citationsJSON, &m.CreatedAt); err != nil {
-			return nil, nil, fmt.Errorf("chat.Store.GetConversation: scan message: %w", err)
-		}
-		if citationsJSON.Valid && citationsJSON.String != "" {
-			if err := json.Unmarshal([]byte(citationsJSON.String), &m.Citations); err != nil {
-				// Log the corrupt citation data and continue.
-				slog.Warn("chat.Store.GetConversation: failed to unmarshal citations",
-					"message_id", m.ID, "error", err)
-				m.Citations = nil
-			}
+		m, scanErr := scanMessage(rows)
+		if scanErr != nil {
+			return nil, nil, fmt.Errorf("chat.Store.GetConversation: scan message: %w", scanErr)
 		}
 		msgs = append(msgs, m)
 	}
@@ -153,6 +167,42 @@ func (s *Store) GetConversation(ctx context.Context, db DBTX, id string) (*Conve
 	}
 
 	return &conv, msgs, nil
+}
+
+// scanMessage decodes a single message row that includes the extended
+// agentic columns. It is shared by GetConversation and SearchMessages so
+// the column list and JSON-decoding logic stay in one place.
+func scanMessage(rows *sql.Rows) (Message, error) {
+	var m Message
+	var citationsJSON, toolCallsJSON, toolCallID, toolName sql.NullString
+	if err := rows.Scan(
+		&m.ID, &m.ConversationID, &m.Role, &m.Content,
+		&citationsJSON, &toolCallsJSON, &toolCallID, &toolName,
+		&m.Iteration, &m.CreatedAt,
+	); err != nil {
+		return Message{}, err
+	}
+	if citationsJSON.Valid && citationsJSON.String != "" {
+		if err := json.Unmarshal([]byte(citationsJSON.String), &m.Citations); err != nil {
+			slog.Warn("chat.scanMessage: failed to unmarshal citations",
+				"message_id", m.ID, "error", err)
+			m.Citations = nil
+		}
+	}
+	if toolCallsJSON.Valid && toolCallsJSON.String != "" {
+		if err := json.Unmarshal([]byte(toolCallsJSON.String), &m.ToolCalls); err != nil {
+			slog.Warn("chat.scanMessage: failed to unmarshal tool_calls",
+				"message_id", m.ID, "error", err)
+			m.ToolCalls = nil
+		}
+	}
+	if toolCallID.Valid {
+		m.ToolCallID = toolCallID.String
+	}
+	if toolName.Valid {
+		m.ToolName = toolName.String
+	}
+	return m, nil
 }
 
 // DeleteConversation removes a conversation and its messages (via CASCADE).
@@ -185,6 +235,16 @@ func (s *Store) AddMessage(ctx context.Context, db DBTX, msg Message) error {
 		citationsJSON = &str
 	}
 
+	var toolCallsJSON *string
+	if len(msg.ToolCalls) > 0 {
+		b, err := json.Marshal(msg.ToolCalls)
+		if err != nil {
+			return fmt.Errorf("chat.Store.AddMessage: marshal tool_calls: %w", err)
+		}
+		str := string(b)
+		toolCallsJSON = &str
+	}
+
 	// If the caller passed a *sql.DB, wrap in a transaction for atomicity.
 	// If the caller already passed a *sql.Tx, use it directly.
 	var txDB DBTX = db
@@ -197,21 +257,26 @@ func (s *Store) AddMessage(ctx context.Context, db DBTX, msg Message) error {
 		txDB = tx
 
 		// Run both operations, then commit.
-		if err := s.addMessageInTx(ctx, txDB, msg, citationsJSON); err != nil {
+		if err := s.addMessageInTx(ctx, txDB, msg, citationsJSON, toolCallsJSON); err != nil {
 			return err
 		}
 		return tx.Commit()
 	}
 
 	// Fallback: caller passed a tx or non-DB, run directly.
-	return s.addMessageInTx(ctx, txDB, msg, citationsJSON)
+	return s.addMessageInTx(ctx, txDB, msg, citationsJSON, toolCallsJSON)
 }
 
-func (s *Store) addMessageInTx(ctx context.Context, db DBTX, msg Message, citationsJSON *string) error {
+func (s *Store) addMessageInTx(ctx context.Context, db DBTX, msg Message, citationsJSON, toolCallsJSON *string) error {
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO messages (id, conversation_id, role, content, citations, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.ConversationID, msg.Role, msg.Content, citationsJSON, msg.CreatedAt,
+		`INSERT INTO messages (
+		    id, conversation_id, role, content, citations,
+		    tool_calls, tool_call_id, tool_name, iteration, created_at
+		 )
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.ConversationID, msg.Role, msg.Content, citationsJSON,
+		toolCallsJSON, nullString(msg.ToolCallID), nullString(msg.ToolName),
+		msg.Iteration, msg.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("chat.Store.AddMessage: %w", err)
@@ -266,7 +331,8 @@ func (s *Store) SearchMessages(ctx context.Context, db DBTX, query string, limit
 	// inserted next don't get re-escaped.
 	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(query)
 	rows, err := db.QueryContext(ctx,
-		`SELECT m.id, m.conversation_id, m.role, m.content, m.citations, m.created_at
+		`SELECT m.id, m.conversation_id, m.role, m.content, m.citations,
+		        m.tool_calls, m.tool_call_id, m.tool_name, m.iteration, m.created_at
 		 FROM messages m
 		 WHERE m.content LIKE ? ESCAPE '\'
 		 ORDER BY m.created_at DESC
@@ -280,17 +346,9 @@ func (s *Store) SearchMessages(ctx context.Context, db DBTX, query string, limit
 
 	var messages []Message
 	for rows.Next() {
-		var msg Message
-		var citations sql.NullString
-		if scanErr := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role,
-			&msg.Content, &citations, &msg.CreatedAt); scanErr != nil {
+		msg, scanErr := scanMessage(rows)
+		if scanErr != nil {
 			return nil, fmt.Errorf("chat.Store.SearchMessages: scan: %w", scanErr)
-		}
-		if citations.Valid && citations.String != "" {
-			var citList []Citation
-			if jsonErr := json.Unmarshal([]byte(citations.String), &citList); jsonErr == nil {
-				msg.Citations = citList
-			}
 		}
 		messages = append(messages, msg)
 	}
@@ -298,6 +356,16 @@ func (s *Store) SearchMessages(ctx context.Context, db DBTX, query string, limit
 		return nil, fmt.Errorf("chat.Store.SearchMessages: rows: %w", err)
 	}
 	return messages, nil
+}
+
+// nullString returns nil for an empty string so SQLite stores NULL instead
+// of "" for the optional tool_call_id / tool_name columns. This keeps the
+// "no value" sentinel uniform with the JSON-encoded columns above.
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // GetFirstUserMessage returns the content of the first user message in a conversation.

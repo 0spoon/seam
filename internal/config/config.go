@@ -16,24 +16,24 @@ import (
 
 // Config holds the complete server configuration.
 type Config struct {
-	Listen        string          `yaml:"listen"`
-	DataDir       string          `yaml:"data_dir"`
-	JWTSecret     string          `yaml:"jwt_secret"`
-	OllamaBaseURL string          `yaml:"ollama_base_url"`
-	ChromaDBURL   string          `yaml:"chromadb_url"`
-	LogLevel      string          `yaml:"log_level"`    // "debug", "info", "warn", "error"; default "info"
-	CORSOrigins   []string        `yaml:"cors_origins"` // allowed CORS origins; default localhost
-	Models        ModelsConfig    `yaml:"models"`
-	LLM           LLMConfig       `yaml:"llm"`
+	Listen        string           `yaml:"listen"`
+	DataDir       string           `yaml:"data_dir"`
+	JWTSecret     string           `yaml:"jwt_secret"`
+	OllamaBaseURL string           `yaml:"ollama_base_url"`
+	ChromaDBURL   string           `yaml:"chromadb_url"`
+	LogLevel      string           `yaml:"log_level"`    // "debug", "info", "warn", "error"; default "info"
+	CORSOrigins   []string         `yaml:"cors_origins"` // allowed CORS origins; default localhost
+	Models        ModelsConfig     `yaml:"models"`
+	LLM           LLMConfig        `yaml:"llm"`
 	Embeddings    EmbeddingsConfig `yaml:"embeddings"`
-	Whisper       WhisperConfig   `yaml:"whisper"`
-	Auth          AuthConfig      `yaml:"auth"`
-	AI            AIConfig        `yaml:"ai"`
-	Assistant     AssistantConfig `yaml:"assistant"`
-	UserDB        UserDBConfig    `yaml:"userdb"`
-	Watcher       WatcherConfig   `yaml:"watcher"`
-	Scheduler     SchedulerConfig `yaml:"scheduler"`
-	WebDistDir    string          `yaml:"web_dist_dir"` // path to web/dist for SPA serving; empty uses default
+	Whisper       WhisperConfig    `yaml:"whisper"`
+	Auth          AuthConfig       `yaml:"auth"`
+	AI            AIConfig         `yaml:"ai"`
+	Assistant     AssistantConfig  `yaml:"assistant"`
+	UserDB        UserDBConfig     `yaml:"userdb"`
+	Watcher       WatcherConfig    `yaml:"watcher"`
+	Scheduler     SchedulerConfig  `yaml:"scheduler"`
+	WebDistDir    string           `yaml:"web_dist_dir"` // path to web/dist for SPA serving; empty uses default
 }
 
 // SchedulerConfig controls the cron-based scheduler that runs proactive

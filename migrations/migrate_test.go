@@ -207,3 +207,84 @@ func TestRun_Idempotent_MultipleCalls(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 }
+
+// TestRun_AppliesAllSeamMigrationsAndExposesToolColumns exercises the real
+// embedded migrations against a fresh database and asserts the new tool
+// columns on the messages table are present, the relaxed role CHECK allows
+// 'tool' and 'system', and unknown roles are still rejected.
+//
+// It talks to the messages table via raw SQL to avoid importing the chat
+// package and creating a layering violation (migrations is a leaf package).
+func TestRun_AppliesAllSeamMigrationsAndExposesToolColumns(t *testing.T) {
+	db := openTestDB(t)
+
+	require.NoError(t, Run(db, Migrations()))
+
+	// Seed a conversation to satisfy the messages.conversation_id FK.
+	_, err := db.Exec(
+		`INSERT INTO conversations (id, title, created_at, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		"conv1", "Test", "2026-04-07T00:00:00Z", "2026-04-07T00:00:00Z",
+	)
+	require.NoError(t, err)
+
+	// Insert a tool message populating every new column.
+	const (
+		msgID      = "msg_tool"
+		toolCalls  = `[{"id":"a","name":"t","arguments":"{}"}]`
+		toolCallID = "a"
+		toolName   = "t"
+		iteration  = 2
+		content    = "tool result"
+	)
+	_, err = db.Exec(
+		`INSERT INTO messages (
+		    id, conversation_id, role, content, citations,
+		    tool_calls, tool_call_id, tool_name, iteration, created_at
+		 )
+		 VALUES (?, ?, 'tool', ?, NULL, ?, ?, ?, ?, ?)`,
+		msgID, "conv1", content, toolCalls, toolCallID, toolName, iteration,
+		"2026-04-07T00:00:01Z",
+	)
+	require.NoError(t, err)
+
+	// Read it back and verify every column survived.
+	var (
+		gotRole       string
+		gotContent    string
+		gotToolCalls  sql.NullString
+		gotToolCallID sql.NullString
+		gotToolName   sql.NullString
+		gotIteration  int
+	)
+	err = db.QueryRow(
+		`SELECT role, content, tool_calls, tool_call_id, tool_name, iteration
+		 FROM messages WHERE id = ?`, msgID,
+	).Scan(&gotRole, &gotContent, &gotToolCalls, &gotToolCallID, &gotToolName, &gotIteration)
+	require.NoError(t, err)
+	require.Equal(t, "tool", gotRole)
+	require.Equal(t, content, gotContent)
+	require.True(t, gotToolCalls.Valid)
+	require.Equal(t, toolCalls, gotToolCalls.String)
+	require.True(t, gotToolCallID.Valid)
+	require.Equal(t, toolCallID, gotToolCallID.String)
+	require.True(t, gotToolName.Valid)
+	require.Equal(t, toolName, gotToolName.String)
+	require.Equal(t, iteration, gotIteration)
+
+	// Relaxed CHECK: 'system' must now be accepted.
+	_, err = db.Exec(
+		`INSERT INTO messages (id, conversation_id, role, content, created_at)
+		 VALUES (?, 'conv1', 'system', 'max iterations reached', ?)`,
+		"msg_system", "2026-04-07T00:00:02Z",
+	)
+	require.NoError(t, err, "role='system' should be accepted by the relaxed CHECK")
+
+	// Unknown roles must still be rejected by the CHECK constraint.
+	_, err = db.Exec(
+		`INSERT INTO messages (id, conversation_id, role, content, created_at)
+		 VALUES (?, 'conv1', 'banana', 'nope', ?)`,
+		"msg_bad", "2026-04-07T00:00:03Z",
+	)
+	require.Error(t, err, "role='banana' should violate the CHECK constraint")
+}

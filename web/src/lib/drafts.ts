@@ -30,9 +30,7 @@ export function clearDraft(noteId: string): void {
   }
 }
 
-export function getDraft(
-  noteId: string,
-): { title: string; body: string; savedAt: number } | null {
+export function getDraft(noteId: string): { title: string; body: string; savedAt: number } | null {
   try {
     const raw = localStorage.getItem(`${DRAFT_PREFIX}${noteId}`);
     if (!raw) return null;

@@ -12,11 +12,7 @@ describe('EmptyState', () => {
   it('renders action button when provided', () => {
     const onClick = vi.fn();
     render(
-      <EmptyState
-        heading="Empty"
-        subtext="Click below"
-        action={{ label: 'Add item', onClick }}
-      />,
+      <EmptyState heading="Empty" subtext="Click below" action={{ label: 'Add item', onClick }} />,
     );
     const button = screen.getByText('Add item');
     expect(button).toBeInTheDocument();

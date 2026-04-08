@@ -47,12 +47,10 @@ export function ProjectPage() {
   const isDragging = useRef(false);
 
   const projectIndex = projects.findIndex((p) => p.id === id);
-  const projectColor = getProjectColor(
-    projectIndex >= 0 ? projectIndex : 0,
-  );
+  const projectColor = getProjectColor(projectIndex >= 0 ? projectIndex : 0);
 
   const previewNote = previewNoteId
-    ? loadedNotes.find((n) => n.id === previewNoteId) ?? null
+    ? (loadedNotes.find((n) => n.id === previewNoteId) ?? null)
     : null;
 
   // -- Drag resize logic --
@@ -119,12 +117,7 @@ export function ProjectPage() {
           setPreviewNoteId(null);
         }
       }
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.key === 'a' &&
-        isSelectionMode &&
-        loadedNotes.length > 0
-      ) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a' && isSelectionMode && loadedNotes.length > 0) {
         e.preventDefault();
         selectAll(loadedNotes.map((n) => n.id));
       }
@@ -196,16 +189,11 @@ export function ProjectPage() {
               <>
                 <button
                   className={styles.sortButton}
-                  onClick={() =>
-                    selectAll(loadedNotes.map((n) => n.id))
-                  }
+                  onClick={() => selectAll(loadedNotes.map((n) => n.id))}
                 >
                   Select all
                 </button>
-                <button
-                  className={styles.sortButton}
-                  onClick={clearSelection}
-                >
+                <button className={styles.sortButton} onClick={clearSelection}>
                   Deselect
                 </button>
               </>
@@ -213,9 +201,7 @@ export function ProjectPage() {
               <>
                 <button
                   className={styles.sortButton}
-                  onClick={() =>
-                    setSort(sort === 'modified' ? 'created' : 'modified')
-                  }
+                  onClick={() => setSort(sort === 'modified' ? 'created' : 'modified')}
                 >
                   <ArrowUpDown size={14} />
                   <span>{sort === 'modified' ? 'Modified' : 'Created'}</span>
@@ -292,10 +278,7 @@ export function ProjectPage() {
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
                   >
-                    <button
-                      className={styles.loadMore}
-                      onClick={handleLoadMore}
-                    >
+                    <button className={styles.loadMore} onClick={handleLoadMore}>
                       Load more
                     </button>
                   </div>
@@ -338,9 +321,7 @@ export function ProjectPage() {
                       projectColor={projectColor}
                       selected={selectedNoteIds.has(note.id)}
                       selectionMode={isSelectionMode}
-                      onSelect={(noteId) =>
-                        handleNoteSelect(noteId, noteIndex, false)
-                      }
+                      onSelect={(noteId) => handleNoteSelect(noteId, noteIndex, false)}
                       previewMode={!isSelectionMode}
                       onPreview={handleNotePreview}
                       previewing={previewNoteId === note.id}

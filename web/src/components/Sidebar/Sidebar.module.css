@@ -196,7 +196,8 @@
   white-space: nowrap;
   overflow: hidden;
   border-left: 2px solid transparent;
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
   width: 100%;
 }
@@ -306,7 +307,8 @@
   height: 20px;
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 
@@ -416,7 +418,8 @@
   height: 28px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 
@@ -506,7 +509,8 @@
   color: var(--text-tertiary);
   opacity: 0;
   flex-shrink: 0;
-  transition: opacity var(--duration-fast) var(--ease-standard),
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard);
 }
 
@@ -598,7 +602,8 @@
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: border-color var(--duration-fast) var(--ease-standard),
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard);
 }
@@ -630,7 +635,8 @@
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard);
 }
 
@@ -676,7 +682,8 @@
   .sidebar {
     width: var(--sidebar-width);
     transform: translateX(-100%);
-    transition: transform var(--duration-normal) var(--ease-out),
+    transition:
+      transform var(--duration-normal) var(--ease-out),
       width var(--duration-normal) var(--ease-out);
     box-shadow: none;
   }

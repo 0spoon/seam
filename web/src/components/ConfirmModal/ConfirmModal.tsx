@@ -37,39 +37,46 @@ export function ConfirmModal({
   }, [open]);
 
   // Focus trap: keep Tab cycling within the modal.
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onCancel();
-      return;
-    }
-    if (e.key === 'Tab') {
-      const container = modalRef.current;
-      if (!container) return;
-      const focusable = container.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCancel();
+        return;
       }
-    }
-  }, [onCancel]);
+      if (e.key === 'Tab') {
+        const container = modalRef.current;
+        if (!container) return;
+        const focusable = container.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    },
+    [onCancel],
+  );
 
   return (
-    <AnimatePresence onExitComplete={() => {
-      previousFocusRef.current?.focus();
-      previousFocusRef.current = null;
-    }}>
+    <AnimatePresence
+      onExitComplete={() => {
+        previousFocusRef.current?.focus();
+        previousFocusRef.current = null;
+      }}
+    >
       {open && (
         <motion.div
           className={styles.backdrop}
-          onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onCancel();
+          }}
           onKeyDown={handleKeyDown}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

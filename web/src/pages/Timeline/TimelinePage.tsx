@@ -30,9 +30,7 @@ function groupNotesByDate(notes: Note[], mode: SortMode): DateGroup[] {
   }
 
   // Sort by date descending.
-  const sorted = Array.from(groups.entries()).sort(
-    ([a], [b]) => b.localeCompare(a),
-  );
+  const sorted = Array.from(groups.entries()).sort(([a], [b]) => b.localeCompare(a));
 
   return sorted.map(([dateKey, notes]) => {
     const parsed = parseISO(dateKey);
@@ -60,14 +58,17 @@ export function TimelinePage() {
 
   const hasMore = notes.length < totalNotes;
 
-  const handleCalendarDateSelect = useCallback(async (dateStr: string) => {
-    try {
-      const note = await getDailyNote(dateStr);
-      navigate(`/notes/${note.id}`);
-    } catch {
-      addToast('Failed to open daily note', 'error');
-    }
-  }, [navigate, addToast]);
+  const handleCalendarDateSelect = useCallback(
+    async (dateStr: string) => {
+      try {
+        const note = await getDailyNote(dateStr);
+        navigate(`/notes/${note.id}`);
+      } catch {
+        addToast('Failed to open daily note', 'error');
+      }
+    },
+    [navigate, addToast],
+  );
 
   const fetchNotes = useCallback(async () => {
     setLoading(true);
@@ -207,15 +208,9 @@ export function TimelinePage() {
         <div className={styles.timelineLine} />
 
         {dateGroups.map((group) => (
-          <div
-            key={group.date}
-            id={`date-${group.date}`}
-            className={styles.dateGroup}
-          >
+          <div key={group.date} id={`date-${group.date}`} className={styles.dateGroup}>
             <div className={styles.dateMarker}>
-              <span
-                className={`${styles.dateDot} ${group.isToday ? styles.dateDotToday : ''}`}
-              />
+              <span className={`${styles.dateDot} ${group.isToday ? styles.dateDotToday : ''}`} />
               <span className={styles.dateText}>{group.displayDate}</span>
               <span className={styles.noteCount}>
                 {group.notes.length} {group.notes.length === 1 ? 'note' : 'notes'}
@@ -233,11 +228,7 @@ export function TimelinePage() {
                   <div className={styles.noteMeta}>
                     <span className={styles.noteTime}>
                       {format(
-                        parseISO(
-                          sortMode === 'created'
-                            ? note.created_at
-                            : note.updated_at,
-                        ),
+                        parseISO(sortMode === 'created' ? note.created_at : note.updated_at),
                         'h:mm a',
                       )}
                     </span>
@@ -259,11 +250,7 @@ export function TimelinePage() {
 
         {hasMore && (
           <div className={styles.loadMoreWrapper}>
-            <button
-              className={styles.loadMoreButton}
-              onClick={loadMore}
-              disabled={loadingMore}
-            >
+            <button className={styles.loadMoreButton} onClick={loadMore} disabled={loadingMore}>
               {loadingMore ? 'Loading...' : `Load more (${totalNotes - notes.length} remaining)`}
             </button>
           </div>

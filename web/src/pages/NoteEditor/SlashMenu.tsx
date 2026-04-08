@@ -104,13 +104,7 @@ function HighlightedLabel({ label, query }: { label: string; query: string }) {
   );
 }
 
-export function SlashMenu({
-  active,
-  query,
-  position,
-  onSelect,
-  onDismiss,
-}: SlashMenuProps) {
+export function SlashMenu({ active, query, position, onSelect, onDismiss }: SlashMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
   const filtered = filterCommands(query);
@@ -141,9 +135,7 @@ export function SlashMenu({
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         e.stopPropagation();
-        setSelectedIndex((i) =>
-          i <= 0 ? Math.max(0, filtered.length - 1) : i - 1,
-        );
+        setSelectedIndex((i) => (i <= 0 ? Math.max(0, filtered.length - 1) : i - 1));
       } else if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
         e.stopPropagation();
@@ -196,16 +188,12 @@ export function SlashMenu({
                   onSelect(cmd);
                 }}
               >
-                <span className={styles.itemIcon}>
-                  {Icon && <Icon size={16} />}
-                </span>
+                <span className={styles.itemIcon}>{Icon && <Icon size={16} />}</span>
                 <span className={styles.itemContent}>
                   <span className={styles.itemLabel}>
                     <HighlightedLabel label={cmd.label} query={query} />
                   </span>
-                  <span className={styles.itemDescription}>
-                    {cmd.description}
-                  </span>
+                  <span className={styles.itemDescription}>{cmd.description}</span>
                 </span>
               </li>
             );

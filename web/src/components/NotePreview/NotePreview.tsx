@@ -58,10 +58,7 @@ export function NotePreview({ note }: NotePreviewProps) {
 
       <div className={styles.divider} />
 
-      <div
-        className={styles.renderedMarkdown}
-        dangerouslySetInnerHTML={{ __html: rendered }}
-      />
+      <div className={styles.renderedMarkdown} dangerouslySetInnerHTML={{ __html: rendered }} />
     </div>
   );
 }

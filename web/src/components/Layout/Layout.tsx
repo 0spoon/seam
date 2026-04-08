@@ -60,7 +60,14 @@ export function Layout() {
       });
     }
     return bindings;
-  }, [setCommandPaletteOpen, setCaptureModalOpen, toggleSidebar, toggleZenMode, setZenMode, zenMode]);
+  }, [
+    setCommandPaletteOpen,
+    setCaptureModalOpen,
+    toggleSidebar,
+    toggleZenMode,
+    setZenMode,
+    zenMode,
+  ]);
 
   useKeyboard(keyBindings);
 
@@ -80,8 +87,11 @@ export function Layout() {
     };
     const name =
       pathToName[location.pathname] ||
-      (location.pathname.startsWith('/notes/') ? 'Note Editor' :
-       location.pathname.startsWith('/projects/') ? 'Project' : 'Page');
+      (location.pathname.startsWith('/notes/')
+        ? 'Note Editor'
+        : location.pathname.startsWith('/projects/')
+          ? 'Project'
+          : 'Page');
     setRouteAnnouncement(`Navigated to ${name}`);
     // Move focus to main content on navigation.
     mainRef.current?.focus();

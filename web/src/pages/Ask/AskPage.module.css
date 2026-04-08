@@ -33,7 +33,8 @@
   height: 28px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 
@@ -143,7 +144,8 @@
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
   cursor: pointer;
@@ -386,7 +388,8 @@
   height: 32px;
   border-radius: var(--radius-md);
   color: var(--accent-primary);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard);
 }
 

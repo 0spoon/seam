@@ -28,9 +28,7 @@ class CommandRegistry {
   }
 
   getAll(): Command[] {
-    return Array.from(this.commands.values()).filter(
-      (cmd) => !cmd.when || cmd.when(),
-    );
+    return Array.from(this.commands.values()).filter((cmd) => !cmd.when || cmd.when());
   }
 
   getFiltered(query: string): Command[] {

@@ -1,0 +1,26 @@
+# Build artifacts
+bin/
+web/dist/
+web/node_modules/
+
+# Vendored / generated
+vendor/
+go.sum
+go.mod
+*.lock
+package-lock.json
+
+# Local data
+data/
+docker/.env
+seam-server.yaml
+
+# SQL migrations stay raw
+migrations/*.sql
+
+# Binary assets
+resources/
+web/public/
+
+# Legal
+LICENSE

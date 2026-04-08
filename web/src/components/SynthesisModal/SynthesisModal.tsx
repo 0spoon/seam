@@ -13,13 +13,7 @@ interface SynthesisModalProps {
   onClose: () => void;
 }
 
-export function SynthesisModal({
-  scope,
-  projectId,
-  tag,
-  title,
-  onClose,
-}: SynthesisModalProps) {
+export function SynthesisModal({ scope, projectId, tag, title, onClose }: SynthesisModalProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState('Summarize the key themes and ideas');
   const [response, setResponse] = useState('');
@@ -41,37 +35,38 @@ export function SynthesisModal({
       });
       setResponse(result.response);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Synthesis failed',
-      );
+      setError(err instanceof Error ? err.message : 'Synthesis failed');
     } finally {
       setIsLoading(false);
     }
   };
 
   // Focus trap and keyboard handling: Escape closes, Tab cycles within modal.
-  const handleFocusTrap = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onClose();
-      return;
-    }
-    if (e.key !== 'Tab') return;
-    const modal = backdropRef.current?.querySelector('[class*="modal"]') as HTMLElement | null;
-    if (!modal) return;
-    const focusable = modal.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    );
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }, [onClose]);
+  const handleFocusTrap = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const modal = backdropRef.current?.querySelector('[class*="modal"]') as HTMLElement | null;
+      if (!modal) return;
+      const focusable = modal.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    },
+    [onClose],
+  );
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
@@ -80,15 +75,16 @@ export function SynthesisModal({
   };
 
   return (
-    <div ref={backdropRef} className={styles.backdrop} onClick={handleBackdropClick} onKeyDown={handleFocusTrap}>
+    <div
+      ref={backdropRef}
+      className={styles.backdrop}
+      onClick={handleBackdropClick}
+      onKeyDown={handleFocusTrap}
+    >
       <div className={styles.modal}>
         <div className={styles.header}>
           <h2 className={styles.title}>{title}</h2>
-          <button
-            className={styles.closeButton}
-            onClick={onClose}
-            aria-label="Close"
-          >
+          <button className={styles.closeButton} onClick={onClose} aria-label="Close">
             <X size={16} />
           </button>
         </div>
@@ -114,11 +110,7 @@ export function SynthesisModal({
               onClick={handleSynthesize}
               disabled={isLoading || !prompt.trim()}
             >
-              {isLoading ? (
-                <Loader2 size={14} className={styles.spinner} />
-              ) : (
-                'Generate'
-              )}
+              {isLoading ? <Loader2 size={14} className={styles.spinner} /> : 'Generate'}
             </button>
           </div>
 

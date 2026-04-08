@@ -39,6 +39,7 @@ lint:
 
 fmt:
 	gofmt -w .
+	cd web && npx prettier --write ..
 
 dev-web:
 	cd web && npm run dev

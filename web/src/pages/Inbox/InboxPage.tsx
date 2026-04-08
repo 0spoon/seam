@@ -64,12 +64,7 @@ export function InboxPage() {
       if (e.key === 'Escape' && isSelectionMode) {
         clearSelection();
       }
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.key === 'a' &&
-        isSelectionMode &&
-        loadedNotes.length > 0
-      ) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a' && isSelectionMode && loadedNotes.length > 0) {
         e.preventDefault();
         selectAll(loadedNotes.map((n) => n.id));
       }
@@ -122,16 +117,11 @@ export function InboxPage() {
             <>
               <button
                 className={styles.sortButton}
-                onClick={() =>
-                  selectAll(loadedNotes.map((n) => n.id))
-                }
+                onClick={() => selectAll(loadedNotes.map((n) => n.id))}
               >
                 Select all
               </button>
-              <button
-                className={styles.sortButton}
-                onClick={clearSelection}
-              >
+              <button className={styles.sortButton} onClick={clearSelection}>
                 Deselect
               </button>
             </>
@@ -139,9 +129,7 @@ export function InboxPage() {
             <>
               <button
                 className={styles.sortButton}
-                onClick={() =>
-                  setSort(sort === 'modified' ? 'created' : 'modified')
-                }
+                onClick={() => setSort(sort === 'modified' ? 'created' : 'modified')}
                 title={`Sort by ${sort === 'modified' ? 'created' : 'modified'}`}
               >
                 <ArrowUpDown size={14} />
@@ -219,10 +207,7 @@ export function InboxPage() {
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                 >
-                  <button
-                    className={styles.loadMore}
-                    onClick={handleLoadMore}
-                  >
+                  <button className={styles.loadMore} onClick={handleLoadMore}>
                     Load more
                   </button>
                 </div>
@@ -263,9 +248,7 @@ export function InboxPage() {
                     note={note}
                     selected={selectedNoteIds.has(note.id)}
                     selectionMode={isSelectionMode}
-                    onSelect={(id) =>
-                      handleNoteSelect(id, noteIndex, false)
-                    }
+                    onSelect={(id) => handleNoteSelect(id, noteIndex, false)}
                   />
                 </motion.div>
               </div>

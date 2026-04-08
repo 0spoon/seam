@@ -40,9 +40,7 @@ describe('NoteCard', () => {
 
   it('renders the body preview', () => {
     renderNoteCard(makeNote());
-    expect(
-      screen.getByText(/This is the body of the test note/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/This is the body of the test note/)).toBeInTheDocument();
   });
 
   it('renders tags as pills', () => {

@@ -35,9 +35,7 @@ export const slashMenuField = StateField.define<SlashMenuState>({
       const cursorOffset = head - line.from;
 
       // Find the '/' in the current line that starts our slash command
-      const slashOffset = cursorOffset > 0
-        ? findSlashOffset(lineText, cursorOffset)
-        : -1;
+      const slashOffset = cursorOffset > 0 ? findSlashOffset(lineText, cursorOffset) : -1;
 
       if (slashOffset < 0) {
         return defaultState;
@@ -139,9 +137,7 @@ export function dismissSlashMenu(view: EditorView): void {
 // Create the CodeMirror extension array for slash command support.
 // The onStateChange callback fires whenever the slash menu state changes,
 // letting the React component re-render the floating menu.
-export function createSlashExtension(
-  onStateChange: (state: SlashMenuState) => void,
-) {
+export function createSlashExtension(onStateChange: (state: SlashMenuState) => void) {
   const notifyPlugin = ViewPlugin.fromClass(
     class {
       prev: SlashMenuState;

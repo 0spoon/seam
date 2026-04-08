@@ -90,7 +90,15 @@ vi.mock('../../api/client', () => ({
   getOrphanNotes: vi.fn().mockResolvedValue([]),
   aiAssist: vi.fn().mockResolvedValue({ result: 'AI generated text' }),
   resolveWikilink: vi.fn().mockResolvedValue({ dangling: true }),
-  createNote: vi.fn().mockResolvedValue({ id: 'new1', title: 'New', body: '', file_path: 'new.md', tags: [], created_at: '', updated_at: '' }),
+  createNote: vi.fn().mockResolvedValue({
+    id: 'new1',
+    title: 'New',
+    body: '',
+    file_path: 'new.md',
+    tags: [],
+    created_at: '',
+    updated_at: '',
+  }),
 }));
 
 vi.mock('../../lib/markdown', () => ({
@@ -109,11 +117,7 @@ vi.mock('../../lib/tagColor', () => ({
 // Mock CodeMirror -- the real component needs a browser DOM with layout
 vi.mock('@uiw/react-codemirror', () => ({
   default: vi.fn(({ value, onChange }: { value: string; onChange?: (val: string) => void }) => (
-    <textarea
-      data-testid="codemirror"
-      value={value}
-      onChange={(e) => onChange?.(e.target.value)}
-    />
+    <textarea data-testid="codemirror" value={value} onChange={(e) => onChange?.(e.target.value)} />
   )),
   __esModule: true,
 }));
@@ -193,20 +197,20 @@ describe('NoteEditorPage', () => {
       created_at: '2026-03-01T10:00:00Z',
       updated_at: '2026-03-08T14:30:00Z',
     };
-    vi.mocked(useNoteStore).mockImplementation(
-      ((selector: (s: Record<string, unknown>) => unknown) => {
-        const state: Record<string, unknown> = {
-          currentNote: mockCurrentNote,
-          backlinks: [],
-          fetchNote: mockFetchNote,
-          updateNote: mockUpdateNote,
-          deleteNote: mockDeleteNote,
-          fetchBacklinks: mockFetchBacklinks,
-          clearCurrentNote: mockClearCurrentNote,
-        };
-        return selector(state);
-      }) as never,
-    );
+    vi.mocked(useNoteStore).mockImplementation(((
+      selector: (s: Record<string, unknown>) => unknown,
+    ) => {
+      const state: Record<string, unknown> = {
+        currentNote: mockCurrentNote,
+        backlinks: [],
+        fetchNote: mockFetchNote,
+        updateNote: mockUpdateNote,
+        deleteNote: mockDeleteNote,
+        fetchBacklinks: mockFetchBacklinks,
+        clearCurrentNote: mockClearCurrentNote,
+      };
+      return selector(state);
+    }) as never);
   });
 
   it('renders AI assist button', () => {
@@ -227,20 +231,20 @@ describe('NoteEditorPage', () => {
 
   it('disables AI assist when no note loaded', () => {
     mockCurrentNote = null;
-    vi.mocked(useNoteStore).mockImplementation(
-      ((selector: (s: Record<string, unknown>) => unknown) => {
-        const state: Record<string, unknown> = {
-          currentNote: null,
-          backlinks: [],
-          fetchNote: mockFetchNote,
-          updateNote: mockUpdateNote,
-          deleteNote: mockDeleteNote,
-          fetchBacklinks: mockFetchBacklinks,
-          clearCurrentNote: mockClearCurrentNote,
-        };
-        return selector(state);
-      }) as never,
-    );
+    vi.mocked(useNoteStore).mockImplementation(((
+      selector: (s: Record<string, unknown>) => unknown,
+    ) => {
+      const state: Record<string, unknown> = {
+        currentNote: null,
+        backlinks: [],
+        fetchNote: mockFetchNote,
+        updateNote: mockUpdateNote,
+        deleteNote: mockDeleteNote,
+        fetchBacklinks: mockFetchBacklinks,
+        clearCurrentNote: mockClearCurrentNote,
+      };
+      return selector(state);
+    }) as never);
 
     renderEditor();
     const aiButton = screen.getByRole('button', { name: 'AI Assist' });

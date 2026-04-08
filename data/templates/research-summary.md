@@ -4,15 +4,16 @@
 
 ## Key Question
 
-
 ## Key Findings
-1. 
+
+1.
 
 ## Sources
-- 
+
+-
 
 ## Analysis
 
-
 ## Next Steps
-- [ ] 
+
+- [ ]

@@ -77,13 +77,7 @@ interface ResultItem {
 }
 
 // Render a label with matched characters highlighted.
-function HighlightedLabel({
-  text,
-  indices,
-}: {
-  text: string;
-  indices?: number[];
-}) {
+function HighlightedLabel({ text, indices }: { text: string; indices?: number[] }) {
   if (!indices || indices.length === 0) {
     return <>{text}</>;
   }
@@ -319,9 +313,7 @@ export function CommandPalette() {
         id: `note-${result.note_id}`,
         label: result.title,
         icon: FileText,
-        meta: result.snippet
-          ? result.snippet.replace(/<\/?b>/g, '').slice(0, 60)
-          : undefined,
+        meta: result.snippet ? result.snippet.replace(/<\/?b>/g, '').slice(0, 60) : undefined,
         section: 'NOTES',
         action: () => {
           setOpen(false);
@@ -473,9 +465,7 @@ export function CommandPalette() {
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
             <div className={styles.inputRow}>
-              {modeLabel && (
-                <span className={styles.modeLabel}>{modeLabel}</span>
-              )}
+              {modeLabel && <span className={styles.modeLabel}>{modeLabel}</span>}
               <input
                 ref={inputRef}
                 type="text"
@@ -507,19 +497,10 @@ export function CommandPalette() {
                           <Icon size={16} />
                         </span>
                         <span className={styles.label}>
-                          <HighlightedLabel
-                            text={item.label}
-                            indices={item.matchIndices}
-                          />
+                          <HighlightedLabel text={item.label} indices={item.matchIndices} />
                         </span>
-                        {item.meta && (
-                          <span className={styles.meta}>{item.meta}</span>
-                        )}
-                        {item.shortcut && (
-                          <span className={styles.shortcut}>
-                            {item.shortcut}
-                          </span>
-                        )}
+                        {item.meta && <span className={styles.meta}>{item.meta}</span>}
+                        {item.shortcut && <span className={styles.shortcut}>{item.shortcut}</span>}
                       </button>
                     );
                   })}
@@ -527,9 +508,7 @@ export function CommandPalette() {
               ))}
               {resultItems.length === 0 && !ftsLoading && (
                 <div className={styles.empty}>
-                  {mode === 'notes' && !searchQuery
-                    ? 'No recent notes'
-                    : 'No results found'}
+                  {mode === 'notes' && !searchQuery ? 'No recent notes' : 'No results found'}
                 </div>
               )}
               {ftsLoading && mode === 'notes' && searchQuery && (
@@ -544,10 +523,7 @@ export function CommandPalette() {
 }
 
 // Helper: filter tags by fuzzy match.
-function filterTags(
-  tags: TagCount[],
-  query: string,
-): { tag: TagCount; indices: number[] }[] {
+function filterTags(tags: TagCount[], query: string): { tag: TagCount; indices: number[] }[] {
   if (!query) {
     return tags.map((tag) => ({ tag, indices: [] }));
   }

@@ -103,10 +103,7 @@ export function ReviewCard({ item, onDismiss, onAction }: ReviewCardProps) {
   return (
     <div className={styles.card}>
       <div className={styles.header}>
-        <button
-          className={styles.titleLink}
-          onClick={() => navigate(`/notes/${item.note_id}`)}
-        >
+        <button className={styles.titleLink} onClick={() => navigate(`/notes/${item.note_id}`)}>
           {item.note_title || 'Untitled'}
         </button>
         <span className={badgeStyles[item.type] || styles.badge}>
@@ -114,9 +111,7 @@ export function ReviewCard({ item, onDismiss, onAction }: ReviewCardProps) {
         </span>
       </div>
 
-      {item.note_snippet && (
-        <p className={styles.snippet}>{item.note_snippet}</p>
-      )}
+      {item.note_snippet && <p className={styles.snippet}>{item.note_snippet}</p>}
 
       <div className={styles.actions}>
         {item.type === 'untagged' && (
@@ -160,11 +155,7 @@ export function ReviewCard({ item, onDismiss, onAction }: ReviewCardProps) {
           </button>
         )}
 
-        <button
-          className={styles.skipButton}
-          onClick={onDismiss}
-          disabled={isApplying}
-        >
+        <button className={styles.skipButton} onClick={onDismiss} disabled={isApplying}>
           <X size={12} />
           Skip
         </button>
@@ -182,9 +173,7 @@ export function ReviewCard({ item, onDismiss, onAction }: ReviewCardProps) {
             >
               <Tag size={10} />
               {tag.name}
-              <span className={styles.confidence}>
-                {Math.round(tag.confidence * 100)}%
-              </span>
+              <span className={styles.confidence}>{Math.round(tag.confidence * 100)}%</span>
             </button>
           ))}
         </div>
@@ -202,17 +191,13 @@ export function ReviewCard({ item, onDismiss, onAction }: ReviewCardProps) {
             >
               <FolderOpen size={10} />
               {proj.name}
-              <span className={styles.confidence}>
-                {Math.round(proj.confidence * 100)}%
-              </span>
+              <span className={styles.confidence}>{Math.round(proj.confidence * 100)}%</span>
             </button>
           ))}
         </div>
       )}
 
-      {isLoadingTags && (
-        <p className={styles.loading}>Analyzing note for tag suggestions...</p>
-      )}
+      {isLoadingTags && <p className={styles.loading}>Analyzing note for tag suggestions...</p>}
       {isLoadingProjects && (
         <p className={styles.loading}>Analyzing note for project suggestions...</p>
       )}

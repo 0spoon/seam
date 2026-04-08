@@ -17,17 +17,13 @@ export function useKeyboard(bindings: KeyBinding[]) {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInput =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable;
+        target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
 
       for (const binding of bindings) {
         if (binding.global && isInput) continue;
 
         const ctrlOrMeta = binding.ctrl || binding.meta;
-        const matchesMod = ctrlOrMeta
-          ? e.ctrlKey || e.metaKey
-          : !e.ctrlKey && !e.metaKey;
+        const matchesMod = ctrlOrMeta ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey;
         const matchesShift = binding.shift ? e.shiftKey : !e.shiftKey;
 
         if (e.key === binding.key && matchesMod && matchesShift) {

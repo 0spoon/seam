@@ -30,9 +30,7 @@ vi.mock('./pages/Settings/SettingsPage', () => ({
 
 // Mock Layout to just render children via Outlet
 vi.mock('./components/Layout/Layout', async () => {
-  const { Outlet } = await vi.importActual<typeof import('react-router-dom')>(
-    'react-router-dom',
-  );
+  const { Outlet } = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
   return {
     Layout: () => (
       <div data-testid="layout">
@@ -106,9 +104,7 @@ let authState: Record<string, unknown> = {};
 
 vi.mock('./stores/authStore', () => ({
   useAuthStore: Object.assign(
-    vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-      selector(authState),
-    ),
+    vi.fn((selector: (s: Record<string, unknown>) => unknown) => selector(authState)),
     {
       setState: vi.fn(),
       getState: () => authState,
@@ -174,10 +170,9 @@ describe('App', () => {
       clearError: vi.fn(),
       logout: vi.fn(),
     };
-    vi.mocked(useAuthStore).mockImplementation(
-      ((selector: (s: Record<string, unknown>) => unknown) =>
-        selector(authState)) as never,
-    );
+    vi.mocked(useAuthStore).mockImplementation(((
+      selector: (s: Record<string, unknown>) => unknown,
+    ) => selector(authState)) as never);
   });
 
   it('redirects to login when not authenticated', () => {
@@ -201,10 +196,9 @@ describe('App', () => {
       isAuthenticated: true,
       isLoading: false,
     };
-    vi.mocked(useAuthStore).mockImplementation(
-      ((selector: (s: Record<string, unknown>) => unknown) =>
-        selector(authState)) as never,
-    );
+    vi.mocked(useAuthStore).mockImplementation(((
+      selector: (s: Record<string, unknown>) => unknown,
+    ) => selector(authState)) as never);
 
     renderApp('/');
     expect(screen.getByTestId('layout')).toBeInTheDocument();
@@ -216,10 +210,9 @@ describe('App', () => {
       isAuthenticated: false,
       isLoading: true,
     };
-    vi.mocked(useAuthStore).mockImplementation(
-      ((selector: (s: Record<string, unknown>) => unknown) =>
-        selector(authState)) as never,
-    );
+    vi.mocked(useAuthStore).mockImplementation(((
+      selector: (s: Record<string, unknown>) => unknown,
+    ) => selector(authState)) as never);
 
     renderApp('/');
     expect(screen.getByTestId('full-page-skeleton')).toBeInTheDocument();
@@ -231,10 +224,9 @@ describe('App', () => {
       ...authState,
       restoreSession,
     };
-    vi.mocked(useAuthStore).mockImplementation(
-      ((selector: (s: Record<string, unknown>) => unknown) =>
-        selector(authState)) as never,
-    );
+    vi.mocked(useAuthStore).mockImplementation(((
+      selector: (s: Record<string, unknown>) => unknown,
+    ) => selector(authState)) as never);
 
     renderApp('/');
     expect(restoreSession).toHaveBeenCalled();

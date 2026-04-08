@@ -61,12 +61,18 @@ export function Sidebar() {
   const updateSetting = useSettingsStore((s) => s.updateSetting);
   const projectsExpanded = settingsProjectsExpanded !== 'false';
   const tagsExpanded = settingsTagsExpanded !== 'false';
-  const setProjectsExpanded = useCallback((expanded: boolean) => {
-    updateSetting('sidebar_projects_expanded', String(expanded));
-  }, [updateSetting]);
-  const setTagsExpanded = useCallback((expanded: boolean) => {
-    updateSetting('sidebar_tags_expanded', String(expanded));
-  }, [updateSetting]);
+  const setProjectsExpanded = useCallback(
+    (expanded: boolean) => {
+      updateSetting('sidebar_projects_expanded', String(expanded));
+    },
+    [updateSetting],
+  );
+  const setTagsExpanded = useCallback(
+    (expanded: boolean) => {
+      updateSetting('sidebar_tags_expanded', String(expanded));
+    },
+    [updateSetting],
+  );
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const newProjectRef = useRef<HTMLInputElement>(null);
@@ -76,7 +82,11 @@ export function Sidebar() {
   const [contextMenuProjectId, setContextMenuProjectId] = useState<string | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; projectId: string; projectName: string }>({ open: false, projectId: '', projectName: '' });
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    open: boolean;
+    projectId: string;
+    projectName: string;
+  }>({ open: false, projectId: '', projectName: '' });
   const [deleteCascade, setDeleteCascade] = useState<'inbox' | 'delete'>('inbox');
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const appendToNote = useNoteStore((s) => s.appendToNote);
@@ -106,16 +116,19 @@ export function Sidebar() {
       const note = await getDailyNote('today');
       await appendToNote(note.id, quickAppendText.trim());
       setQuickAppendText('');
-      addToast('Added to today\'s note', 'success');
+      addToast("Added to today's note", 'success');
     } catch {
       addToast('Failed to append to daily note', 'error');
     }
   }, [quickAppendText, appendToNote, addToast]);
 
-  const keyBindings = useMemo(() => [
-    { key: '/', global: true, handler: focusSearch },
-    { key: '.', meta: true, handler: toggleQuickAppend },
-  ], [focusSearch, toggleQuickAppend]);
+  const keyBindings = useMemo(
+    () => [
+      { key: '/', global: true, handler: focusSearch },
+      { key: '.', meta: true, handler: toggleQuickAppend },
+    ],
+    [focusSearch, toggleQuickAppend],
+  );
 
   useKeyboard(keyBindings);
 
@@ -200,10 +213,13 @@ export function Sidebar() {
   };
 
   // Close mobile sidebar overlay after navigating.
-  const navTo = useCallback((path: string) => {
-    navigate(path);
-    setSidebarOpen(false);
-  }, [navigate, setSidebarOpen]);
+  const navTo = useCallback(
+    (path: string) => {
+      navigate(path);
+      setSidebarOpen(false);
+    },
+    [navigate, setSidebarOpen],
+  );
 
   const handleCreateProject = useCallback(async () => {
     const name = newProjectName.trim();
@@ -243,19 +259,22 @@ export function Sidebar() {
     };
   }, [contextMenuProjectId]);
 
-  const handleRenameProject = useCallback(async (projectId: string, newName: string) => {
-    const trimmed = newName.trim();
-    if (!trimmed) {
-      setRenamingProjectId(null);
-      return;
-    }
-    try {
-      await updateProject(projectId, { name: trimmed });
-      setRenamingProjectId(null);
-    } catch {
-      // Error toast handled by store
-    }
-  }, [updateProject]);
+  const handleRenameProject = useCallback(
+    async (projectId: string, newName: string) => {
+      const trimmed = newName.trim();
+      if (!trimmed) {
+        setRenamingProjectId(null);
+        return;
+      }
+      try {
+        await updateProject(projectId, { name: trimmed });
+        setRenamingProjectId(null);
+      } catch {
+        // Error toast handled by store
+      }
+    },
+    [updateProject],
+  );
 
   const handleDeleteProject = useCallback(async () => {
     if (!deleteConfirm.projectId) return;
@@ -271,19 +290,25 @@ export function Sidebar() {
     }
   }, [deleteConfirm, deleteCascade, deleteProject, navTo, location.pathname]);
 
-  const handleNewNoteInProject = useCallback(async (projectId: string) => {
-    setContextMenuProjectId(null);
-    try {
-      const note = await createNoteInProject({ title: 'Untitled', body: '', project_id: projectId });
-      navTo(`/notes/${note.id}`);
-    } catch {
-      addToast('Failed to create note', 'error');
-    }
-  }, [createNoteInProject, navTo, addToast]);
+  const handleNewNoteInProject = useCallback(
+    async (projectId: string) => {
+      setContextMenuProjectId(null);
+      try {
+        const note = await createNoteInProject({
+          title: 'Untitled',
+          body: '',
+          project_id: projectId,
+        });
+        navTo(`/notes/${note.id}`);
+      } catch {
+        addToast('Failed to create note', 'error');
+      }
+    },
+    [createNoteInProject, navTo, addToast],
+  );
 
   const isActive = (path: string) => location.pathname === path;
-  const isProjectActive = (id: string) =>
-    location.pathname === `/projects/${id}`;
+  const isProjectActive = (id: string) => location.pathname === `/projects/${id}`;
 
   const handleSettings = () => {
     navTo('/settings');
@@ -291,426 +316,422 @@ export function Sidebar() {
 
   return (
     <>
-    <nav
-      className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''} ${sidebarOpen ? styles.mobileOpen : ''}`}
-      role="navigation"
-      aria-label="Main navigation"
-    >
-      <div className={styles.top}>
-        {/* Wordmark */}
-        <button
-          className={styles.wordmark}
-          onClick={() => navTo('/')}
-          title="Go to Inbox"
-        >
-          {collapsed ? 'S' : 'Seam'}
-        </button>
-
-        {/* Search */}
-        {collapsed ? (
-          <button
-            className={styles.navItem}
-            onClick={() => navTo('/search')}
-            title="Search notes"
-            aria-label="Search notes"
-          >
-            <Search size={18} />
+      <nav
+        className={`${styles.sidebar} ${collapsed ? styles.collapsed : ''} ${sidebarOpen ? styles.mobileOpen : ''}`}
+        role="navigation"
+        aria-label="Main navigation"
+      >
+        <div className={styles.top}>
+          {/* Wordmark */}
+          <button className={styles.wordmark} onClick={() => navTo('/')} title="Go to Inbox">
+            {collapsed ? 'S' : 'Seam'}
           </button>
-        ) : (
-          <form onSubmit={handleSearchSubmit} className={styles.searchForm}>
-            <Search size={14} className={styles.searchIcon} />
-            <input
-              ref={searchRef}
-              type="text"
-              className={styles.searchInput}
-              placeholder="Search notes..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
-              aria-label="Search notes (press / to focus)"
-              role="combobox"
-              aria-expanded={showDropdown}
-              aria-controls="sidebar-search-listbox"
-              aria-activedescendant={
-                showDropdown && selectedIndex >= 0
-                  ? `search-result-${searchResults[selectedIndex]?.note_id}`
-                  : undefined
-              }
-            />
-            {!searchQuery && (
-              <kbd className={styles.searchHint}>/</kbd>
-            )}
-            {showDropdown && (
-              <div
-                ref={dropdownRef}
-                className={styles.searchDropdown}
-                role="listbox"
-                id="sidebar-search-listbox"
-                aria-live="polite"
-              >
-                {searchResults.map((result, index) => (
-                  <button
-                    key={result.note_id}
-                    id={`search-result-${result.note_id}`}
-                    className={`${styles.searchResult} ${index === selectedIndex ? styles.searchResultSelected : ''}`}
-                    onClick={() => {
-                      setShowDropdown(false);
-                      setSearchQuery('');
-                      navTo(`/notes/${result.note_id}`);
-                    }}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    role="option"
-                    aria-selected={index === selectedIndex}
-                  >
-                    <span className={styles.searchResultTitle}>{result.title}</span>
-                    <span
-                      className={styles.searchResultSnippet}
-                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(result.snippet) }}
-                    />
-                  </button>
-                ))}
+
+          {/* Search */}
+          {collapsed ? (
+            <button
+              className={styles.navItem}
+              onClick={() => navTo('/search')}
+              title="Search notes"
+              aria-label="Search notes"
+            >
+              <Search size={18} />
+            </button>
+          ) : (
+            <form onSubmit={handleSearchSubmit} className={styles.searchForm}>
+              <Search size={14} className={styles.searchIcon} />
+              <input
+                ref={searchRef}
+                type="text"
+                className={styles.searchInput}
+                placeholder="Search notes..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
+                aria-label="Search notes (press / to focus)"
+                role="combobox"
+                aria-expanded={showDropdown}
+                aria-controls="sidebar-search-listbox"
+                aria-activedescendant={
+                  showDropdown && selectedIndex >= 0
+                    ? `search-result-${searchResults[selectedIndex]?.note_id}`
+                    : undefined
+                }
+              />
+              {!searchQuery && <kbd className={styles.searchHint}>/</kbd>}
+              {showDropdown && (
+                <div
+                  ref={dropdownRef}
+                  className={styles.searchDropdown}
+                  role="listbox"
+                  id="sidebar-search-listbox"
+                  aria-live="polite"
+                >
+                  {searchResults.map((result, index) => (
+                    <button
+                      key={result.note_id}
+                      id={`search-result-${result.note_id}`}
+                      className={`${styles.searchResult} ${index === selectedIndex ? styles.searchResultSelected : ''}`}
+                      onClick={() => {
+                        setShowDropdown(false);
+                        setSearchQuery('');
+                        navTo(`/notes/${result.note_id}`);
+                      }}
+                      onMouseEnter={() => setSelectedIndex(index)}
+                      role="option"
+                      aria-selected={index === selectedIndex}
+                    >
+                      <span className={styles.searchResultTitle}>{result.title}</span>
+                      <span
+                        className={styles.searchResultSnippet}
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(result.snippet) }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </form>
+          )}
+
+          {/* Today */}
+          {collapsed ? (
+            <button
+              className={styles.navItem}
+              onClick={() => navTo('/today')}
+              title="Today's daily note"
+              aria-label="Today's daily note"
+            >
+              <CalendarDays size={18} />
+            </button>
+          ) : (
+            <button
+              className={styles.todayButton}
+              onClick={() => navTo('/today')}
+              title="Go to today's daily note"
+            >
+              <CalendarDays size={16} />
+              <span>{format(new Date(), 'EEE, MMM d')}</span>
+            </button>
+          )}
+
+          {/* Inbox */}
+          <button
+            className={`${styles.navItem} ${isActive('/') ? styles.active : ''}`}
+            onClick={() => navTo('/')}
+            title="Inbox"
+          >
+            <Inbox size={18} />
+            <span className={styles.fadeLabel}>Inbox</span>
+          </button>
+
+          {/* Ask Seam */}
+          <button
+            className={`${styles.navItem} ${isActive('/ask') ? styles.active : ''}`}
+            onClick={() => navTo('/ask')}
+            title="Ask Seam"
+          >
+            <MessageCircle size={18} />
+            <span className={styles.fadeLabel}>Ask Seam</span>
+          </button>
+
+          {/* Graph */}
+          <button
+            className={`${styles.navItem} ${isActive('/graph') ? styles.active : ''}`}
+            onClick={() => navTo('/graph')}
+            title="Knowledge Graph"
+          >
+            <Network size={18} />
+            <span className={styles.fadeLabel}>Graph</span>
+          </button>
+
+          {/* Timeline */}
+          <button
+            className={`${styles.navItem} ${isActive('/timeline') ? styles.active : ''}`}
+            onClick={() => navTo('/timeline')}
+            title="Timeline"
+          >
+            <Calendar size={18} />
+            <span className={styles.fadeLabel}>Timeline</span>
+          </button>
+
+          {/* Garden */}
+          <button
+            className={`${styles.navItem} ${isActive('/review') ? styles.active : ''}`}
+            onClick={() => navTo('/review')}
+            title="Garden"
+          >
+            <Sprout size={18} />
+            <span className={styles.fadeLabel}>Garden</span>
+          </button>
+
+          {/* Projects */}
+          <div className={styles.section}>
+            {collapsed ? (
+              <div className={styles.sectionDivider} />
+            ) : (
+              <div className={styles.sectionHeaderRow}>
+                <button
+                  className={styles.sectionHeader}
+                  onClick={() => setProjectsExpanded(!projectsExpanded)}
+                >
+                  Projects
+                </button>
+                <button
+                  className={styles.sectionAction}
+                  onClick={() => setShowNewProject(!showNewProject)}
+                  title="Create project"
+                  aria-label="Create project"
+                >
+                  <Plus size={12} />
+                </button>
               </div>
             )}
-          </form>
-        )}
+            {!collapsed && showNewProject && (
+              <div className={styles.newProjectRow}>
+                <input
+                  ref={newProjectRef}
+                  className={styles.newProjectInput}
+                  placeholder="Project name"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleCreateProject();
+                    if (e.key === 'Escape') {
+                      setShowNewProject(false);
+                      setNewProjectName('');
+                    }
+                  }}
+                />
+                <button
+                  className={styles.newProjectConfirm}
+                  onClick={handleCreateProject}
+                  disabled={!newProjectName.trim()}
+                  aria-label="Confirm"
+                >
+                  <Check size={12} />
+                </button>
+              </div>
+            )}
+            {(collapsed || projectsExpanded) &&
+              projects.map((project, index) => (
+                <div
+                  key={project.id}
+                  className={styles.projectRow}
+                  ref={contextMenuProjectId === project.id ? contextMenuRef : undefined}
+                >
+                  {renamingProjectId === project.id ? (
+                    <input
+                      className={styles.renameInput}
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRenameProject(project.id, renameValue);
+                        if (e.key === 'Escape') setRenamingProjectId(null);
+                      }}
+                      onBlur={() => handleRenameProject(project.id, renameValue)}
+                      autoFocus
+                    />
+                  ) : (
+                    <button
+                      className={`${styles.navItem} ${isProjectActive(project.id) ? styles.active : ''}`}
+                      onClick={() => navTo(`/projects/${project.id}`)}
+                      onContextMenu={(e) => {
+                        if (collapsed) return;
+                        e.preventDefault();
+                        setContextMenuProjectId(project.id);
+                      }}
+                      title={project.name}
+                      style={{
+                        flex: 1,
+                        ...(isProjectActive(project.id)
+                          ? { borderLeftColor: getProjectColor(index) }
+                          : undefined),
+                      }}
+                    >
+                      <span
+                        className={styles.projectDot}
+                        style={{ backgroundColor: getProjectColor(index) }}
+                      />
+                      {!collapsed && <span className={styles.navLabel}>{project.name}</span>}
+                    </button>
+                  )}
+                  {!collapsed && !renamingProjectId && (
+                    <button
+                      className={styles.projectMenuTrigger}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setContextMenuProjectId(
+                          contextMenuProjectId === project.id ? null : project.id,
+                        );
+                      }}
+                      aria-label={`${project.name} options`}
+                    >
+                      <MoreHorizontal size={12} />
+                    </button>
+                  )}
+                  {contextMenuProjectId === project.id && (
+                    <div className={styles.contextMenu}>
+                      <button
+                        className={styles.contextMenuItem}
+                        onClick={() => {
+                          setContextMenuProjectId(null);
+                          setRenamingProjectId(project.id);
+                          setRenameValue(project.name);
+                        }}
+                      >
+                        <Pencil size={12} />
+                        Rename
+                      </button>
+                      <button
+                        className={styles.contextMenuItem}
+                        onClick={() => handleNewNoteInProject(project.id)}
+                      >
+                        <FilePlus size={12} />
+                        New note
+                      </button>
+                      <div className={styles.contextMenuDivider} />
+                      <button
+                        className={styles.contextMenuItemDanger}
+                        onClick={() => {
+                          setContextMenuProjectId(null);
+                          setDeleteConfirm({
+                            open: true,
+                            projectId: project.id,
+                            projectName: project.name,
+                          });
+                          setDeleteCascade('inbox');
+                        }}
+                      >
+                        <Trash2 size={12} />
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
 
-        {/* Today */}
-        {collapsed ? (
-          <button
-            className={styles.navItem}
-            onClick={() => navTo('/today')}
-            title="Today's daily note"
-            aria-label="Today's daily note"
-          >
-            <CalendarDays size={18} />
-          </button>
-        ) : (
-          <button
-            className={styles.todayButton}
-            onClick={() => navTo('/today')}
-            title="Go to today's daily note"
-          >
-            <CalendarDays size={16} />
-            <span>{format(new Date(), 'EEE, MMM d')}</span>
-          </button>
-        )}
-
-        {/* Inbox */}
-        <button
-          className={`${styles.navItem} ${isActive('/') ? styles.active : ''}`}
-          onClick={() => navTo('/')}
-          title="Inbox"
-        >
-          <Inbox size={18} />
-          <span className={styles.fadeLabel}>Inbox</span>
-        </button>
-
-        {/* Ask Seam */}
-        <button
-          className={`${styles.navItem} ${isActive('/ask') ? styles.active : ''}`}
-          onClick={() => navTo('/ask')}
-          title="Ask Seam"
-        >
-          <MessageCircle size={18} />
-          <span className={styles.fadeLabel}>Ask Seam</span>
-        </button>
-
-        {/* Graph */}
-        <button
-          className={`${styles.navItem} ${isActive('/graph') ? styles.active : ''}`}
-          onClick={() => navTo('/graph')}
-          title="Knowledge Graph"
-        >
-          <Network size={18} />
-          <span className={styles.fadeLabel}>Graph</span>
-        </button>
-
-        {/* Timeline */}
-        <button
-          className={`${styles.navItem} ${isActive('/timeline') ? styles.active : ''}`}
-          onClick={() => navTo('/timeline')}
-          title="Timeline"
-        >
-          <Calendar size={18} />
-          <span className={styles.fadeLabel}>Timeline</span>
-        </button>
-
-        {/* Garden */}
-        <button
-          className={`${styles.navItem} ${isActive('/review') ? styles.active : ''}`}
-          onClick={() => navTo('/review')}
-          title="Garden"
-        >
-          <Sprout size={18} />
-          <span className={styles.fadeLabel}>Garden</span>
-        </button>
-
-        {/* Projects */}
-        <div className={styles.section}>
-          {collapsed ? (
-            <div className={styles.sectionDivider} />
-          ) : (
-            <div className={styles.sectionHeaderRow}>
+          {/* Tags */}
+          {!collapsed && (
+            <div className={styles.section}>
               <button
                 className={styles.sectionHeader}
-                onClick={() => setProjectsExpanded(!projectsExpanded)}
+                onClick={() => setTagsExpanded(!tagsExpanded)}
               >
-                Projects
+                Tags
               </button>
-              <button
-                className={styles.sectionAction}
-                onClick={() => setShowNewProject(!showNewProject)}
-                title="Create project"
-                aria-label="Create project"
-              >
-                <Plus size={12} />
-              </button>
+              {tagsExpanded &&
+                tags.slice(0, 10).map((tag) => (
+                  <button
+                    key={tag.name}
+                    className={styles.navItem}
+                    onClick={() => navTo(`/?tag=${encodeURIComponent(tag.name)}`)}
+                    title={`${tag.name} (${tag.count})`}
+                  >
+                    <Tag size={14} />
+                    <span className={styles.navLabel}>#{tag.name}</span>
+                    <span className={styles.count}>{tag.count}</span>
+                  </button>
+                ))}
             </div>
           )}
-          {!collapsed && showNewProject && (
-            <div className={styles.newProjectRow}>
+        </div>
+
+        <div className={styles.bottom}>
+          <div className={styles.divider} />
+
+          {/* User row */}
+          <div className={styles.userRow}>
+            <div className={styles.avatar}>{user?.username?.charAt(0).toUpperCase() ?? '?'}</div>
+            {!collapsed && (
+              <>
+                <span className={styles.username}>{user?.username}</span>
+                <ConnectionStatus />
+                <button
+                  className={styles.iconButton}
+                  onClick={handleSettings}
+                  title="Settings"
+                  aria-label="Settings"
+                >
+                  <Settings size={14} />
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Quick-append input */}
+          {!collapsed && quickAppendOpen && (
+            <div className={styles.quickAppend}>
               <input
-                ref={newProjectRef}
-                className={styles.newProjectInput}
-                placeholder="Project name"
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
+                ref={quickAppendRef}
+                type="text"
+                className={styles.quickAppendInput}
+                placeholder="Quick note to today..."
+                value={quickAppendText}
+                onChange={(e) => setQuickAppendText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateProject();
+                  if (e.key === 'Enter') handleQuickAppend();
                   if (e.key === 'Escape') {
-                    setShowNewProject(false);
-                    setNewProjectName('');
+                    setQuickAppendOpen(false);
+                    setQuickAppendText('');
                   }
                 }}
+                aria-label="Quick append to daily note"
               />
-              <button
-                className={styles.newProjectConfirm}
-                onClick={handleCreateProject}
-                disabled={!newProjectName.trim()}
-                aria-label="Confirm"
-              >
-                <Check size={12} />
-              </button>
             </div>
           )}
-          {(collapsed || projectsExpanded) &&
-            projects.map((project, index) => (
-              <div key={project.id} className={styles.projectRow} ref={contextMenuProjectId === project.id ? contextMenuRef : undefined}>
-                {renamingProjectId === project.id ? (
-                  <input
-                    className={styles.renameInput}
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleRenameProject(project.id, renameValue);
-                      if (e.key === 'Escape') setRenamingProjectId(null);
-                    }}
-                    onBlur={() => handleRenameProject(project.id, renameValue)}
-                    autoFocus
-                  />
-                ) : (
-                  <button
-                    className={`${styles.navItem} ${isProjectActive(project.id) ? styles.active : ''}`}
-                    onClick={() => navTo(`/projects/${project.id}`)}
-                    onContextMenu={(e) => {
-                      if (collapsed) return;
-                      e.preventDefault();
-                      setContextMenuProjectId(project.id);
-                    }}
-                    title={project.name}
-                    style={{
-                      flex: 1,
-                      ...(isProjectActive(project.id) ? { borderLeftColor: getProjectColor(index) } : undefined),
-                    }}
-                  >
-                    <span
-                      className={styles.projectDot}
-                      style={{ backgroundColor: getProjectColor(index) }}
-                    />
-                    {!collapsed && (
-                      <span className={styles.navLabel}>{project.name}</span>
-                    )}
-                  </button>
-                )}
-                {!collapsed && !renamingProjectId && (
-                  <button
-                    className={styles.projectMenuTrigger}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setContextMenuProjectId(contextMenuProjectId === project.id ? null : project.id);
-                    }}
-                    aria-label={`${project.name} options`}
-                  >
-                    <MoreHorizontal size={12} />
-                  </button>
-                )}
-                {contextMenuProjectId === project.id && (
-                  <div className={styles.contextMenu}>
-                    <button
-                      className={styles.contextMenuItem}
-                      onClick={() => {
-                        setContextMenuProjectId(null);
-                        setRenamingProjectId(project.id);
-                        setRenameValue(project.name);
-                      }}
-                    >
-                      <Pencil size={12} />
-                      Rename
-                    </button>
-                    <button
-                      className={styles.contextMenuItem}
-                      onClick={() => handleNewNoteInProject(project.id)}
-                    >
-                      <FilePlus size={12} />
-                      New note
-                    </button>
-                    <div className={styles.contextMenuDivider} />
-                    <button
-                      className={styles.contextMenuItemDanger}
-                      onClick={() => {
-                        setContextMenuProjectId(null);
-                        setDeleteConfirm({ open: true, projectId: project.id, projectName: project.name });
-                        setDeleteCascade('inbox');
-                      }}
-                    >
-                      <Trash2 size={12} />
-                      Delete
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-        </div>
 
-        {/* Tags */}
-        {!collapsed && (
-        <div className={styles.section}>
+          {/* Capture button */}
           <button
-            className={styles.sectionHeader}
-            onClick={() => setTagsExpanded(!tagsExpanded)}
+            className={styles.captureButton}
+            onClick={() => setCaptureModalOpen(true)}
+            title="Quick capture"
+            aria-label="Quick capture"
           >
-            Tags
+            {collapsed ? <Plus size={16} /> : 'Capture'}
           </button>
-          {tagsExpanded &&
-            tags.slice(0, 10).map((tag) => (
-              <button
-                key={tag.name}
-                className={styles.navItem}
-                onClick={() => navTo(`/?tag=${encodeURIComponent(tag.name)}`)}
-                title={`${tag.name} (${tag.count})`}
-              >
-                <Tag size={14} />
-                <span className={styles.navLabel}>#{tag.name}</span>
-                <span className={styles.count}>{tag.count}</span>
-              </button>
-            ))}
+
+          {/* Collapse toggle */}
+          <button
+            className={styles.collapseToggle}
+            onClick={toggleSidebar}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
         </div>
-        )}
-      </div>
+      </nav>
 
-      <div className={styles.bottom}>
-        <div className={styles.divider} />
-
-        {/* User row */}
-        <div className={styles.userRow}>
-          <div className={styles.avatar}>
-            {user?.username?.charAt(0).toUpperCase() ?? '?'}
-          </div>
-          {!collapsed && (
-            <>
-              <span className={styles.username}>{user?.username}</span>
-              <ConnectionStatus />
-              <button
-                className={styles.iconButton}
-                onClick={handleSettings}
-                title="Settings"
-                aria-label="Settings"
-              >
-                <Settings size={14} />
-              </button>
-            </>
-          )}
+      <ConfirmModal
+        open={deleteConfirm.open}
+        title={`Delete "${deleteConfirm.projectName}"`}
+        message={
+          deleteCascade === 'inbox'
+            ? 'Notes in this project will be moved to Inbox.'
+            : 'This project and all its notes will be permanently deleted.'
+        }
+        confirmLabel={deleteCascade === 'inbox' ? 'Keep notes' : 'Delete everything'}
+        destructive={deleteCascade === 'delete'}
+        onConfirm={handleDeleteProject}
+        onCancel={() => setDeleteConfirm({ open: false, projectId: '', projectName: '' })}
+      >
+        <div className={styles.cascadeToggle}>
+          <button
+            className={`${styles.cascadeButton} ${deleteCascade === 'inbox' ? styles.cascadeButtonActive : ''}`}
+            onClick={() => setDeleteCascade('inbox')}
+          >
+            Keep notes
+          </button>
+          <button
+            className={`${styles.cascadeButton} ${deleteCascade === 'delete' ? styles.cascadeButtonDanger : ''}`}
+            onClick={() => setDeleteCascade('delete')}
+          >
+            Delete everything
+          </button>
         </div>
-
-        {/* Quick-append input */}
-        {!collapsed && quickAppendOpen && (
-          <div className={styles.quickAppend}>
-            <input
-              ref={quickAppendRef}
-              type="text"
-              className={styles.quickAppendInput}
-              placeholder="Quick note to today..."
-              value={quickAppendText}
-              onChange={(e) => setQuickAppendText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleQuickAppend();
-                if (e.key === 'Escape') {
-                  setQuickAppendOpen(false);
-                  setQuickAppendText('');
-                }
-              }}
-              aria-label="Quick append to daily note"
-            />
-          </div>
-        )}
-
-        {/* Capture button */}
-        <button
-          className={styles.captureButton}
-          onClick={() => setCaptureModalOpen(true)}
-          title="Quick capture"
-          aria-label="Quick capture"
-        >
-          {collapsed ? <Plus size={16} /> : 'Capture'}
-        </button>
-
-        {/* Collapse toggle */}
-        <button
-          className={styles.collapseToggle}
-          onClick={toggleSidebar}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {collapsed ? (
-            <PanelLeftOpen size={16} />
-          ) : (
-            <PanelLeftClose size={16} />
-          )}
-        </button>
-      </div>
-    </nav>
-
-    <ConfirmModal
-      open={deleteConfirm.open}
-      title={`Delete "${deleteConfirm.projectName}"`}
-      message={
-        deleteCascade === 'inbox'
-          ? 'Notes in this project will be moved to Inbox.'
-          : 'This project and all its notes will be permanently deleted.'
-      }
-      confirmLabel={deleteCascade === 'inbox' ? 'Keep notes' : 'Delete everything'}
-      destructive={deleteCascade === 'delete'}
-      onConfirm={handleDeleteProject}
-      onCancel={() => setDeleteConfirm({ open: false, projectId: '', projectName: '' })}
-    >
-      <div className={styles.cascadeToggle}>
-        <button
-          className={`${styles.cascadeButton} ${deleteCascade === 'inbox' ? styles.cascadeButtonActive : ''}`}
-          onClick={() => setDeleteCascade('inbox')}
-        >
-          Keep notes
-        </button>
-        <button
-          className={`${styles.cascadeButton} ${deleteCascade === 'delete' ? styles.cascadeButtonDanger : ''}`}
-          onClick={() => setDeleteCascade('delete')}
-        >
-          Delete everything
-        </button>
-      </div>
-    </ConfirmModal>
+      </ConfirmModal>
     </>
   );
 }
-
-

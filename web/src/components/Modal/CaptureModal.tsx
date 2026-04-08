@@ -58,7 +58,9 @@ export function CaptureModal() {
       // Auto-focus body textarea
       setTimeout(() => bodyRef.current?.focus(), 100);
       // Load available templates.
-      listTemplates().then(setTemplates).catch(() => setTemplates([]));
+      listTemplates()
+        .then(setTemplates)
+        .catch(() => setTemplates([]));
     } else {
       // Reset form
       setTitle('');
@@ -174,18 +176,21 @@ export function CaptureModal() {
     }
   };
 
-  const applyTemplateByName = useCallback(async (name: string) => {
-    try {
-      const vars: Record<string, string> = {};
-      if (title.trim()) vars.title = title.trim();
-      const projectName = projects.find((p) => p.id === projectId)?.name;
-      if (projectName) vars.project = projectName;
-      const result = await applyTemplate(name, vars);
-      setBody(result.body);
-    } catch {
-      addToast('Failed to apply template', 'error');
-    }
-  }, [title, projectId, projects, addToast]);
+  const applyTemplateByName = useCallback(
+    async (name: string) => {
+      try {
+        const vars: Record<string, string> = {};
+        if (title.trim()) vars.title = title.trim();
+        const projectName = projects.find((p) => p.id === projectId)?.name;
+        if (projectName) vars.project = projectName;
+        const result = await applyTemplate(name, vars);
+        setBody(result.body);
+      } catch {
+        addToast('Failed to apply template', 'error');
+      }
+    },
+    [title, projectId, projects, addToast],
+  );
 
   const handleSelectTemplate = (name: string) => {
     setSelectedTemplate(name);
@@ -262,170 +267,170 @@ export function CaptureModal() {
 
   return (
     <>
-    <AnimatePresence onExitComplete={() => {
-      previousFocusRef.current?.focus();
-      previousFocusRef.current = null;
-    }}>
-      {isOpen && (
-        <motion.div
-          ref={backdropRef}
-          className={styles.backdrop}
-          onClick={handleBackdropClick}
-          onKeyDown={(e) => { handleFocusTrap(e); handleKeyDown(e); }}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Quick capture"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.25, ease: [0.4, 0, 1, 1] }}
-        >
+      <AnimatePresence
+        onExitComplete={() => {
+          previousFocusRef.current?.focus();
+          previousFocusRef.current = null;
+        }}
+      >
+        {isOpen && (
           <motion.div
-            ref={modalRef}
-            className={styles.modal}
-            style={{ maxWidth: 'var(--modal-width-sm)' }}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 4 }}
-            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            ref={backdropRef}
+            className={styles.backdrop}
+            onClick={handleBackdropClick}
+            onKeyDown={(e) => {
+              handleFocusTrap(e);
+              handleKeyDown(e);
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Quick capture"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.4, 0, 1, 1] }}
           >
-        <div className={styles.modalHeader}>
-          <h2 className={styles.modalTitle}>Quick Capture</h2>
-          <button
-            className={styles.closeButton}
-            onClick={confirmDiscardAndClose}
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className={styles.modalBody}>
-          {urlMode && (
-            <div className={styles.urlModeBanner}>
-              <Link size={14} />
-              <span>URL detected - will fetch and save page content</span>
-            </div>
-          )}
-          {!urlMode && (
-            <input
-              type="text"
-              className={styles.titleInput}
-              placeholder="Title (optional)"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          )}
-          <textarea
-            ref={bodyRef}
-            className={styles.bodyTextarea}
-            placeholder={urlMode ? 'Paste a URL to capture...' : 'Write your thought...'}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
-          <div className={styles.captureOptions}>
-            <select
-              className={styles.projectSelect}
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              aria-label="Project"
+            <motion.div
+              ref={modalRef}
+              className={styles.modal}
+              style={{ maxWidth: 'var(--modal-width-sm)' }}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
             >
-              <option value="">Inbox</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              className={styles.tagInput}
-              placeholder="Tags (comma-separated)"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-            />
-          </div>
-          {!urlMode && templates.length > 0 && (
-            <div className={styles.templateSection}>
-              <button
-                className={styles.templateToggle}
-                onClick={() => setShowTemplatePicker(!showTemplatePicker)}
-                type="button"
-              >
-                <FileText size={14} />
-                {selectedTemplate
-                  ? `Template: ${selectedTemplate}`
-                  : 'Use a template'}
-              </button>
-              {showTemplatePicker && (
-                <div className={styles.templateList}>
-                  {selectedTemplate && (
-                    <button
-                      className={styles.templateItem}
-                      onClick={() => handleSelectTemplate('')}
-                    >
-                      None (blank note)
-                    </button>
-                  )}
-                  {templates.map((t) => (
-                    <button
-                      key={t.name}
-                      className={`${styles.templateItem} ${
-                        t.name === selectedTemplate ? styles.templateItemActive : ''
-                      }`}
-                      onClick={() => handleSelectTemplate(t.name)}
-                    >
-                      <span className={styles.templateName}>{t.name}</span>
-                      <span className={styles.templateDesc}>{t.description}</span>
-                    </button>
-                  ))}
+              <div className={styles.modalHeader}>
+                <h2 className={styles.modalTitle}>Quick Capture</h2>
+                <button
+                  className={styles.closeButton}
+                  onClick={confirmDiscardAndClose}
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className={styles.modalBody}>
+                {urlMode && (
+                  <div className={styles.urlModeBanner}>
+                    <Link size={14} />
+                    <span>URL detected - will fetch and save page content</span>
+                  </div>
+                )}
+                {!urlMode && (
+                  <input
+                    type="text"
+                    className={styles.titleInput}
+                    placeholder="Title (optional)"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                  />
+                )}
+                <textarea
+                  ref={bodyRef}
+                  className={styles.bodyTextarea}
+                  placeholder={urlMode ? 'Paste a URL to capture...' : 'Write your thought...'}
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                />
+                <div className={styles.captureOptions}>
+                  <select
+                    className={styles.projectSelect}
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                    aria-label="Project"
+                  >
+                    <option value="">Inbox</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    className={styles.tagInput}
+                    placeholder="Tags (comma-separated)"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                  />
                 </div>
-              )}
-            </div>
-          )}
-        </div>
+                {!urlMode && templates.length > 0 && (
+                  <div className={styles.templateSection}>
+                    <button
+                      className={styles.templateToggle}
+                      onClick={() => setShowTemplatePicker(!showTemplatePicker)}
+                      type="button"
+                    >
+                      <FileText size={14} />
+                      {selectedTemplate ? `Template: ${selectedTemplate}` : 'Use a template'}
+                    </button>
+                    {showTemplatePicker && (
+                      <div className={styles.templateList}>
+                        {selectedTemplate && (
+                          <button
+                            className={styles.templateItem}
+                            onClick={() => handleSelectTemplate('')}
+                          >
+                            None (blank note)
+                          </button>
+                        )}
+                        {templates.map((t) => (
+                          <button
+                            key={t.name}
+                            className={`${styles.templateItem} ${
+                              t.name === selectedTemplate ? styles.templateItemActive : ''
+                            }`}
+                            onClick={() => handleSelectTemplate(t.name)}
+                          >
+                            <span className={styles.templateName}>{t.name}</span>
+                            <span className={styles.templateDesc}>{t.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-        <div className={styles.modalFooter}>
-          <div className={styles.footerLeft}>
-            <button
-              className={styles.ghostButton}
-              onClick={handleToggleRecording}
-              title={isRecording ? 'Stop recording' : 'Record voice note'}
-              aria-label={isRecording ? 'Stop recording' : 'Record voice note'}
-            >
-              {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
-            </button>
-          </div>
-          <div className={styles.footerRight}>
-            <button
-              className={styles.ghostButton}
-              onClick={confirmDiscardAndClose}
-            >
-              Cancel
-            </button>
-            <button
-              className={styles.primaryButton}
-              onClick={handleSave}
-              disabled={isSaving || (!body.trim() && !title.trim())}
-            >
-              {isSaving ? 'Saving...' : urlMode ? 'Capture URL' : 'Save to Inbox'}
-            </button>
-          </div>
-        </div>
+              <div className={styles.modalFooter}>
+                <div className={styles.footerLeft}>
+                  <button
+                    className={styles.ghostButton}
+                    onClick={handleToggleRecording}
+                    title={isRecording ? 'Stop recording' : 'Record voice note'}
+                    aria-label={isRecording ? 'Stop recording' : 'Record voice note'}
+                  >
+                    {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
+                  </button>
+                </div>
+                <div className={styles.footerRight}>
+                  <button className={styles.ghostButton} onClick={confirmDiscardAndClose}>
+                    Cancel
+                  </button>
+                  <button
+                    className={styles.primaryButton}
+                    onClick={handleSave}
+                    disabled={isSaving || (!body.trim() && !title.trim())}
+                  >
+                    {isSaving ? 'Saving...' : urlMode ? 'Capture URL' : 'Save to Inbox'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
 
-    <ConfirmModal
-      open={confirmState.open}
-      title={confirmState.title}
-      message={confirmState.message}
-      confirmLabel="Discard"
-      destructive
-      onConfirm={confirmState.onConfirm}
-      onCancel={() => setConfirmState((s) => ({ ...s, open: false }))}
-    />
+      <ConfirmModal
+        open={confirmState.open}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmLabel="Discard"
+        destructive
+        onConfirm={confirmState.onConfirm}
+        onCancel={() => setConfirmState((s) => ({ ...s, open: false }))}
+      />
     </>
   );
 }

@@ -20,7 +20,8 @@
   height: 24px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 
@@ -64,7 +65,8 @@
   color: var(--text-secondary);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 

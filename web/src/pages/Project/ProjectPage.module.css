@@ -24,7 +24,7 @@
 }
 
 .resizeHandle::before {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0 -4px;
 }
@@ -33,7 +33,8 @@
   width: 1px;
   height: 100%;
   background: var(--border-subtle);
-  transition: width var(--duration-fast) var(--ease-standard),
+  transition:
+    width var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard);
 }
 

@@ -107,9 +107,7 @@ describe('noteStore', () => {
       total: 2,
     });
 
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(null, { status: 204 }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await useNoteStore.getState().deleteNote('note1');
 

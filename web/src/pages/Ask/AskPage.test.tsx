@@ -70,9 +70,7 @@ describe('AskPage', () => {
     // Default: keep the stream open so the page sits in the streaming
     // state. Tests that need a completed stream can override this with
     // a mockImplementationOnce that calls the onEvent callback.
-    vi.mocked(streamAssistantChat).mockImplementation(
-      () => new Promise(() => {}),
-    );
+    vi.mocked(streamAssistantChat).mockImplementation(() => new Promise(() => {}));
 
     // jsdom does not implement scrollIntoView.
     Element.prototype.scrollIntoView = vi.fn();
@@ -88,23 +86,17 @@ describe('AskPage', () => {
     // The subtitle text was rewritten when the page moved to the
     // agentic assistant. Match a substring instead of the full string
     // so future copy tweaks don't break this test.
-    expect(
-      screen.getByText(/assistant can search, read, create/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/assistant can search, read, create/i)).toBeInTheDocument();
   });
 
   it('shows empty state when no messages', async () => {
     await renderAskPage();
-    expect(
-      screen.getByText(/Ask anything.*Seam finds the answer/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Ask anything.*Seam finds the answer/)).toBeInTheDocument();
   });
 
   it('has a text input with correct placeholder', async () => {
     await renderAskPage();
-    expect(
-      screen.getByPlaceholderText('Ask about your notes...'),
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Ask about your notes...')).toBeInTheDocument();
   });
 
   it('send button is disabled when input is empty', async () => {
@@ -179,9 +171,7 @@ describe('AskPage', () => {
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
 
     // No user message should appear - empty state still showing.
-    expect(
-      screen.getByText(/Ask anything.*Seam finds the answer/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Ask anything.*Seam finds the answer/)).toBeInTheDocument();
   });
 
   it('does not submit empty input', async () => {
@@ -192,9 +182,7 @@ describe('AskPage', () => {
     fireEvent.submit(form);
 
     // Empty state should still be showing.
-    expect(
-      screen.getByText(/Ask anything.*Seam finds the answer/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Ask anything.*Seam finds the answer/)).toBeInTheDocument();
   });
 
   it('hides empty state after first message', async () => {
@@ -205,36 +193,30 @@ describe('AskPage', () => {
     fireEvent.submit(input.closest('form')!);
 
     await waitFor(() => {
-      expect(
-        screen.queryByText(/Ask anything.*Seam finds the answer/),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/Ask anything.*Seam finds the answer/)).not.toBeInTheDocument();
     });
   });
 
   it('handleApprove streams resume events and reloads conversation', async () => {
     // streamAssistantChat fires a confirmation event so the page enters
     // awaiting_approval. The resume stream then emits tool_use + done.
-    vi.mocked(streamAssistantChat).mockImplementationOnce(
-      async (_convId, _msg, _hist, onEvent) => {
-        onEvent({
-          type: 'confirmation',
-          tool_name: 'create_note',
-          content: 'act_pending_1',
-        });
-        onEvent({ type: 'done' });
-      },
-    );
-    vi.mocked(streamResumeAction).mockImplementationOnce(
-      async (_actionId, onEvent) => {
-        onEvent({
-          type: 'tool_use',
-          tool_name: 'create_note',
-          content: '{"id":"n1"}',
-        });
-        onEvent({ type: 'text', content: 'Note created.' });
-        onEvent({ type: 'done' });
-      },
-    );
+    vi.mocked(streamAssistantChat).mockImplementationOnce(async (_convId, _msg, _hist, onEvent) => {
+      onEvent({
+        type: 'confirmation',
+        tool_name: 'create_note',
+        content: 'act_pending_1',
+      });
+      onEvent({ type: 'done' });
+    });
+    vi.mocked(streamResumeAction).mockImplementationOnce(async (_actionId, onEvent) => {
+      onEvent({
+        type: 'tool_use',
+        tool_name: 'create_note',
+        content: '{"id":"n1"}',
+      });
+      onEvent({ type: 'text', content: 'Note created.' });
+      onEvent({ type: 'done' });
+    });
     vi.mocked(getConversation).mockResolvedValue({
       id: 'conv1',
       title: '',

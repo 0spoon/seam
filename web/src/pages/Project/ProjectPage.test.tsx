@@ -28,17 +28,13 @@ vi.mock('@tanstack/react-virtual', () => ({
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
-    div: ({
-      children,
-      ...props
-    }: {
-      children?: React.ReactNode;
-      [key: string]: unknown;
-    }) => {
+    div: ({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) => {
       const safe = Object.fromEntries(
         Object.entries(props).filter(
           ([k]) =>
-            !['initial', 'animate', 'exit', 'transition', 'layout', 'ref', 'data-index'].includes(k),
+            !['initial', 'animate', 'exit', 'transition', 'layout', 'ref', 'data-index'].includes(
+              k,
+            ),
         ),
       );
       return <div {...safe}>{children}</div>;
@@ -101,9 +97,7 @@ describe('ProjectPage', () => {
   it('shows empty state when no notes', () => {
     renderProjectPage();
     expect(screen.getByText('No notes yet')).toBeInTheDocument();
-    expect(
-      screen.getByText('Create the first note in this project'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Create the first note in this project')).toBeInTheDocument();
   });
 
   it('renders "New note" button', () => {

@@ -21,7 +21,8 @@
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 
@@ -41,7 +42,8 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 

@@ -18,9 +18,10 @@ const editorTheme = EditorView.theme({
     borderLeftColor: 'var(--accent-primary)',
     borderLeftWidth: '2px',
   },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, &.cm-focused .cm-selectionBackground .cm-selectionBackground': {
-    backgroundColor: 'var(--accent-muted)',
-  },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, &.cm-focused .cm-selectionBackground .cm-selectionBackground':
+    {
+      backgroundColor: 'var(--accent-muted)',
+    },
   '.cm-activeLine': {
     backgroundColor: 'rgba(22, 25, 34, 0.5)',
   },

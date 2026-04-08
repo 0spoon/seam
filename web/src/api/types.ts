@@ -236,12 +236,7 @@ export interface ChatHistoryMessage {
 
 // Agentic assistant types (SSE chat stream + tool invocations).
 
-export type AssistantStreamEventType =
-  | 'text'
-  | 'tool_use'
-  | 'confirmation'
-  | 'done'
-  | 'error';
+export type AssistantStreamEventType = 'text' | 'tool_use' | 'confirmation' | 'done' | 'error';
 
 export interface AssistantStreamEvent {
   type: AssistantStreamEventType;
@@ -317,7 +312,7 @@ export interface BulkActionResult {
 export interface TwoHopBacklink {
   id: string;
   title: string;
-  via_id: string;    // intermediate note ID
+  via_id: string; // intermediate note ID
   via_title: string; // intermediate note title
 }
 

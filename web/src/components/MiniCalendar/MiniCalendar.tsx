@@ -90,21 +90,11 @@ export function MiniCalendar({ onDateSelect }: MiniCalendarProps) {
   return (
     <div className={styles.calendar}>
       <div className={styles.header}>
-        <button
-          className={styles.navButton}
-          onClick={handlePrevMonth}
-          aria-label="Previous month"
-        >
+        <button className={styles.navButton} onClick={handlePrevMonth} aria-label="Previous month">
           <ChevronLeft size={14} />
         </button>
-        <span className={styles.monthLabel}>
-          {format(currentMonth, 'MMMM yyyy')}
-        </span>
-        <button
-          className={styles.navButton}
-          onClick={handleNextMonth}
-          aria-label="Next month"
-        >
+        <span className={styles.monthLabel}>{format(currentMonth, 'MMMM yyyy')}</span>
+        <button className={styles.navButton} onClick={handleNextMonth} aria-label="Next month">
           <ChevronRight size={14} />
         </button>
       </div>

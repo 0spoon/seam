@@ -13,9 +13,7 @@ describe('useKeyboard', () => {
 
   it('calls handler when matching key pressed', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: 'a', handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: 'a', handler }]));
 
     dispatchKey({ key: 'a' });
     expect(handler).toHaveBeenCalledOnce();
@@ -23,9 +21,7 @@ describe('useKeyboard', () => {
 
   it('does not call handler for non-matching key', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: 'a', handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: 'a', handler }]));
 
     dispatchKey({ key: 'b' });
     expect(handler).not.toHaveBeenCalled();
@@ -33,9 +29,7 @@ describe('useKeyboard', () => {
 
   it('matches ctrl modifier', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: 'k', ctrl: true, handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: 'k', ctrl: true, handler }]));
 
     // Without ctrl -- should not fire
     dispatchKey({ key: 'k' });
@@ -48,9 +42,7 @@ describe('useKeyboard', () => {
 
   it('matches meta modifier', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: 'k', meta: true, handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: 'k', meta: true, handler }]));
 
     // Without meta -- should not fire
     dispatchKey({ key: 'k' });
@@ -63,9 +55,7 @@ describe('useKeyboard', () => {
 
   it('matches ctrl when meta binding specified (ctrlOrMeta logic)', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: 'k', meta: true, handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: 'k', meta: true, handler }]));
 
     // ctrl should also match a meta binding
     dispatchKey({ key: 'k', ctrlKey: true });
@@ -74,9 +64,7 @@ describe('useKeyboard', () => {
 
   it('matches shift modifier', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: 'P', shift: true, handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: 'P', shift: true, handler }]));
 
     // Without shift -- should not fire
     dispatchKey({ key: 'P' });
@@ -89,9 +77,7 @@ describe('useKeyboard', () => {
 
   it('skips global binding when input is focused', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: '/', global: true, handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: '/', global: true, handler }]));
 
     // Dispatch from an INPUT element so e.target is the input.
     // The event bubbles up to window where the hook listener lives.
@@ -107,9 +93,7 @@ describe('useKeyboard', () => {
 
   it('fires global binding when no input is focused', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: '/', global: true, handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: '/', global: true, handler }]));
 
     // Focus on a non-input element
     document.body.focus();
@@ -119,9 +103,7 @@ describe('useKeyboard', () => {
 
   it('skips global binding when textarea is focused', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: '/', global: true, handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: '/', global: true, handler }]));
 
     const textarea = document.createElement('textarea');
     document.body.appendChild(textarea);
@@ -135,9 +117,7 @@ describe('useKeyboard', () => {
 
   it('calls preventDefault on matched binding', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: 'k', meta: true, handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: 'k', meta: true, handler }]));
 
     const event = new KeyboardEvent('keydown', {
       key: 'k',
@@ -172,9 +152,7 @@ describe('useKeyboard', () => {
 
   it('does not match when ctrl/meta is pressed but binding has no modifier', () => {
     const handler = vi.fn();
-    renderHook(() =>
-      useKeyboard([{ key: 'a', handler }]),
-    );
+    renderHook(() => useKeyboard([{ key: 'a', handler }]));
 
     dispatchKey({ key: 'a', ctrlKey: true });
     expect(handler).not.toHaveBeenCalled();

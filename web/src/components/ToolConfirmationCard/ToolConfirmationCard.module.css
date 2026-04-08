@@ -89,7 +89,8 @@
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 

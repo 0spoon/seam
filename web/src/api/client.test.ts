@@ -125,9 +125,7 @@ describe('API Client', () => {
     it('clears tokens after logout', async () => {
       setTokens({ access_token: 'a', refresh_token: 'r' });
 
-      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-        new Response(null, { status: 204 }),
-      );
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 204 }));
 
       await logout();
       expect(getAccessToken()).toBeNull();
@@ -228,9 +226,7 @@ describe('API Client', () => {
     });
 
     it('deletes a note', async () => {
-      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-        new Response(null, { status: 204 }),
-      );
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 204 }));
 
       await expect(deleteNote('note1')).resolves.toBeUndefined();
     });
@@ -595,7 +591,11 @@ describe('API Client', () => {
         }),
       );
 
-      const result = await aiAssist('note3', 'extract-actions', 'We need to review the PR and update the docs.');
+      const result = await aiAssist(
+        'note3',
+        'extract-actions',
+        'We need to review the PR and update the docs.',
+      );
       expect(result.result).toContain('Review PR');
 
       const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
@@ -617,7 +617,10 @@ describe('API Client', () => {
   describe('getGraph', () => {
     it('fetches graph data with no filter', async () => {
       setTokens({ access_token: 'token', refresh_token: 'rt' });
-      const mockGraph = { nodes: [{ id: 'n1', title: 'Test', tags: [], link_count: 0 }], edges: [] };
+      const mockGraph = {
+        nodes: [{ id: 'n1', title: 'Test', tags: [], link_count: 0 }],
+        edges: [],
+      };
       vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
         new Response(JSON.stringify(mockGraph), { status: 200 }),
       );

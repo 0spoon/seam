@@ -54,16 +54,12 @@ describe('SearchPage', () => {
     renderSearchPage();
     const semanticTab = screen.getByText('Semantic');
     fireEvent.click(semanticTab);
-    expect(
-      screen.getByPlaceholderText('Ask a question about your notes...'),
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Ask a question about your notes...')).toBeInTheDocument();
   });
 
   it('calls searchFTS in fulltext mode after debounce', async () => {
     vi.mocked(searchFTS).mockResolvedValue({
-      results: [
-        { note_id: 'n1', title: 'API Design', snippet: 'REST <b>API</b>', rank: 1.0 },
-      ],
+      results: [{ note_id: 'n1', title: 'API Design', snippet: 'REST <b>API</b>', rank: 1.0 }],
       total: 1,
     });
 
@@ -115,9 +111,7 @@ describe('SearchPage', () => {
 
   it('navigates to note on result click', async () => {
     vi.mocked(searchFTS).mockResolvedValue({
-      results: [
-        { note_id: 'note123', title: 'My Note', snippet: 'content', rank: 1.0 },
-      ],
+      results: [{ note_id: 'note123', title: 'My Note', snippet: 'content', rank: 1.0 }],
       total: 1,
     });
 
@@ -182,9 +176,7 @@ describe('SearchPage', () => {
 
   it('clears results when query is emptied', async () => {
     vi.mocked(searchFTS).mockResolvedValue({
-      results: [
-        { note_id: 'n1', title: 'Result', snippet: 'text', rank: 1.0 },
-      ],
+      results: [{ note_id: 'n1', title: 'Result', snippet: 'text', rank: 1.0 }],
       total: 1,
     });
 

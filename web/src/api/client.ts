@@ -159,11 +159,7 @@ async function requestRaw(
   return res;
 }
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-  retry = true,
-): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const res = await requestRaw(path, options, retry);
 
   if (res.status === 204) {
@@ -262,10 +258,7 @@ export async function getNote(id: string): Promise<Note> {
   return request<Note>(`/notes/${id}`);
 }
 
-export async function updateNote(
-  id: string,
-  req: UpdateNoteReq,
-): Promise<Note> {
+export async function updateNote(id: string, req: UpdateNoteReq): Promise<Note> {
   return request<Note>(`/notes/${id}`, {
     method: 'PUT',
     body: JSON.stringify(req),
@@ -341,20 +334,14 @@ export async function listProjects(): Promise<Project[]> {
   return request<Project[]>('/projects/');
 }
 
-export async function updateProject(
-  id: string,
-  req: UpdateProjectReq,
-): Promise<Project> {
+export async function updateProject(id: string, req: UpdateProjectReq): Promise<Project> {
   return request<Project>(`/projects/${id}`, {
     method: 'PUT',
     body: JSON.stringify(req),
   });
 }
 
-export async function deleteProject(
-  id: string,
-  cascade: 'inbox' | 'delete',
-): Promise<void> {
+export async function deleteProject(id: string, cascade: 'inbox' | 'delete'): Promise<void> {
   return request<void>(`/projects/${id}?cascade=${cascade}`, {
     method: 'DELETE',
   });
@@ -378,26 +365,18 @@ export async function searchSemantic(
   return request<SemanticResult[]>(`/search/semantic?${params}`, { signal });
 }
 
-export async function getRelatedNotes(
-  noteId: string,
-  limit = 5,
-): Promise<RelatedNote[]> {
+export async function getRelatedNotes(noteId: string, limit = 5): Promise<RelatedNote[]> {
   return request<RelatedNote[]>(`/ai/notes/${noteId}/related?limit=${limit}`);
 }
 
-export async function askSeam(
-  query: string,
-  history: ChatMessage[] = [],
-): Promise<ChatResult> {
+export async function askSeam(query: string, history: ChatMessage[] = []): Promise<ChatResult> {
   return request<ChatResult>('/ai/ask', {
     method: 'POST',
     body: JSON.stringify({ query, history }),
   });
 }
 
-export async function synthesize(
-  req: SynthesizeReq,
-): Promise<SynthesisResult> {
+export async function synthesize(req: SynthesizeReq): Promise<SynthesisResult> {
   return request<SynthesisResult>('/ai/synthesize', {
     method: 'POST',
     body: JSON.stringify(req),
@@ -458,9 +437,7 @@ export async function aiAssist(
 }
 
 // Graph endpoints
-export async function getGraph(
-  filter: GraphFilter = {},
-): Promise<GraphData> {
+export async function getGraph(filter: GraphFilter = {}): Promise<GraphData> {
   const params = new URLSearchParams();
   if (filter.project) params.set('project', filter.project);
   if (filter.tag) params.set('tag', filter.tag);
@@ -471,9 +448,7 @@ export async function getGraph(
   return request<GraphData>(`/graph${qs ? `?${qs}` : ''}`);
 }
 
-export async function getTwoHopBacklinks(
-  noteId: string,
-): Promise<TwoHopBacklink[]> {
+export async function getTwoHopBacklinks(noteId: string): Promise<TwoHopBacklink[]> {
   return request<TwoHopBacklink[]>(`/graph/two-hop-backlinks/${noteId}`);
 }
 
@@ -721,13 +696,8 @@ export async function streamResumeAction(
  * continue the agent loop after execution and is kept only as a fallback
  * for callers that cannot consume an SSE stream.
  */
-export async function approveAssistantAction(
-  actionId: string,
-): Promise<AssistantToolResult> {
-  return request<AssistantToolResult>(
-    `/assistant/actions/${actionId}/approve`,
-    { method: 'POST' },
-  );
+export async function approveAssistantAction(actionId: string): Promise<AssistantToolResult> {
+  return request<AssistantToolResult>(`/assistant/actions/${actionId}/approve`, { method: 'POST' });
 }
 
 export async function rejectAssistantAction(actionId: string): Promise<void> {
@@ -741,9 +711,7 @@ export async function getAssistantProfile(): Promise<unknown> {
   return request<unknown>('/assistant/profile');
 }
 
-export async function updateAssistantProfile(
-  profile: unknown,
-): Promise<unknown> {
+export async function updateAssistantProfile(profile: unknown): Promise<unknown> {
   return request<unknown>('/assistant/profile', {
     method: 'PUT',
     body: JSON.stringify(profile),
@@ -763,17 +731,11 @@ export async function listVersions(
   return { versions: versions || [], total };
 }
 
-export async function getVersion(
-  noteId: string,
-  version: number,
-): Promise<NoteVersion> {
+export async function getVersion(noteId: string, version: number): Promise<NoteVersion> {
   return request<NoteVersion>(`/notes/${noteId}/versions/${version}`);
 }
 
-export async function restoreVersion(
-  noteId: string,
-  version: number,
-): Promise<Note> {
+export async function restoreVersion(noteId: string, version: number): Promise<Note> {
   return request<Note>(`/notes/${noteId}/versions/${version}/restore`, {
     method: 'POST',
   });
@@ -786,24 +748,18 @@ export async function resolveWikilink(title: string): Promise<ResolvedLink> {
 
 // Review queue endpoints (Knowledge Gardening)
 
-export async function getReviewQueue(
-  limit = 20,
-): Promise<ReviewItem[]> {
+export async function getReviewQueue(limit = 20): Promise<ReviewItem[]> {
   return request<ReviewItem[]>(`/review/queue?limit=${limit}`);
 }
 
-export async function suggestTags(
-  noteId: string,
-): Promise<{ tags: TagSuggestion[] }> {
+export async function suggestTags(noteId: string): Promise<{ tags: TagSuggestion[] }> {
   return request<{ tags: TagSuggestion[] }>('/ai/suggest-tags', {
     method: 'POST',
     body: JSON.stringify({ note_id: noteId }),
   });
 }
 
-export async function suggestProject(
-  noteId: string,
-): Promise<{ projects: ProjectSuggestion[] }> {
+export async function suggestProject(noteId: string): Promise<{ projects: ProjectSuggestion[] }> {
   return request<{ projects: ProjectSuggestion[] }>('/ai/suggest-project', {
     method: 'POST',
     body: JSON.stringify({ note_id: noteId }),

@@ -52,9 +52,7 @@ md.renderer.rules['wikilink'] = (tokens, idx) => {
   const token = tokens[idx];
   const target = (token.meta as { target: string }).target;
   const display = token.content;
-  const escaped = target
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;');
+  const escaped = target.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   return `<a class="wikilink" data-wikilink="${escaped}" href="#">${md.utils.escapeHtml(display)}</a>`;
 };
 

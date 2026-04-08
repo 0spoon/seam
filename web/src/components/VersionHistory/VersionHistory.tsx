@@ -54,40 +54,42 @@ export function VersionHistory({ noteId, currentBody, onRestore }: VersionHistor
     }
   }, [isExpanded, versions.length, fetchVersions]);
 
-  const handleVersionClick = useCallback(async (v: NoteVersion) => {
-    if (selectedVersion?.id === v.id) {
-      setSelectedVersion(null);
-      return;
-    }
-    // Fetch full version content if body is empty (list may return truncated).
-    try {
-      const full = await getVersion(noteId, v.version);
-      setSelectedVersion(full);
-    } catch {
-      addToast('Failed to load version', 'error');
-    }
-  }, [noteId, selectedVersion, addToast]);
+  const handleVersionClick = useCallback(
+    async (v: NoteVersion) => {
+      if (selectedVersion?.id === v.id) {
+        setSelectedVersion(null);
+        return;
+      }
+      // Fetch full version content if body is empty (list may return truncated).
+      try {
+        const full = await getVersion(noteId, v.version);
+        setSelectedVersion(full);
+      } catch {
+        addToast('Failed to load version', 'error');
+      }
+    },
+    [noteId, selectedVersion, addToast],
+  );
 
-  const handleRestore = useCallback(async (version: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await restoreVersion(noteId, version);
-      addToast('Version restored', 'success');
-      onRestore();
-      fetchVersions();
-      setSelectedVersion(null);
-    } catch {
-      addToast('Failed to restore version', 'error');
-    }
-  }, [noteId, onRestore, fetchVersions, addToast]);
+  const handleRestore = useCallback(
+    async (version: number, e: React.MouseEvent) => {
+      e.stopPropagation();
+      try {
+        await restoreVersion(noteId, version);
+        addToast('Version restored', 'success');
+        onRestore();
+        fetchVersions();
+        setSelectedVersion(null);
+      } catch {
+        addToast('Failed to restore version', 'error');
+      }
+    },
+    [noteId, onRestore, fetchVersions, addToast],
+  );
 
   return (
     <section className={styles.container}>
-      <button
-        className={styles.header}
-        onClick={handleToggle}
-        aria-expanded={isExpanded}
-      >
+      <button className={styles.header} onClick={handleToggle} aria-expanded={isExpanded}>
         <span className={styles.headerLeft}>
           <History size={12} />
           History
@@ -108,9 +110,7 @@ export function VersionHistory({ noteId, currentBody, onRestore }: VersionHistor
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
-            {isLoading && (
-              <p className={styles.loadingState}>Loading versions...</p>
-            )}
+            {isLoading && <p className={styles.loadingState}>Loading versions...</p>}
 
             {!isLoading && versions.length === 0 && (
               <p className={styles.emptyState}>No previous versions</p>
@@ -134,9 +134,7 @@ export function VersionHistory({ noteId, currentBody, onRestore }: VersionHistor
                   >
                     <div className={styles.versionInfo}>
                       <span className={styles.versionLabel}>v{v.version}</span>
-                      <span className={styles.versionTime}>
-                        {timeAgo(v.created_at)}
-                      </span>
+                      <span className={styles.versionTime}>{timeAgo(v.created_at)}</span>
                     </div>
                     <div className={styles.versionActions}>
                       <button

@@ -6,7 +6,8 @@
   cursor: pointer;
   min-height: var(--note-card-min-height);
   border-left: 2px solid transparent;
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard);
 }
 
@@ -42,7 +43,8 @@
   flex-shrink: 0;
   cursor: pointer;
   color: var(--text-inverse);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard);
 }
 

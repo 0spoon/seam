@@ -47,9 +47,7 @@ describe('TimelinePage', () => {
   });
 
   it('renders loading state initially', () => {
-    (listNotes as ReturnType<typeof vi.fn>).mockImplementation(
-      () => new Promise(() => {}),
-    );
+    (listNotes as ReturnType<typeof vi.fn>).mockImplementation(() => new Promise(() => {}));
     render(
       <MemoryRouter>
         <TimelinePage />
@@ -139,9 +137,7 @@ describe('TimelinePage', () => {
 
     // Should re-fetch with created sort after clicking the toggle.
     await waitFor(() => {
-      expect(listNotes).toHaveBeenCalledWith(
-        expect.objectContaining({ sort: 'created' }),
-      );
+      expect(listNotes).toHaveBeenCalledWith(expect.objectContaining({ sort: 'created' }));
     });
   });
 

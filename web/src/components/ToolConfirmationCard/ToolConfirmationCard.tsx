@@ -35,17 +35,8 @@ export function ToolConfirmationCard({
       </div>
       <pre className={styles.args}>{prettyArgs}</pre>
       <div className={styles.footer}>
-        <button
-          type="button"
-          className={styles.rejectButton}
-          onClick={onReject}
-          disabled={loading}
-        >
-          {loading ? (
-            <Loader2 size={14} className={styles.spinner} />
-          ) : (
-            <X size={14} />
-          )}
+        <button type="button" className={styles.rejectButton} onClick={onReject} disabled={loading}>
+          {loading ? <Loader2 size={14} className={styles.spinner} /> : <X size={14} />}
           Reject
         </button>
         <button
@@ -54,11 +45,7 @@ export function ToolConfirmationCard({
           onClick={onApprove}
           disabled={loading}
         >
-          {loading ? (
-            <Loader2 size={14} className={styles.spinner} />
-          ) : (
-            <Check size={14} />
-          )}
+          {loading ? <Loader2 size={14} className={styles.spinner} /> : <Check size={14} />}
           Approve
         </button>
       </div>

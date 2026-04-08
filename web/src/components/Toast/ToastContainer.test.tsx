@@ -23,10 +23,7 @@ vi.mock('motion/react', () => ({
         onKeyDown={onKeyDown}
         {...Object.fromEntries(
           Object.entries(props).filter(
-            ([k]) =>
-              !['initial', 'animate', 'exit', 'transition', 'layout'].includes(
-                k,
-              ),
+            ([k]) => !['initial', 'animate', 'exit', 'transition', 'layout'].includes(k),
           ),
         )}
       >

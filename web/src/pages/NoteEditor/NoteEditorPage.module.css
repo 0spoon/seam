@@ -31,7 +31,8 @@
   height: 28px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 
@@ -199,7 +200,8 @@
   height: 28px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 
@@ -704,8 +706,12 @@
 }
 
 @keyframes noteLoadingSpin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .noteLoadingText {
@@ -797,10 +803,18 @@
 }
 
 @keyframes slashHintFade {
-  0% { opacity: 0; }
-  10% { opacity: 1; }
-  80% { opacity: 1; }
-  100% { opacity: 0; }
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 /* Zen mode */
@@ -812,7 +826,8 @@
   max-width: 900px;
   margin: 0 auto;
   padding: var(--space-8) var(--space-12);
-  transition: max-width var(--duration-slow) var(--ease-out),
+  transition:
+    max-width var(--duration-slow) var(--ease-out),
     padding var(--duration-slow) var(--ease-out);
 }
 
@@ -890,7 +905,8 @@
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
   font-weight: 400;
-  transition: color var(--duration-fast) var(--ease-standard),
+  transition:
+    color var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard);
 }
 

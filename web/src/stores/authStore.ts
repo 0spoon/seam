@@ -15,11 +15,7 @@ interface AuthState {
   error: string | null;
 
   login: (username: string, password: string) => Promise<void>;
-  register: (
-    username: string,
-    email: string,
-    password: string,
-  ) => Promise<void>;
+  register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   restoreSession: () => Promise<void>;
   clearError: () => void;
@@ -40,8 +36,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       connect();
       useToastStore.getState().addToast('Logged in successfully', 'success');
     } catch (err) {
-      const message =
-        err instanceof api.ApiError ? err.message : 'Login failed';
+      const message = err instanceof api.ApiError ? err.message : 'Login failed';
       set({ error: message, isLoading: false });
       useToastStore.getState().addToast(message, 'error');
       throw err;
@@ -57,8 +52,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       connect();
       useToastStore.getState().addToast('Account created successfully', 'success');
     } catch (err) {
-      const message =
-        err instanceof api.ApiError ? err.message : 'Registration failed';
+      const message = err instanceof api.ApiError ? err.message : 'Registration failed';
       set({ error: message, isLoading: false });
       useToastStore.getState().addToast(message, 'error');
       throw err;

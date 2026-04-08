@@ -135,7 +135,8 @@
   border: 1px solid var(--accent-primary);
   border-radius: var(--radius-sm);
   opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-standard),
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard);
 }
 

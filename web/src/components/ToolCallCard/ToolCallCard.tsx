@@ -1,12 +1,5 @@
 import { useState, useMemo } from 'react';
-import {
-  Loader2,
-  Check,
-  X,
-  ChevronDown,
-  ChevronRight,
-  Wrench,
-} from 'lucide-react';
+import { Loader2, Check, X, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
 import { renderToolResult } from './renderers';
 import styles from './ToolCallCard.module.css';
 
@@ -17,12 +10,7 @@ interface ToolCallCardProps {
   errorMessage?: string;
 }
 
-export function ToolCallCard({
-  toolName,
-  status,
-  resultJson,
-  errorMessage,
-}: ToolCallCardProps) {
+export function ToolCallCard({ toolName, status, resultJson, errorMessage }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const parsed = useMemo<unknown>(() => {
@@ -57,18 +45,14 @@ export function ToolCallCard({
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
-        <span className={`${styles.statusIcon} ${statusClass}`}>
-          {StatusIcon}
-        </span>
+        <span className={`${styles.statusIcon} ${statusClass}`}>{StatusIcon}</span>
         <Wrench size={12} className={styles.toolIcon} />
         <span className={styles.toolName}>{toolName}</span>
         <span className={styles.caret}>
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </span>
       </button>
-      {errorMessage && (
-        <div className={styles.errorMessage}>{errorMessage}</div>
-      )}
+      {errorMessage && <div className={styles.errorMessage}>{errorMessage}</div>}
       {expanded && body && <div className={styles.body}>{body}</div>}
     </div>
   );

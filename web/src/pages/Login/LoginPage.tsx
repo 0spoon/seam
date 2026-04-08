@@ -92,23 +92,13 @@ export function LoginPage() {
             />
           </div>
 
-          <button
-            type="submit"
-            className={styles.submitButton}
-            disabled={isLoading}
-          >
-            {isLoading
-              ? 'Loading...'
-              : isRegister
-                ? 'Create account'
-                : 'Log in'}
+          <button type="submit" className={styles.submitButton} disabled={isLoading}>
+            {isLoading ? 'Loading...' : isRegister ? 'Create account' : 'Log in'}
           </button>
         </form>
 
         <button className={styles.toggleLink} onClick={toggleMode}>
-          {isRegister
-            ? 'Already have an account? Log in'
-            : 'Need an account? Register'}
+          {isRegister ? 'Already have an account? Log in' : 'Need an account? Register'}
         </button>
       </div>
     </div>

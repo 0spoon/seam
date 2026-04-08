@@ -6,15 +6,10 @@
 }
 
 .skeleton::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--bg-surface),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, var(--bg-surface), transparent);
   animation: shimmer 1.5s infinite;
 }
 

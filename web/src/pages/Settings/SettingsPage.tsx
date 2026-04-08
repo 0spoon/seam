@@ -42,15 +42,18 @@ export function SettingsPage() {
   const [passwordLoading, setPasswordLoading] = useState(false);
 
   useEffect(() => {
-    getMe().then((user) => {
-      setUsername(user.username);
-      setEmail(user.email);
-      setNewEmail(user.email);
-    }).catch(() => {
-      addToast('Failed to load account info', 'error');
-    }).finally(() => {
-      setAccountLoading(false);
-    });
+    getMe()
+      .then((user) => {
+        setUsername(user.username);
+        setEmail(user.email);
+        setNewEmail(user.email);
+      })
+      .catch(() => {
+        addToast('Failed to load account info', 'error');
+      })
+      .finally(() => {
+        setAccountLoading(false);
+      });
   }, [addToast]);
 
   const handleChangePassword = async () => {
@@ -128,7 +131,10 @@ export function SettingsPage() {
                 onChange={(e) => setNewEmail(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleUpdateEmail();
-                  if (e.key === 'Escape') { setShowEmailForm(false); setNewEmail(email); }
+                  if (e.key === 'Escape') {
+                    setShowEmailForm(false);
+                    setNewEmail(email);
+                  }
                 }}
                 style={{ width: 200 }}
                 autoFocus
@@ -178,7 +184,9 @@ export function SettingsPage() {
               placeholder="Confirm new password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleChangePassword(); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleChangePassword();
+              }}
               autoComplete="new-password"
             />
           </div>
@@ -283,7 +291,7 @@ export function SettingsPage() {
           Seam -- a local-first, AI-powered knowledge system. Where ideas connect.
         </p>
         <p className={styles.aboutVersion}>
-          Version {(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0')}
+          Version {typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
         </p>
         <p className={styles.aboutText}>
           <a

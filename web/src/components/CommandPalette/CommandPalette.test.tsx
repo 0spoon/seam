@@ -83,13 +83,16 @@ vi.mock('../../stores/uiStore', () => ({
       };
       return selector(state);
     }),
-    { setState: vi.fn(), getState: vi.fn(() => ({
-      setCommandPaletteOpen: vi.fn(),
-      setCaptureModalOpen: vi.fn(),
-      toggleSidebar: vi.fn(),
-      toggleRightPanel: vi.fn(),
-      setEditorViewMode: vi.fn(),
-    })) },
+    {
+      setState: vi.fn(),
+      getState: vi.fn(() => ({
+        setCommandPaletteOpen: vi.fn(),
+        setCaptureModalOpen: vi.fn(),
+        toggleSidebar: vi.fn(),
+        toggleRightPanel: vi.fn(),
+        setEditorViewMode: vi.fn(),
+      })),
+    },
   ),
 }));
 
@@ -117,10 +120,8 @@ function setUIState(overrides: Record<string, unknown>) {
     tags: [],
   };
   const merged = { ...defaults, ...overrides };
-  vi.mocked(useUIStore).mockImplementation(
-    ((selector: (s: Record<string, unknown>) => unknown) =>
-      selector(merged)) as never,
-  );
+  vi.mocked(useUIStore).mockImplementation(((selector: (s: Record<string, unknown>) => unknown) =>
+    selector(merged)) as never);
 }
 
 function setProjectState(overrides: Record<string, unknown>) {
@@ -128,10 +129,9 @@ function setProjectState(overrides: Record<string, unknown>) {
     projects: [],
   };
   const merged = { ...defaults, ...overrides };
-  vi.mocked(useProjectStore).mockImplementation(
-    ((selector: (s: Record<string, unknown>) => unknown) =>
-      selector(merged)) as never,
-  );
+  vi.mocked(useProjectStore).mockImplementation(((
+    selector: (s: Record<string, unknown>) => unknown,
+  ) => selector(merged)) as never);
 }
 
 function renderPalette() {
@@ -186,9 +186,7 @@ describe('CommandPalette', () => {
     setUIState({ commandPaletteOpen: true });
     renderPalette();
 
-    const input = screen.getByPlaceholderText(
-      'Search notes, >commands, #tags, @projects...',
-    );
+    const input = screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...');
     fireEvent.change(input, { target: { value: '>' } });
 
     expect(screen.getByText('Commands')).toBeInTheDocument();
@@ -203,15 +201,14 @@ describe('CommandPalette', () => {
     setUIState({ commandPaletteOpen: true });
     renderPalette();
 
-    const input = screen.getByPlaceholderText(
-      'Search notes, >commands, #tags, @projects...',
-    );
+    const input = screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...');
     fireEvent.change(input, { target: { value: '>graph' } });
 
     // Text is split across highlight spans, so use a function matcher.
     expect(
-      screen.getByText((_content, el) =>
-        el?.classList.contains('label') && el?.textContent === 'Graph view' || false,
+      screen.getByText(
+        (_content, el) =>
+          (el?.classList.contains('label') && el?.textContent === 'Graph view') || false,
       ),
     ).toBeInTheDocument();
     // Only one command result should appear
@@ -229,9 +226,7 @@ describe('CommandPalette', () => {
     });
     renderPalette();
 
-    const input = screen.getByPlaceholderText(
-      'Search notes, >commands, #tags, @projects...',
-    );
+    const input = screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...');
     fireEvent.change(input, { target: { value: '#' } });
 
     expect(screen.getByText('Tags')).toBeInTheDocument();
@@ -249,15 +244,13 @@ describe('CommandPalette', () => {
     });
     renderPalette();
 
-    const input = screen.getByPlaceholderText(
-      'Search notes, >commands, #tags, @projects...',
-    );
+    const input = screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...');
     fireEvent.change(input, { target: { value: '#rust' } });
 
     // Text is split across highlight spans, so use a function matcher.
     expect(
-      screen.getByText((_content, el) =>
-        el?.classList.contains('label') && el?.textContent === '#rust' || false,
+      screen.getByText(
+        (_content, el) => (el?.classList.contains('label') && el?.textContent === '#rust') || false,
       ),
     ).toBeInTheDocument();
     // Only one tag result should appear
@@ -275,9 +268,7 @@ describe('CommandPalette', () => {
     });
     renderPalette();
 
-    const input = screen.getByPlaceholderText(
-      'Search notes, >commands, #tags, @projects...',
-    );
+    const input = screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...');
     fireEvent.change(input, { target: { value: '@' } });
 
     expect(screen.getByText('Projects')).toBeInTheDocument();
@@ -289,9 +280,7 @@ describe('CommandPalette', () => {
     setUIState({ commandPaletteOpen: true });
     renderPalette();
 
-    const input = screen.getByPlaceholderText(
-      'Search notes, >commands, #tags, @projects...',
-    );
+    const input = screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...');
     fireEvent.change(input, { target: { value: '>' } });
 
     expect(screen.getByText('Cmd+N')).toBeInTheDocument();
@@ -303,9 +292,7 @@ describe('CommandPalette', () => {
     setUIState({ commandPaletteOpen: true, setCommandPaletteOpen: setOpen });
     renderPalette();
 
-    const input = screen.getByPlaceholderText(
-      'Search notes, >commands, #tags, @projects...',
-    );
+    const input = screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...');
     fireEvent.keyDown(input, { key: 'Escape' });
 
     expect(setOpen).toHaveBeenCalledWith(false);
@@ -315,9 +302,7 @@ describe('CommandPalette', () => {
     setUIState({ commandPaletteOpen: true });
     renderPalette();
 
-    const input = screen.getByPlaceholderText(
-      'Search notes, >commands, #tags, @projects...',
-    );
+    const input = screen.getByPlaceholderText('Search notes, >commands, #tags, @projects...');
     fireEvent.change(input, { target: { value: '>xyznonexistent' } });
 
     expect(screen.getByText('No results found')).toBeInTheDocument();

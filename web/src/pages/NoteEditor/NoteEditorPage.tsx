@@ -3,7 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { AnimatePresence, motion } from 'motion/react';
-import { formatDistanceToNow, addDays, subDays, format as formatDate, parse as parseDate } from 'date-fns';
+import {
+  formatDistanceToNow,
+  addDays,
+  subDays,
+  format as formatDate,
+  parse as parseDate,
+} from 'date-fns';
 import {
   Bold,
   Italic,
@@ -37,7 +43,13 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useToastStore } from '../../components/Toast/ToastContainer';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { getRelatedNotes, aiAssist, getTwoHopBacklinks, resolveWikilink, createNote as apiCreateNote } from '../../api/client';
+import {
+  getRelatedNotes,
+  aiAssist,
+  getTwoHopBacklinks,
+  resolveWikilink,
+  createNote as apiCreateNote,
+} from '../../api/client';
 import { renderMarkdown } from '../../lib/markdown';
 import { getCached, setCache, invalidateCache } from '../../lib/wikilinkCache';
 import { LinkPreviewCard } from '../../components/LinkPreviewCard/LinkPreviewCard';
@@ -61,7 +73,15 @@ import { useRecentNote } from '../../hooks/useRecentNotes';
 import { ZenModeExit } from '../../components/ZenModeExit/ZenModeExit';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { typewriterScrolling } from './typewriterExtension';
-import type { AIAssistReq, LinkSuggestion, RelatedNote, ResolvedLink, TwoHopBacklink, WSMessage, TagCount } from '../../api/types';
+import type {
+  AIAssistReq,
+  LinkSuggestion,
+  RelatedNote,
+  ResolvedLink,
+  TwoHopBacklink,
+  WSMessage,
+  TagCount,
+} from '../../api/types';
 import styles from './NoteEditorPage.module.css';
 
 export function NoteEditorPage() {
@@ -107,7 +127,11 @@ export function NoteEditorPage() {
     pos: null,
   });
   const [showSlashHint, setShowSlashHint] = useState(false);
-  const [draftBanner, setDraftBanner] = useState<{ title: string; body: string; savedAt: number } | null>(null);
+  const [draftBanner, setDraftBanner] = useState<{
+    title: string;
+    body: string;
+    savedAt: number;
+  } | null>(null);
   const [hoverPreview, setHoverPreview] = useState<{
     link: ResolvedLink;
     position: { top: number; left: number };
@@ -154,17 +178,21 @@ export function NoteEditorPage() {
       });
       fetchBacklinks(id);
       // Fetch related notes (semantic similarity).
-      getRelatedNotes(id).then((data) => {
-        if (!aborted) setRelatedNotes(data);
-      }).catch(() => {
-        if (!aborted) setRelatedNotes([]);
-      });
+      getRelatedNotes(id)
+        .then((data) => {
+          if (!aborted) setRelatedNotes(data);
+        })
+        .catch(() => {
+          if (!aborted) setRelatedNotes([]);
+        });
       // Fetch two-hop backlinks.
-      getTwoHopBacklinks(id).then((data) => {
-        if (!aborted) setTwoHopBacklinks(data);
-      }).catch(() => {
-        if (!aborted) setTwoHopBacklinks([]);
-      });
+      getTwoHopBacklinks(id)
+        .then((data) => {
+          if (!aborted) setTwoHopBacklinks(data);
+        })
+        .catch(() => {
+          if (!aborted) setTwoHopBacklinks([]);
+        });
       // Orphan status is computed from backlinks and content below.
     }
     return () => {
@@ -235,55 +263,64 @@ export function NoteEditorPage() {
     }
   }, [currentNote?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSave = useCallback(async (value: string) => {
-    if (!id) return;
-    setSaveStatus('saving');
-    try {
-      await updateNote(id, { body: value });
-      setSaveStatus('saved');
-      clearDraft(id);
-    } catch {
-      setSaveStatus('unsaved');
-      addToast('Failed to save note', 'error');
-    }
-  }, [id, updateNote, addToast]);
-
-  const handleTitleChange = useCallback((newTitle: string) => {
-    setTitle(newTitle);
-    titleRef.current = newTitle;
-    setSaveStatus('unsaved');
-    if (id) saveDraft(id, newTitle, contentRef.current);
-
-    if (titleTimerRef.current) {
-      clearTimeout(titleTimerRef.current);
-    }
-    titleTimerRef.current = setTimeout(async () => {
+  const handleSave = useCallback(
+    async (value: string) => {
       if (!id) return;
       setSaveStatus('saving');
       try {
-        await updateNote(id, { title: newTitle });
+        await updateNote(id, { body: value });
         setSaveStatus('saved');
         clearDraft(id);
       } catch {
         setSaveStatus('unsaved');
-        addToast('Failed to save title', 'error');
+        addToast('Failed to save note', 'error');
       }
-    }, 1000);
-  }, [id, updateNote, addToast]);
+    },
+    [id, updateNote, addToast],
+  );
 
-  const handleChange = useCallback((value: string) => {
-    setContent(value);
-    contentRef.current = value;
-    setSaveStatus('unsaved');
-    if (id) saveDraft(id, titleRef.current, value);
+  const handleTitleChange = useCallback(
+    (newTitle: string) => {
+      setTitle(newTitle);
+      titleRef.current = newTitle;
+      setSaveStatus('unsaved');
+      if (id) saveDraft(id, newTitle, contentRef.current);
 
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-    saveTimerRef.current = setTimeout(() => {
-      handleSave(value);
-    }, 1000);
-  }, [id, handleSave]);
+      if (titleTimerRef.current) {
+        clearTimeout(titleTimerRef.current);
+      }
+      titleTimerRef.current = setTimeout(async () => {
+        if (!id) return;
+        setSaveStatus('saving');
+        try {
+          await updateNote(id, { title: newTitle });
+          setSaveStatus('saved');
+          clearDraft(id);
+        } catch {
+          setSaveStatus('unsaved');
+          addToast('Failed to save title', 'error');
+        }
+      }, 1000);
+    },
+    [id, updateNote, addToast],
+  );
+
+  const handleChange = useCallback(
+    (value: string) => {
+      setContent(value);
+      contentRef.current = value;
+      setSaveStatus('unsaved');
+      if (id) saveDraft(id, titleRef.current, value);
+
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+      saveTimerRef.current = setTimeout(() => {
+        handleSave(value);
+      }, 1000);
+    },
+    [id, handleSave],
+  );
 
   // Refs for the unmount-only cleanup effect.
   const handleSaveRef = useRef(handleSave);
@@ -392,27 +429,26 @@ export function NoteEditorPage() {
         handleSave(newContent);
       }
       // Remove this suggestion from the list.
-      setLinkSuggestions((prev) =>
-        prev.filter((s) => s.target_title !== targetTitle),
-      );
+      setLinkSuggestions((prev) => prev.filter((s) => s.target_title !== targetTitle));
     },
     [content, handleSave],
   );
 
   const handleDismissSuggestion = useCallback((targetTitle: string) => {
-    setLinkSuggestions((prev) =>
-      prev.filter((s) => s.target_title !== targetTitle),
-    );
+    setLinkSuggestions((prev) => prev.filter((s) => s.target_title !== targetTitle));
   }, []);
 
-  const handleProjectChange = useCallback(async (newProjectId: string) => {
-    if (!id) return;
-    try {
-      await updateNote(id, { project_id: newProjectId || '' });
-    } catch {
-      addToast('Failed to move note', 'error');
-    }
-  }, [id, updateNote, addToast]);
+  const handleProjectChange = useCallback(
+    async (newProjectId: string) => {
+      if (!id) return;
+      try {
+        await updateNote(id, { project_id: newProjectId || '' });
+      } catch {
+        addToast('Failed to move note', 'error');
+      }
+    },
+    [id, updateNote, addToast],
+  );
 
   // -- Tag editing --
   const allTags = useUIStore((s) => s.tags);
@@ -422,75 +458,90 @@ export function NoteEditorPage() {
   const [tagSuggestionIndex, setTagSuggestionIndex] = useState(-1);
   const tagTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const saveTagsDebounced = useCallback((newTags: string[]) => {
-    if (!id) return;
-    if (tagTimerRef.current) clearTimeout(tagTimerRef.current);
-    tagTimerRef.current = setTimeout(async () => {
-      try {
-        await updateNote(id, { tags: newTags });
-        fetchTags();
-      } catch {
-        addToast('Failed to update tags', 'error');
-      }
-    }, 500);
-  }, [id, updateNote, fetchTags, addToast]);
+  const saveTagsDebounced = useCallback(
+    (newTags: string[]) => {
+      if (!id) return;
+      if (tagTimerRef.current) clearTimeout(tagTimerRef.current);
+      tagTimerRef.current = setTimeout(async () => {
+        try {
+          await updateNote(id, { tags: newTags });
+          fetchTags();
+        } catch {
+          addToast('Failed to update tags', 'error');
+        }
+      }, 500);
+    },
+    [id, updateNote, fetchTags, addToast],
+  );
 
-  const handleAddTag = useCallback((tagName: string) => {
-    const cleaned = tagName.trim().replace(/^#/, '').toLowerCase();
-    if (!cleaned || !currentNote) return;
-    const existing = currentNote.tags ?? [];
-    if (existing.includes(cleaned)) {
+  const handleAddTag = useCallback(
+    (tagName: string) => {
+      const cleaned = tagName.trim().replace(/^#/, '').toLowerCase();
+      if (!cleaned || !currentNote) return;
+      const existing = currentNote.tags ?? [];
+      if (existing.includes(cleaned)) {
+        setTagInput('');
+        return;
+      }
+      const newTags = [...existing, cleaned];
+      saveTagsDebounced(newTags);
       setTagInput('');
-      return;
-    }
-    const newTags = [...existing, cleaned];
-    saveTagsDebounced(newTags);
-    setTagInput('');
-    setTagSuggestions([]);
-    setTagSuggestionIndex(-1);
-  }, [currentNote, saveTagsDebounced]);
-
-  const handleRemoveTag = useCallback((tagName: string) => {
-    if (!currentNote) return;
-    const existing = currentNote.tags ?? [];
-    const newTags = existing.filter((t) => t !== tagName);
-    saveTagsDebounced(newTags);
-  }, [currentNote, saveTagsDebounced]);
-
-  const handleTagInputChange = useCallback((value: string) => {
-    setTagInput(value);
-    setTagSuggestionIndex(-1);
-    if (!value.trim()) {
-      setTagSuggestions([]);
-      return;
-    }
-    const query = value.trim().toLowerCase().replace(/^#/, '');
-    const existing = new Set(currentNote?.tags ?? []);
-    const matches = allTags
-      .filter((t) => t.name.toLowerCase().includes(query) && !existing.has(t.name))
-      .slice(0, 8);
-    setTagSuggestions(matches);
-  }, [allTags, currentNote?.tags]);
-
-  const handleTagInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      if (tagSuggestionIndex >= 0 && tagSuggestionIndex < tagSuggestions.length) {
-        handleAddTag(tagSuggestions[tagSuggestionIndex].name);
-      } else if (tagInput.trim()) {
-        handleAddTag(tagInput);
-      }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setTagSuggestionIndex((i) => Math.min(i + 1, tagSuggestions.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setTagSuggestionIndex((i) => Math.max(i - 1, -1));
-    } else if (e.key === 'Escape') {
       setTagSuggestions([]);
       setTagSuggestionIndex(-1);
-    }
-  }, [tagInput, tagSuggestions, tagSuggestionIndex, handleAddTag]);
+    },
+    [currentNote, saveTagsDebounced],
+  );
+
+  const handleRemoveTag = useCallback(
+    (tagName: string) => {
+      if (!currentNote) return;
+      const existing = currentNote.tags ?? [];
+      const newTags = existing.filter((t) => t !== tagName);
+      saveTagsDebounced(newTags);
+    },
+    [currentNote, saveTagsDebounced],
+  );
+
+  const handleTagInputChange = useCallback(
+    (value: string) => {
+      setTagInput(value);
+      setTagSuggestionIndex(-1);
+      if (!value.trim()) {
+        setTagSuggestions([]);
+        return;
+      }
+      const query = value.trim().toLowerCase().replace(/^#/, '');
+      const existing = new Set(currentNote?.tags ?? []);
+      const matches = allTags
+        .filter((t) => t.name.toLowerCase().includes(query) && !existing.has(t.name))
+        .slice(0, 8);
+      setTagSuggestions(matches);
+    },
+    [allTags, currentNote?.tags],
+  );
+
+  const handleTagInputKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        if (tagSuggestionIndex >= 0 && tagSuggestionIndex < tagSuggestions.length) {
+          handleAddTag(tagSuggestions[tagSuggestionIndex].name);
+        } else if (tagInput.trim()) {
+          handleAddTag(tagInput);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setTagSuggestionIndex((i) => Math.min(i + 1, tagSuggestions.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setTagSuggestionIndex((i) => Math.max(i - 1, -1));
+      } else if (e.key === 'Escape') {
+        setTagSuggestions([]);
+        setTagSuggestionIndex(-1);
+      }
+    },
+    [tagInput, tagSuggestions, tagSuggestionIndex, handleAddTag],
+  );
 
   // Cleanup tag timer on unmount
   useEffect(() => {
@@ -535,23 +586,30 @@ export function NoteEditorPage() {
 
   const isDaily = currentNote?.tags?.includes('daily');
 
-  const navigateToDailyNote = useCallback((offset: number) => {
-    if (!currentNote) return;
-    // Parse the date from the note title (YYYY-MM-DD prefix).
-    const match = currentNote.title.match(/^(\d{4}-\d{2}-\d{2})/);
-    if (!match) return;
-    const currentDate = parseDate(match[1], 'yyyy-MM-dd', new Date());
-    const targetDate = offset > 0 ? addDays(currentDate, offset) : subDays(currentDate, Math.abs(offset));
-    const targetDateStr = formatDate(targetDate, 'yyyy-MM-dd');
-    navigate(`/today?date=${targetDateStr}`);
-  }, [currentNote, navigate]);
+  const navigateToDailyNote = useCallback(
+    (offset: number) => {
+      if (!currentNote) return;
+      // Parse the date from the note title (YYYY-MM-DD prefix).
+      const match = currentNote.title.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (!match) return;
+      const currentDate = parseDate(match[1], 'yyyy-MM-dd', new Date());
+      const targetDate =
+        offset > 0 ? addDays(currentDate, offset) : subDays(currentDate, Math.abs(offset));
+      const targetDateStr = formatDate(targetDate, 'yyyy-MM-dd');
+      navigate(`/today?date=${targetDateStr}`);
+    },
+    [currentNote, navigate],
+  );
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-      e.preventDefault();
-      handleSave(content);
-    }
-  }, [content, handleSave]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        handleSave(content);
+      }
+    },
+    [content, handleSave],
+  );
 
   // Toolbar formatting functions that interact with the CodeMirror editor.
   const wrapSelection = useCallback((prefix: string, suffix: string) => {
@@ -609,22 +667,25 @@ export function NoteEditorPage() {
     return view.state.sliceDoc(from, to);
   }, []);
 
-  const handleAIAssist = useCallback(async (action: AIAssistReq['action']) => {
-    if (!id) return;
-    setShowAIMenu(false);
-    setAILoading(true);
-    setAIResult(null);
-    try {
-      const selection = getSelectedText();
-      const result = await aiAssist(id, action, selection || undefined);
-      setAIResult({ action, text: result.result });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'AI assist request failed';
-      addToast(message, 'error');
-    } finally {
-      setAILoading(false);
-    }
-  }, [id, getSelectedText, addToast]);
+  const handleAIAssist = useCallback(
+    async (action: AIAssistReq['action']) => {
+      if (!id) return;
+      setShowAIMenu(false);
+      setAILoading(true);
+      setAIResult(null);
+      try {
+        const selection = getSelectedText();
+        const result = await aiAssist(id, action, selection || undefined);
+        setAIResult({ action, text: result.result });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'AI assist request failed';
+        addToast(message, 'error');
+      } finally {
+        setAILoading(false);
+      }
+    },
+    [id, getSelectedText, addToast],
+  );
 
   const handleInsertAIResult = useCallback(() => {
     if (!aiResult) return;
@@ -632,9 +693,7 @@ export function NoteEditorPage() {
     if (view) {
       const { from, to } = view.state.selection.main;
       // If there was a selection, replace it; otherwise append at cursor.
-      const insert = from === to
-        ? `\n\n${aiResult.text}`
-        : aiResult.text;
+      const insert = from === to ? `\n\n${aiResult.text}` : aiResult.text;
       view.dispatch({
         changes: { from, to, insert },
       });
@@ -681,38 +740,41 @@ export function NoteEditorPage() {
   }, [showMenu, showAIMenu]);
 
   // Handle wikilink clicks in the preview pane -- resolve directly to the note.
-  const handleWikilinkClick = useCallback(async (e: MouseEvent) => {
-    const target = (e.target as HTMLElement).closest('a[data-wikilink]');
-    if (!target) return;
+  const handleWikilinkClick = useCallback(
+    async (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('a[data-wikilink]');
+      if (!target) return;
 
-    e.preventDefault();
-    e.stopPropagation();
+      e.preventDefault();
+      e.stopPropagation();
 
-    const linkTitle = target.getAttribute('data-wikilink');
-    if (!linkTitle) return;
+      const linkTitle = target.getAttribute('data-wikilink');
+      if (!linkTitle) return;
 
-    try {
-      let resolved = getCached(linkTitle);
-      if (!resolved) {
-        resolved = await resolveWikilink(linkTitle);
-        setCache(linkTitle, resolved);
+      try {
+        let resolved = getCached(linkTitle);
+        if (!resolved) {
+          resolved = await resolveWikilink(linkTitle);
+          setCache(linkTitle, resolved);
+        }
+
+        if (!resolved.dangling && resolved.note_id) {
+          navigate(`/notes/${resolved.note_id}`);
+        } else {
+          // Show create-note prompt for dangling link.
+          const rect = target.getBoundingClientRect();
+          setHoverPreview({
+            link: resolved,
+            position: { top: rect.bottom + 8, left: rect.left },
+          });
+        }
+      } catch {
+        // Fall back to search navigation on error.
+        navigate(`/search?q=${encodeURIComponent(linkTitle)}`);
       }
-
-      if (!resolved.dangling && resolved.note_id) {
-        navigate(`/notes/${resolved.note_id}`);
-      } else {
-        // Show create-note prompt for dangling link.
-        const rect = target.getBoundingClientRect();
-        setHoverPreview({
-          link: resolved,
-          position: { top: rect.bottom + 8, left: rect.left },
-        });
-      }
-    } catch {
-      // Fall back to search navigation on error.
-      navigate(`/search?q=${encodeURIComponent(linkTitle)}`);
-    }
-  }, [navigate]);
+    },
+    [navigate],
+  );
 
   // Handle wikilink hover preview in the preview pane.
   useEffect(() => {
@@ -789,16 +851,19 @@ export function NoteEditorPage() {
     setDraftBanner(null);
   }, [id]);
 
-  const handleCreateFromDangling = useCallback(async (danglingTitle: string) => {
-    try {
-      const note = await apiCreateNote({ title: danglingTitle, body: '' });
-      invalidateCache();
-      setHoverPreview(null);
-      navigate(`/notes/${note.id}`);
-    } catch {
-      addToast('Failed to create note', 'error');
-    }
-  }, [navigate, addToast]);
+  const handleCreateFromDangling = useCallback(
+    async (danglingTitle: string) => {
+      try {
+        const note = await apiCreateNote({ title: danglingTitle, body: '' });
+        invalidateCache();
+        setHoverPreview(null);
+        navigate(`/notes/${note.id}`);
+      } catch {
+        addToast('Failed to create note', 'error');
+      }
+    },
+    [navigate, addToast],
+  );
 
   const wordStats = useMemo(() => {
     const chars = content.length;
@@ -812,13 +877,16 @@ export function NoteEditorPage() {
     [content, viewMode],
   );
 
-  const slashExtension = useMemo(
-    () => createSlashExtension(setSlashMenuState),
-    [],
-  );
+  const slashExtension = useMemo(() => createSlashExtension(setSlashMenuState), []);
 
   const cmExtensions = useMemo(() => {
-    const exts = [markdown(), wikilinkDecorationPlugin, wikilinkDecorationTheme, wikilinkAutocomplete, ...slashExtension];
+    const exts = [
+      markdown(),
+      wikilinkDecorationPlugin,
+      wikilinkDecorationTheme,
+      wikilinkAutocomplete,
+      ...slashExtension,
+    ];
     if (zenMode && typewriterEnabled) {
       exts.push(typewriterScrolling);
     }
@@ -828,189 +896,253 @@ export function NoteEditorPage() {
   return (
     <div className={`${styles.page} ${zenMode ? styles.zenMode : ''}`} onKeyDown={handleKeyDown}>
       {/* Toolbar */}
-      {!zenMode && <div className={styles.toolbar}>
-        <div className={styles.toolbarLeft}>
-          <button className={styles.toolButton} title="Bold (Cmd+B)" aria-label="Bold" onClick={handleBold}>
-            <Bold size={16} />
-          </button>
-          <button className={styles.toolButton} title="Italic (Cmd+I)" aria-label="Italic" onClick={handleItalic}>
-            <Italic size={16} />
-          </button>
-          <button className={styles.toolButton} title="Heading" aria-label="Heading" onClick={handleHeading}>
-            <Heading size={16} />
-          </button>
-          <button className={styles.toolButton} title="Link" aria-label="Link" onClick={handleLink}>
-            <Link size={16} />
-          </button>
-          <button className={styles.toolButton} title="Wikilink" aria-label="Wikilink" onClick={handleWikilink}>
-            <Link2 size={16} />
-          </button>
-          <button className={styles.toolButton} title="Code" aria-label="Code" onClick={handleCode}>
-            <Code size={16} />
-          </button>
-          <button className={styles.toolButton} title="List" aria-label="List" onClick={handleList}>
-            <List size={16} />
-          </button>
-          <button className={styles.toolButton} title="Checklist" aria-label="Checklist" onClick={handleChecklist}>
-            <ListChecks size={16} />
-          </button>
-
-          <div className={styles.toolbarSeparator} />
-
-          <div className={styles.menuContainer} ref={aiMenuRef}>
-            <button
-              className={`${styles.toolButton} ${aiLoading ? styles.activeView : ''}`}
-              onClick={() => setShowAIMenu(!showAIMenu)}
-              title="AI Assist"
-              aria-label="AI Assist"
-              aria-expanded={showAIMenu}
-              aria-haspopup="menu"
-              disabled={aiLoading}
-            >
-              <Sparkles size={16} />
-            </button>
-            {showAIMenu && (
-              <div className={styles.menu} role="menu">
-                <button
-                  className={styles.menuItemDefault}
-                  role="menuitem"
-                  onClick={() => handleAIAssist('expand')}
-                >
-                  <Sparkles size={14} />
-                  Expand
-                </button>
-                <button
-                  className={styles.menuItemDefault}
-                  role="menuitem"
-                  onClick={() => handleAIAssist('summarize')}
-                >
-                  <Sparkles size={14} />
-                  Summarize
-                </button>
-                <button
-                  className={styles.menuItemDefault}
-                  role="menuitem"
-                  onClick={() => handleAIAssist('extract-actions')}
-                >
-                  <ListChecks size={14} />
-                  Extract Actions
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className={styles.toolbarRight}>
-          <button
-            className={styles.toolButton}
-            onClick={toggleZenMode}
-            title="Zen mode (Cmd+Shift+\)"
-            aria-label="Zen mode"
-          >
-            {zenMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          </button>
-
-          <div className={styles.toolbarSeparator} />
-
-          <button
-            className={`${styles.toolButton} ${viewMode === 'editor' ? styles.activeView : ''}`}
-            onClick={() => setViewMode('editor')}
-            title="Editor only"
-            aria-label="Editor only"
-          >
-            <PenLine size={16} />
-          </button>
-          <button
-            className={`${styles.toolButton} ${viewMode === 'split' ? styles.activeView : ''}`}
-            onClick={() => setViewMode('split')}
-            title="Split view"
-            aria-label="Split view"
-          >
-            <Columns2 size={16} />
-          </button>
-          <button
-            className={`${styles.toolButton} ${viewMode === 'preview' ? styles.activeView : ''}`}
-            onClick={() => setViewMode('preview')}
-            title="Preview only"
-            aria-label="Preview only"
-          >
-            <Eye size={16} />
-          </button>
-
-          <div className={styles.toolbarSeparator} />
-
-          <button
-            className={styles.toolButton}
-            onClick={toggleRightPanel}
-            title="Toggle right panel"
-            aria-label="Toggle right panel"
-          >
-            <PanelRight size={16} />
-          </button>
-
-          <div className={styles.menuContainer} ref={menuRef}>
+      {!zenMode && (
+        <div className={styles.toolbar}>
+          <div className={styles.toolbarLeft}>
             <button
               className={styles.toolButton}
-              onClick={() => setShowMenu(!showMenu)}
-              title="More options"
-              aria-label="More options"
-              aria-expanded={showMenu}
-              aria-haspopup="menu"
+              title="Bold (Cmd+B)"
+              aria-label="Bold"
+              onClick={handleBold}
             >
-              <MoreHorizontal size={16} />
+              <Bold size={16} />
             </button>
-            {showMenu && (
-              <div className={styles.menu} role="menu">
-                <button className={styles.menuItemDefault} role="menuitem" onClick={handleDuplicate}>
-                  <Files size={14} />
-                  Duplicate note
-                </button>
-                <button className={styles.menuItemDefault} role="menuitem" onClick={handleCopyLink}>
-                  <Copy size={14} />
-                  Copy link
-                </button>
-                <button className={styles.menuItemDefault} role="menuitem" onClick={handleExportMarkdown}>
-                  <Download size={14} />
-                  Export as Markdown
-                </button>
-                <button className={styles.menuItemDefault} role="menuitem" onClick={handleOpenInNewTab}>
-                  <ExternalLink size={14} />
-                  Open in new tab
-                </button>
-                <div className={styles.menuDivider} />
-                <div className={styles.menuSubmenu}>
-                  <div className={styles.menuSubmenuLabel}>
-                    <FolderInput size={14} />
-                    Move to project
-                  </div>
+            <button
+              className={styles.toolButton}
+              title="Italic (Cmd+I)"
+              aria-label="Italic"
+              onClick={handleItalic}
+            >
+              <Italic size={16} />
+            </button>
+            <button
+              className={styles.toolButton}
+              title="Heading"
+              aria-label="Heading"
+              onClick={handleHeading}
+            >
+              <Heading size={16} />
+            </button>
+            <button
+              className={styles.toolButton}
+              title="Link"
+              aria-label="Link"
+              onClick={handleLink}
+            >
+              <Link size={16} />
+            </button>
+            <button
+              className={styles.toolButton}
+              title="Wikilink"
+              aria-label="Wikilink"
+              onClick={handleWikilink}
+            >
+              <Link2 size={16} />
+            </button>
+            <button
+              className={styles.toolButton}
+              title="Code"
+              aria-label="Code"
+              onClick={handleCode}
+            >
+              <Code size={16} />
+            </button>
+            <button
+              className={styles.toolButton}
+              title="List"
+              aria-label="List"
+              onClick={handleList}
+            >
+              <List size={16} />
+            </button>
+            <button
+              className={styles.toolButton}
+              title="Checklist"
+              aria-label="Checklist"
+              onClick={handleChecklist}
+            >
+              <ListChecks size={16} />
+            </button>
+
+            <div className={styles.toolbarSeparator} />
+
+            <div className={styles.menuContainer} ref={aiMenuRef}>
+              <button
+                className={`${styles.toolButton} ${aiLoading ? styles.activeView : ''}`}
+                onClick={() => setShowAIMenu(!showAIMenu)}
+                title="AI Assist"
+                aria-label="AI Assist"
+                aria-expanded={showAIMenu}
+                aria-haspopup="menu"
+                disabled={aiLoading}
+              >
+                <Sparkles size={16} />
+              </button>
+              {showAIMenu && (
+                <div className={styles.menu} role="menu">
                   <button
                     className={styles.menuItemDefault}
                     role="menuitem"
-                    onClick={() => { handleProjectChange(''); setShowMenu(false); }}
+                    onClick={() => handleAIAssist('expand')}
                   >
-                    Inbox
+                    <Sparkles size={14} />
+                    Expand
                   </button>
-                  {projects.map((p) => (
-                    <button
-                      key={p.id}
-                      className={`${styles.menuItemDefault} ${currentNote?.project_id === p.id ? styles.menuItemActive : ''}`}
-                      role="menuitem"
-                      onClick={() => { handleProjectChange(p.id); setShowMenu(false); }}
-                    >
-                      {p.name}
-                    </button>
-                  ))}
+                  <button
+                    className={styles.menuItemDefault}
+                    role="menuitem"
+                    onClick={() => handleAIAssist('summarize')}
+                  >
+                    <Sparkles size={14} />
+                    Summarize
+                  </button>
+                  <button
+                    className={styles.menuItemDefault}
+                    role="menuitem"
+                    onClick={() => handleAIAssist('extract-actions')}
+                  >
+                    <ListChecks size={14} />
+                    Extract Actions
+                  </button>
                 </div>
-                <div className={styles.menuDivider} />
-                <button className={styles.menuItem} role="menuitem" onClick={handleDeleteClick}>
-                  <Trash2 size={14} />
-                  Delete note
-                </button>
-              </div>
-            )}
+              )}
+            </div>
+          </div>
+
+          <div className={styles.toolbarRight}>
+            <button
+              className={styles.toolButton}
+              onClick={toggleZenMode}
+              title="Zen mode (Cmd+Shift+\)"
+              aria-label="Zen mode"
+            >
+              {zenMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+
+            <div className={styles.toolbarSeparator} />
+
+            <button
+              className={`${styles.toolButton} ${viewMode === 'editor' ? styles.activeView : ''}`}
+              onClick={() => setViewMode('editor')}
+              title="Editor only"
+              aria-label="Editor only"
+            >
+              <PenLine size={16} />
+            </button>
+            <button
+              className={`${styles.toolButton} ${viewMode === 'split' ? styles.activeView : ''}`}
+              onClick={() => setViewMode('split')}
+              title="Split view"
+              aria-label="Split view"
+            >
+              <Columns2 size={16} />
+            </button>
+            <button
+              className={`${styles.toolButton} ${viewMode === 'preview' ? styles.activeView : ''}`}
+              onClick={() => setViewMode('preview')}
+              title="Preview only"
+              aria-label="Preview only"
+            >
+              <Eye size={16} />
+            </button>
+
+            <div className={styles.toolbarSeparator} />
+
+            <button
+              className={styles.toolButton}
+              onClick={toggleRightPanel}
+              title="Toggle right panel"
+              aria-label="Toggle right panel"
+            >
+              <PanelRight size={16} />
+            </button>
+
+            <div className={styles.menuContainer} ref={menuRef}>
+              <button
+                className={styles.toolButton}
+                onClick={() => setShowMenu(!showMenu)}
+                title="More options"
+                aria-label="More options"
+                aria-expanded={showMenu}
+                aria-haspopup="menu"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {showMenu && (
+                <div className={styles.menu} role="menu">
+                  <button
+                    className={styles.menuItemDefault}
+                    role="menuitem"
+                    onClick={handleDuplicate}
+                  >
+                    <Files size={14} />
+                    Duplicate note
+                  </button>
+                  <button
+                    className={styles.menuItemDefault}
+                    role="menuitem"
+                    onClick={handleCopyLink}
+                  >
+                    <Copy size={14} />
+                    Copy link
+                  </button>
+                  <button
+                    className={styles.menuItemDefault}
+                    role="menuitem"
+                    onClick={handleExportMarkdown}
+                  >
+                    <Download size={14} />
+                    Export as Markdown
+                  </button>
+                  <button
+                    className={styles.menuItemDefault}
+                    role="menuitem"
+                    onClick={handleOpenInNewTab}
+                  >
+                    <ExternalLink size={14} />
+                    Open in new tab
+                  </button>
+                  <div className={styles.menuDivider} />
+                  <div className={styles.menuSubmenu}>
+                    <div className={styles.menuSubmenuLabel}>
+                      <FolderInput size={14} />
+                      Move to project
+                    </div>
+                    <button
+                      className={styles.menuItemDefault}
+                      role="menuitem"
+                      onClick={() => {
+                        handleProjectChange('');
+                        setShowMenu(false);
+                      }}
+                    >
+                      Inbox
+                    </button>
+                    {projects.map((p) => (
+                      <button
+                        key={p.id}
+                        className={`${styles.menuItemDefault} ${currentNote?.project_id === p.id ? styles.menuItemActive : ''}`}
+                        role="menuitem"
+                        onClick={() => {
+                          handleProjectChange(p.id);
+                          setShowMenu(false);
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={styles.menuDivider} />
+                  <button className={styles.menuItem} role="menuitem" onClick={handleDeleteClick}>
+                    <Trash2 size={14} />
+                    Delete note
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>}
+      )}
 
       {/* Zen mode floating exit control */}
       {zenMode && (
@@ -1025,409 +1157,400 @@ export function NoteEditorPage() {
       <div className={styles.contentArea}>
         {noteLoading ? (
           <EditorSkeleton />
-        ) : (<>
-        {draftBanner && (
-          <div className={styles.draftBanner}>
-            <span className={styles.draftBannerText}>
-              Local draft found (saved{' '}
-              {formatDistanceToNow(new Date(draftBanner.savedAt), { addSuffix: true })})
-            </span>
-            <div className={styles.draftBannerActions}>
-              <button className={styles.draftRestore} onClick={handleRestoreDraft}>
-                Restore
-              </button>
-              <button className={styles.draftDiscard} onClick={handleDiscardDraft}>
-                Discard
-              </button>
-            </div>
-          </div>
-        )}
-        <div className={styles.editorWrapper}>
-          {/* Editor pane */}
-          {viewMode !== 'preview' && (
-            <div
-              className={styles.editorPane}
-            >
-              <div className={styles.titleRow}>
-                <input
-                  ref={titleInputRef}
-                  type="text"
-                  className={styles.titleInput}
-                  value={title}
-                  onChange={(e) => handleTitleChange(e.target.value)}
-                  placeholder="Untitled"
-                  aria-label="Note title"
-                />
-                {isDaily && (
-                  <div className={styles.dailyNav}>
-                    <button
-                      className={styles.dailyNavButton}
-                      onClick={() => navigateToDailyNote(-1)}
-                      title="Previous day"
-                      aria-label="Previous day"
-                    >
-                      <ChevronLeft size={16} />
-                    </button>
-                    <button
-                      className={styles.dailyNavButton}
-                      onClick={() => navigateToDailyNote(1)}
-                      title="Next day"
-                      aria-label="Next day"
-                    >
-                      <ChevronRight size={16} />
-                    </button>
+        ) : (
+          <>
+            {draftBanner && (
+              <div className={styles.draftBanner}>
+                <span className={styles.draftBannerText}>
+                  Local draft found (saved{' '}
+                  {formatDistanceToNow(new Date(draftBanner.savedAt), { addSuffix: true })})
+                </span>
+                <div className={styles.draftBannerActions}>
+                  <button className={styles.draftRestore} onClick={handleRestoreDraft}>
+                    Restore
+                  </button>
+                  <button className={styles.draftDiscard} onClick={handleDiscardDraft}>
+                    Discard
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className={styles.editorWrapper}>
+              {/* Editor pane */}
+              {viewMode !== 'preview' && (
+                <div className={styles.editorPane}>
+                  <div className={styles.titleRow}>
+                    <input
+                      ref={titleInputRef}
+                      type="text"
+                      className={styles.titleInput}
+                      value={title}
+                      onChange={(e) => handleTitleChange(e.target.value)}
+                      placeholder="Untitled"
+                      aria-label="Note title"
+                    />
+                    {isDaily && (
+                      <div className={styles.dailyNav}>
+                        <button
+                          className={styles.dailyNavButton}
+                          onClick={() => navigateToDailyNote(-1)}
+                          title="Previous day"
+                          aria-label="Previous day"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <button
+                          className={styles.dailyNavButton}
+                          onClick={() => navigateToDailyNote(1)}
+                          title="Next day"
+                          aria-label="Next day"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              <div style={{ position: 'relative' }}>
-                <CodeMirror
-                  ref={editorRef}
-                  value={content}
-                  onChange={handleChange}
-                  extensions={cmExtensions}
-                  theme={seamEditorTheme}
-                  basicSetup={{
-                    lineNumbers: true,
-                    highlightActiveLine: true,
-                    foldGutter: false,
-                  }}
-                  className={styles.codeMirror}
-                />
-                <SlashMenu
-                  active={slashMenuState.active}
-                  query={slashMenuState.query}
-                  position={slashMenuState.pos}
-                  onSelect={handleSlashSelect}
-                  onDismiss={handleSlashDismiss}
-                />
-              </div>
-              {showSlashHint && (
+                  <div style={{ position: 'relative' }}>
+                    <CodeMirror
+                      ref={editorRef}
+                      value={content}
+                      onChange={handleChange}
+                      extensions={cmExtensions}
+                      theme={seamEditorTheme}
+                      basicSetup={{
+                        lineNumbers: true,
+                        highlightActiveLine: true,
+                        foldGutter: false,
+                      }}
+                      className={styles.codeMirror}
+                    />
+                    <SlashMenu
+                      active={slashMenuState.active}
+                      query={slashMenuState.query}
+                      position={slashMenuState.pos}
+                      onSelect={handleSlashSelect}
+                      onDismiss={handleSlashDismiss}
+                    />
+                  </div>
+                  {showSlashHint && (
+                    <div className={styles.slashHint} onClick={() => setShowSlashHint(false)}>
+                      Tip: Type / for commands
+                    </div>
+                  )}
+                  <div className={styles.wordCountBar}>
+                    <span>{wordStats.words.toLocaleString()} words</span>
+                    <span className={styles.wordCountSeparator}>/</span>
+                    <span>{wordStats.chars.toLocaleString()} chars</span>
+                    <span className={styles.wordCountSeparator}>/</span>
+                    <span>{wordStats.readingMinutes} min read</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Preview pane */}
+              {viewMode !== 'editor' && (
                 <div
-                  className={styles.slashHint}
-                  onClick={() => setShowSlashHint(false)}
+                  ref={previewRef}
+                  className={styles.previewPane}
+                  style={{ flex: viewMode === 'split' ? '1' : undefined }}
                 >
-                  Tip: Type / for commands
+                  <div className={styles.previewContent}>
+                    <h1 className={styles.previewTitle}>{title || 'Untitled'}</h1>
+                    <div
+                      className={styles.renderedMarkdown}
+                      dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                    />
+                  </div>
                 </div>
               )}
-              <div className={styles.wordCountBar}>
-                <span>{wordStats.words.toLocaleString()} words</span>
-                <span className={styles.wordCountSeparator}>/</span>
-                <span>{wordStats.chars.toLocaleString()} chars</span>
-                <span className={styles.wordCountSeparator}>/</span>
-                <span>{wordStats.readingMinutes} min read</span>
-              </div>
             </div>
-          )}
 
-          {/* Preview pane */}
-          {viewMode !== 'editor' && (
-            <div
-              ref={previewRef}
-              className={styles.previewPane}
-              style={{ flex: viewMode === 'split' ? '1' : undefined }}
-            >
-              <div className={styles.previewContent}>
-                <h1 className={styles.previewTitle}>{title || 'Untitled'}</h1>
-                <div
-                  className={styles.renderedMarkdown}
-                  dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
+            {/* Right panel */}
+            <AnimatePresence>
+              {rightPanelOpen && !zenMode && (
+                <motion.aside
+                  className={styles.rightPanel}
+                  initial={{ x: '100%', opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: '100%', opacity: 0 }}
+                  transition={{ duration: 0.2, ease: [0, 0, 0.2, 1] }}
+                >
+                  {/* Link suggestions */}
+                  {linkSuggestions.length > 0 && (
+                    <section className={styles.panelSection}>
+                      <h3 className={styles.panelSectionTitle}>
+                        <Sparkles size={12} />
+                        Suggested Links
+                      </h3>
+                      {linkSuggestions.map((suggestion) => (
+                        <div key={suggestion.target_note_id} className={styles.suggestionItem}>
+                          <div className={styles.suggestionHeader}>
+                            <span className={styles.suggestionTitle}>
+                              {suggestion.target_title}
+                            </span>
+                            <button
+                              className={styles.suggestionDismiss}
+                              onClick={() => handleDismissSuggestion(suggestion.target_title)}
+                              aria-label="Dismiss suggestion"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                          <p className={styles.suggestionReason}>{suggestion.reason}</p>
+                          <button
+                            className={styles.suggestionAccept}
+                            onClick={() => handleAcceptLink(suggestion.target_title)}
+                          >
+                            Link
+                          </button>
+                        </div>
+                      ))}
+                    </section>
+                  )}
 
-        {/* Right panel */}
-        <AnimatePresence>
-        {rightPanelOpen && !zenMode && (
-          <motion.aside
-            className={styles.rightPanel}
-            initial={{ x: '100%', opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: '100%', opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0, 0, 0.2, 1] }}
-          >
-            {/* Link suggestions */}
-            {linkSuggestions.length > 0 && (
-              <section className={styles.panelSection}>
-                <h3 className={styles.panelSectionTitle}>
-                  <Sparkles size={12} />
-                  Suggested Links
-                </h3>
-                {linkSuggestions.map((suggestion) => (
-                  <div key={suggestion.target_note_id} className={styles.suggestionItem}>
-                    <div className={styles.suggestionHeader}>
-                      <span className={styles.suggestionTitle}>
-                        {suggestion.target_title}
-                      </span>
-                      <button
-                        className={styles.suggestionDismiss}
-                        onClick={() => handleDismissSuggestion(suggestion.target_title)}
-                        aria-label="Dismiss suggestion"
-                      >
-                        <X size={12} />
-                      </button>
+                  {/* AI Assist result */}
+                  {(aiLoading || aiResult) && (
+                    <section className={styles.panelSection}>
+                      <h3 className={styles.panelSectionTitle}>
+                        <Sparkles size={12} />
+                        AI Assist
+                      </h3>
+                      {aiLoading && <p className={styles.panelEmpty}>Generating...</p>}
+                      {aiResult && (
+                        <div className={styles.aiResultBlock}>
+                          <p className={styles.aiResultLabel}>
+                            {aiResult.action === 'expand' && 'Expanded text'}
+                            {aiResult.action === 'summarize' && 'Summary'}
+                            {aiResult.action === 'extract-actions' && 'Action items'}
+                          </p>
+                          <div className={styles.aiResultContent}>
+                            <div
+                              className={styles.renderedMarkdownSmall}
+                              dangerouslySetInnerHTML={{
+                                __html: sanitizeHtml(renderMarkdown(aiResult.text)),
+                              }}
+                            />
+                          </div>
+                          <div className={styles.aiResultActions}>
+                            <button
+                              className={styles.suggestionAccept}
+                              onClick={handleInsertAIResult}
+                            >
+                              Insert
+                            </button>
+                            <button
+                              className={styles.suggestionDismiss}
+                              onClick={handleDismissAIResult}
+                              aria-label="Dismiss"
+                              style={{ width: 'auto', height: 'auto', padding: '2px 8px' }}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  {/* Related notes */}
+                  <section className={styles.panelSection}>
+                    <h3 className={styles.panelSectionTitle}>Related</h3>
+                    {relatedNotes.length === 0 ? (
+                      <p className={styles.panelEmpty}>No related notes</p>
+                    ) : (
+                      relatedNotes.map((note, i) => (
+                        <motion.div
+                          key={note.note_id}
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.25, delay: i * 0.03, ease: [0.16, 1, 0.3, 1] }}
+                        >
+                          <button
+                            className={styles.backlinkItem}
+                            onClick={() => navigate(`/notes/${note.note_id}`)}
+                          >
+                            <span className={styles.backlinkTitle}>{note.title}</span>
+                            <span className={styles.backlinkMeta}>
+                              {Math.round(note.score * 100)}% similar
+                            </span>
+                          </button>
+                        </motion.div>
+                      ))
+                    )}
+                  </section>
+
+                  {/* Backlinks */}
+                  <section className={styles.panelSection}>
+                    <h3 className={styles.panelSectionTitle}>Backlinks</h3>
+                    {backlinks.length === 0 ? (
+                      <p className={styles.panelEmpty}>No backlinks</p>
+                    ) : (
+                      backlinks.map((note, i) => (
+                        <motion.div
+                          key={note.id}
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.25, delay: i * 0.03, ease: [0.16, 1, 0.3, 1] }}
+                        >
+                          <button
+                            className={styles.backlinkItem}
+                            onClick={() => navigate(`/notes/${note.id}`)}
+                          >
+                            <span className={styles.backlinkTitle}>{note.title}</span>
+                            <span className={styles.backlinkMeta}>{timeAgo(note.updated_at)}</span>
+                          </button>
+                        </motion.div>
+                      ))
+                    )}
+                  </section>
+
+                  {/* Orphan indicator */}
+                  {isOrphan && (
+                    <section className={styles.panelSection}>
+                      <div className={styles.orphanBadge}>Orphan note -- no links in or out</div>
+                    </section>
+                  )}
+
+                  {/* Two-hop backlinks */}
+                  {twoHopBacklinks.length > 0 && (
+                    <section className={styles.panelSection}>
+                      <h3 className={styles.panelSectionTitle}>2-hop Backlinks</h3>
+                      {twoHopBacklinks.map((note) => (
+                        <div key={note.id} className={styles.twoHopItem}>
+                          <button
+                            className={styles.backlinkItem}
+                            onClick={() => navigate(`/notes/${note.id}`)}
+                          >
+                            <span className={styles.backlinkTitle}>{note.title}</span>
+                          </button>
+                          <span className={styles.twoHopVia}>
+                            via{' '}
+                            <button
+                              className={styles.twoHopViaLink}
+                              onClick={() => navigate(`/notes/${note.via_id}`)}
+                            >
+                              {note.via_title}
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                    </section>
+                  )}
+
+                  {/* Tags */}
+                  <section className={styles.panelSection}>
+                    <h3 className={styles.panelSectionTitle}>Tags</h3>
+                    <div className={styles.tagList}>
+                      {currentNote?.tags?.map((tag) => (
+                        <span
+                          key={tag}
+                          className={styles.tag}
+                          style={{
+                            backgroundColor: `${getTagColor(tag)}1a`,
+                            color: getTagColor(tag),
+                          }}
+                        >
+                          #{tag}
+                          <button
+                            className={styles.tagRemove}
+                            onClick={() => handleRemoveTag(tag)}
+                            aria-label={`Remove tag ${tag}`}
+                          >
+                            <X size={10} />
+                          </button>
+                        </span>
+                      ))}
                     </div>
-                    <p className={styles.suggestionReason}>{suggestion.reason}</p>
-                    <button
-                      className={styles.suggestionAccept}
-                      onClick={() => handleAcceptLink(suggestion.target_title)}
-                    >
-                      Link
-                    </button>
-                  </div>
-                ))}
-              </section>
-            )}
-
-            {/* AI Assist result */}
-            {(aiLoading || aiResult) && (
-              <section className={styles.panelSection}>
-                <h3 className={styles.panelSectionTitle}>
-                  <Sparkles size={12} />
-                  AI Assist
-                </h3>
-                {aiLoading && (
-                  <p className={styles.panelEmpty}>Generating...</p>
-                )}
-                {aiResult && (
-                  <div className={styles.aiResultBlock}>
-                    <p className={styles.aiResultLabel}>
-                      {aiResult.action === 'expand' && 'Expanded text'}
-                      {aiResult.action === 'summarize' && 'Summary'}
-                      {aiResult.action === 'extract-actions' && 'Action items'}
-                    </p>
-                    <div className={styles.aiResultContent}>
-                      <div
-                        className={styles.renderedMarkdownSmall}
-                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderMarkdown(aiResult.text)) }}
-                      />
-                    </div>
-                    <div className={styles.aiResultActions}>
-                      <button
-                        className={styles.suggestionAccept}
-                        onClick={handleInsertAIResult}
-                      >
-                        Insert
-                      </button>
-                      <button
-                        className={styles.suggestionDismiss}
-                        onClick={handleDismissAIResult}
-                        aria-label="Dismiss"
-                        style={{ width: 'auto', height: 'auto', padding: '2px 8px' }}
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </section>
-            )}
-
-            {/* Related notes */}
-            <section className={styles.panelSection}>
-              <h3 className={styles.panelSectionTitle}>Related</h3>
-              {relatedNotes.length === 0 ? (
-                <p className={styles.panelEmpty}>No related notes</p>
-              ) : (
-                relatedNotes.map((note, i) => (
-                  <motion.div
-                    key={note.note_id}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25, delay: i * 0.03, ease: [0.16, 1, 0.3, 1] }}
-                  >
-                    <button
-                      className={styles.backlinkItem}
-                      onClick={() => navigate(`/notes/${note.note_id}`)}
-                    >
-                      <span className={styles.backlinkTitle}>{note.title}</span>
-                      <span className={styles.backlinkMeta}>
-                        {Math.round(note.score * 100)}% similar
-                      </span>
-                    </button>
-                  </motion.div>
-                ))
-              )}
-            </section>
-
-            {/* Backlinks */}
-            <section className={styles.panelSection}>
-              <h3 className={styles.panelSectionTitle}>Backlinks</h3>
-              {backlinks.length === 0 ? (
-                <p className={styles.panelEmpty}>No backlinks</p>
-              ) : (
-                backlinks.map((note, i) => (
-                  <motion.div
-                    key={note.id}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25, delay: i * 0.03, ease: [0.16, 1, 0.3, 1] }}
-                  >
-                    <button
-                      className={styles.backlinkItem}
-                      onClick={() => navigate(`/notes/${note.id}`)}
-                    >
-                      <span className={styles.backlinkTitle}>{note.title}</span>
-                      <span className={styles.backlinkMeta}>
-                        {timeAgo(note.updated_at)}
-                      </span>
-                    </button>
-                  </motion.div>
-                ))
-              )}
-            </section>
-
-            {/* Orphan indicator */}
-            {isOrphan && (
-              <section className={styles.panelSection}>
-                <div className={styles.orphanBadge}>
-                  Orphan note -- no links in or out
-                </div>
-              </section>
-            )}
-
-            {/* Two-hop backlinks */}
-            {twoHopBacklinks.length > 0 && (
-              <section className={styles.panelSection}>
-                <h3 className={styles.panelSectionTitle}>2-hop Backlinks</h3>
-                {twoHopBacklinks.map((note) => (
-                  <div key={note.id} className={styles.twoHopItem}>
-                    <button
-                      className={styles.backlinkItem}
-                      onClick={() => navigate(`/notes/${note.id}`)}
-                    >
-                      <span className={styles.backlinkTitle}>{note.title}</span>
-                    </button>
-                    <span className={styles.twoHopVia}>
-                      via{' '}
-                      <button
-                        className={styles.twoHopViaLink}
-                        onClick={() => navigate(`/notes/${note.via_id}`)}
-                      >
-                        {note.via_title}
-                      </button>
-                    </span>
-                  </div>
-                ))}
-              </section>
-            )}
-
-            {/* Tags */}
-            <section className={styles.panelSection}>
-              <h3 className={styles.panelSectionTitle}>Tags</h3>
-              <div className={styles.tagList}>
-                {currentNote?.tags?.map((tag) => (
-                  <span
-                    key={tag}
-                    className={styles.tag}
-                    style={{
-                      backgroundColor: `${getTagColor(tag)}1a`,
-                      color: getTagColor(tag),
-                    }}
-                  >
-                    #{tag}
-                    <button
-                      className={styles.tagRemove}
-                      onClick={() => handleRemoveTag(tag)}
-                      aria-label={`Remove tag ${tag}`}
-                    >
-                      <X size={10} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <div className={styles.tagInputWrapper}>
-                <input
-                  type="text"
-                  className={styles.tagInputField}
-                  placeholder="Add tag..."
-                  value={tagInput}
-                  onChange={(e) => handleTagInputChange(e.target.value)}
-                  onKeyDown={handleTagInputKeyDown}
-                  onBlur={() => {
-                    // Delay to allow click on suggestion
-                    setTimeout(() => {
-                      setTagSuggestions([]);
-                      setTagSuggestionIndex(-1);
-                    }, 150);
-                  }}
-                  aria-label="Add tag"
-                />
-                {tagSuggestions.length > 0 && (
-                  <div className={styles.tagSuggestions}>
-                    {tagSuggestions.map((t, i) => (
-                      <button
-                        key={t.name}
-                        className={`${styles.tagSuggestionItem} ${i === tagSuggestionIndex ? styles.tagSuggestionItemActive : ''}`}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          handleAddTag(t.name);
+                    <div className={styles.tagInputWrapper}>
+                      <input
+                        type="text"
+                        className={styles.tagInputField}
+                        placeholder="Add tag..."
+                        value={tagInput}
+                        onChange={(e) => handleTagInputChange(e.target.value)}
+                        onKeyDown={handleTagInputKeyDown}
+                        onBlur={() => {
+                          // Delay to allow click on suggestion
+                          setTimeout(() => {
+                            setTagSuggestions([]);
+                            setTagSuggestionIndex(-1);
+                          }, 150);
                         }}
-                      >
-                        #{t.name} ({t.count})
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </section>
+                        aria-label="Add tag"
+                      />
+                      {tagSuggestions.length > 0 && (
+                        <div className={styles.tagSuggestions}>
+                          {tagSuggestions.map((t, i) => (
+                            <button
+                              key={t.name}
+                              className={`${styles.tagSuggestionItem} ${i === tagSuggestionIndex ? styles.tagSuggestionItemActive : ''}`}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                handleAddTag(t.name);
+                              }}
+                            >
+                              #{t.name} ({t.count})
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </section>
 
-            {/* Project */}
-            <section className={styles.panelSection}>
-              <h3 className={styles.panelSectionTitle}>Project</h3>
-              <select
-                className={styles.projectSelect}
-                value={currentNote?.project_id ?? ''}
-                onChange={(e) => handleProjectChange(e.target.value)}
-                aria-label="Assign project"
-              >
-                <option value="">Inbox</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </section>
+                  {/* Project */}
+                  <section className={styles.panelSection}>
+                    <h3 className={styles.panelSectionTitle}>Project</h3>
+                    <select
+                      className={styles.projectSelect}
+                      value={currentNote?.project_id ?? ''}
+                      onChange={(e) => handleProjectChange(e.target.value)}
+                      aria-label="Assign project"
+                    >
+                      <option value="">Inbox</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </section>
 
-            {/* Metadata */}
-            <section className={styles.panelSection}>
-              <h3 className={styles.panelSectionTitle}>Metadata</h3>
-              <div className={styles.metadata}>
-                <div className={styles.metaRow}>
-                  <span className={styles.metaLabel}>Created</span>
-                  <span className={styles.metaValue}>
-                    {currentNote ? formatDateTime(currentNote.created_at) : ''}
-                  </span>
-                </div>
-                <div className={styles.metaRow}>
-                  <span className={styles.metaLabel}>Modified</span>
-                  <span className={styles.metaValue}>
-                    {currentNote ? formatDateTime(currentNote.updated_at) : ''}
-                  </span>
-                </div>
-                <div className={styles.metaRow}>
-                  <span className={styles.metaLabel}>Path</span>
-                  <span className={styles.metaValue}>
-                    {currentNote?.file_path}
-                  </span>
-                </div>
-              </div>
-            </section>
+                  {/* Metadata */}
+                  <section className={styles.panelSection}>
+                    <h3 className={styles.panelSectionTitle}>Metadata</h3>
+                    <div className={styles.metadata}>
+                      <div className={styles.metaRow}>
+                        <span className={styles.metaLabel}>Created</span>
+                        <span className={styles.metaValue}>
+                          {currentNote ? formatDateTime(currentNote.created_at) : ''}
+                        </span>
+                      </div>
+                      <div className={styles.metaRow}>
+                        <span className={styles.metaLabel}>Modified</span>
+                        <span className={styles.metaValue}>
+                          {currentNote ? formatDateTime(currentNote.updated_at) : ''}
+                        </span>
+                      </div>
+                      <div className={styles.metaRow}>
+                        <span className={styles.metaLabel}>Path</span>
+                        <span className={styles.metaValue}>{currentNote?.file_path}</span>
+                      </div>
+                    </div>
+                  </section>
 
-            {/* Version History */}
-            {currentNote && (
-              <VersionHistory
-                noteId={currentNote.id}
-                currentBody={content}
-                onRestore={() => fetchNote(id!)}
-              />
-            )}
-          </motion.aside>
+                  {/* Version History */}
+                  {currentNote && (
+                    <VersionHistory
+                      noteId={currentNote.id}
+                      currentBody={content}
+                      onRestore={() => fetchNote(id!)}
+                    />
+                  )}
+                </motion.aside>
+              )}
+            </AnimatePresence>
+          </>
         )}
-        </AnimatePresence>
-        </>)}
 
         {/* Wikilink hover preview card */}
         {hoverPreview && (

@@ -55,9 +55,7 @@ function localId(): string {
 // other role is passed through unchanged. The server now produces
 // well-paired histories (assistant tool_call envelopes followed by
 // matching tool result rows), so the client just forwards them.
-function toAssistantHistory(
-  msgs: ChatHistoryMessage[],
-): AssistantMessage[] {
+function toAssistantHistory(msgs: ChatHistoryMessage[]): AssistantMessage[] {
   const out: AssistantMessage[] = [];
   for (const m of msgs) {
     if (m.role === 'system') continue;
@@ -80,12 +78,9 @@ export function AskPage() {
   const [streamingTools, setStreamingTools] = useState<ToolCallView[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [streamStatus, setStreamStatus] = useState<StreamStatus>('idle');
-  const [pendingConfirmation, setPendingConfirmation] =
-    useState<PendingConfirmation | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [recentConversations, setRecentConversations] = useState<
-    Conversation[]
-  >([]);
+  const [recentConversations, setRecentConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showConvDropdown, setShowConvDropdown] = useState(false);
   const [approvalLoading, setApprovalLoading] = useState(false);
@@ -110,9 +105,7 @@ export function AskPage() {
         setRecentConversations(conversations);
         if (conversations.length > 0) {
           const recent = conversations[0];
-          const { conversation, messages: msgs } = await getConversation(
-            recent.id,
-          );
+          const { conversation, messages: msgs } = await getConversation(recent.id);
           if (cancelled) return;
           setConversationId(conversation.id);
           setMessages(msgs);
@@ -133,10 +126,7 @@ export function AskPage() {
   useEffect(() => {
     if (!showConvDropdown) return;
     const handleClick = (e: MouseEvent) => {
-      if (
-        convDropdownRef.current &&
-        !convDropdownRef.current.contains(e.target as Node)
-      ) {
+      if (convDropdownRef.current && !convDropdownRef.current.contains(e.target as Node)) {
         setShowConvDropdown(false);
       }
     };
@@ -197,9 +187,7 @@ export function AskPage() {
   // stale closure -- the caller supplies the truth.
   const runStream = useCallback(
     async (convId: string, message: string, baseHistory: ChatHistoryMessage[]) => {
-      const history = toAssistantHistory(baseHistory).slice(
-        -MAX_HISTORY_MESSAGES,
-      );
+      const history = toAssistantHistory(baseHistory).slice(-MAX_HISTORY_MESSAGES);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -245,13 +233,7 @@ export function AskPage() {
       };
 
       try {
-        await streamAssistantChat(
-          convId,
-          message,
-          history,
-          handleEvent,
-          controller.signal,
-        );
+        await streamAssistantChat(convId, message, history, handleEvent, controller.signal);
       } catch (err) {
         if (controller.signal.aborted) {
           // User cancelled -- treat as idle.
@@ -575,8 +557,7 @@ export function AskPage() {
           <div>
             <h1 className={styles.title}>Ask Seam</h1>
             <p className={styles.subtitle}>
-              Ask anything. The assistant can search, read, create, and update
-              your notes.
+              Ask anything. The assistant can search, read, create, and update your notes.
             </p>
           </div>
           <div className={styles.headerActions}>
@@ -634,9 +615,7 @@ export function AskPage() {
       <div className={styles.chatArea}>
         {messages.length === 0 && !isBusy && (
           <div className={styles.emptyState}>
-            <p className={styles.emptyText}>
-              Ask anything -- Seam finds the answer in your notes.
-            </p>
+            <p className={styles.emptyText}>Ask anything -- Seam finds the answer in your notes.</p>
             <div className={styles.suggestions}>
               {STARTER_SUGGESTIONS.map((suggestion) => (
                 <button
@@ -654,10 +633,7 @@ export function AskPage() {
         {messages.map((msg) => {
           if (msg.role === 'user') {
             return (
-              <div
-                key={msg.id}
-                className={`${styles.message} ${styles.userMessage}`}
-              >
+              <div key={msg.id} className={`${styles.message} ${styles.userMessage}`}>
                 <div className={styles.messageContent}>{msg.content}</div>
               </div>
             );
@@ -689,8 +665,7 @@ export function AskPage() {
           }
 
           // assistant
-          const hasToolCalls =
-            Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+          const hasToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
           return (
             <div key={msg.id}>
               {hasToolCalls && (
@@ -710,9 +685,7 @@ export function AskPage() {
                 </div>
               )}
               {msg.content && (
-                <div
-                  className={`${styles.message} ${styles.assistantMessage}`}
-                >
+                <div className={`${styles.message} ${styles.assistantMessage}`}>
                   <div
                     className={styles.messageContent}
                     dangerouslySetInnerHTML={{
@@ -749,14 +722,12 @@ export function AskPage() {
             </div>
           )}
 
-          {streamStatus === 'streaming' &&
-            !streamingText &&
-            streamingTools.length === 0 && (
-              <div className={`${styles.message} ${styles.assistantMessage}`}>
-                <Loader2 size={16} className={styles.spinner} />
-                <span className={styles.thinkingText}>Thinking...</span>
-              </div>
-            )}
+          {streamStatus === 'streaming' && !streamingText && streamingTools.length === 0 && (
+            <div className={`${styles.message} ${styles.assistantMessage}`}>
+              <Loader2 size={16} className={styles.spinner} />
+              <span className={styles.thinkingText}>Thinking...</span>
+            </div>
+          )}
 
           {pendingConfirmation && (
             <ToolConfirmationCard

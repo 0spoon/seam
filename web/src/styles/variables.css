@@ -20,7 +20,7 @@
   /* Accents */
   --accent-primary: #c4915c;
   --accent-hover: #d4a06c;
-  --accent-muted: rgba(196, 145, 92, 0.10);
+  --accent-muted: rgba(196, 145, 92, 0.1);
   --accent-secondary: #6b9b7a;
   --accent-tertiary: #7b8ec4;
 
@@ -41,10 +41,10 @@
   --project-8: #c46b6b;
 
   /* Typography */
-  --font-display: 'Fraunces', Georgia, serif;
-  --font-ui: 'Outfit', system-ui, sans-serif;
-  --font-content: 'Lora', Georgia, serif;
-  --font-mono: 'IBM Plex Mono', 'Menlo', monospace;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-ui: "Outfit", system-ui, sans-serif;
+  --font-content: "Lora", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "Menlo", monospace;
 
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;

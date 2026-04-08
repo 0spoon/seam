@@ -72,7 +72,8 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   border-left: 2px solid transparent;
-  transition: background var(--duration-fast) var(--ease-standard),
+  transition:
+    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard);
 }
 

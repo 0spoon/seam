@@ -70,9 +70,7 @@ describe('projectStore', () => {
       projects: [makeProject(), makeProject({ id: 'proj2' })],
     });
 
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(null, { status: 204 }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await useProjectStore.getState().deleteProject('proj1', 'inbox');
 

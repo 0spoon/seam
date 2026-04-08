@@ -9,15 +9,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { useToastStore } from '../../components/Toast/ToastContainer';
 import { getProjectColor } from '../../lib/tagColor';
 import { GraphSkeleton } from '../../components/Skeleton/Skeleton';
-import {
-  Search,
-  Filter,
-  X,
-  Crosshair,
-  ArrowLeft,
-  ExternalLink,
-  Unlink,
-} from 'lucide-react';
+import { Search, Filter, X, Crosshair, ArrowLeft, ExternalLink, Unlink } from 'lucide-react';
 import type { GraphData, GraphNode } from '../../api/types';
 import styles from './GraphPage.module.css';
 
@@ -146,9 +138,7 @@ function packCirclesInRect(
   if (circles.length === 0) return [];
 
   // Work with copies sorted largest first.
-  const sorted = circles
-    .map((c) => ({ ...c }))
-    .sort((a, b) => b.r - a.r);
+  const sorted = circles.map((c) => ({ ...c })).sort((a, b) => b.r - a.r);
 
   const cx = 0;
   const cy = 0;
@@ -190,9 +180,7 @@ function packCirclesInRect(
           // Prefer positions that spread across the rectangle.
           // Score = distance from center (we want moderate spread, not all
           // at center), penalized if too far from center.
-          const distFromCenter = Math.sqrt(
-            candidateX * candidateX + candidateY * candidateY,
-          );
+          const distFromCenter = Math.sqrt(candidateX * candidateX + candidateY * candidateY);
           // Favor filling space: slight preference for positions further out,
           // but not beyond half the viewport dimension.
           const idealDist = Math.min(width, height) * 0.3;
@@ -361,10 +349,7 @@ interface DisplayData {
   hopMap: Map<string, number> | null;
 }
 
-function buildDisplayData(
-  graphData: GraphData,
-  focusNodeId: string | null,
-): DisplayData {
+function buildDisplayData(graphData: GraphData, focusNodeId: string | null): DisplayData {
   if (!focusNodeId) {
     return { nodes: graphData.nodes, edges: graphData.edges, hopMap: null };
   }
@@ -397,9 +382,7 @@ function buildDisplayData(
   const visible = new Set(hopMap.keys());
   return {
     nodes: graphData.nodes.filter((n) => visible.has(n.id)),
-    edges: graphData.edges.filter(
-      (e) => visible.has(e.source) && visible.has(e.target),
-    ),
+    edges: graphData.edges.filter((e) => visible.has(e.source) && visible.has(e.target)),
     hopMap,
   };
 }
@@ -527,8 +510,7 @@ export function GraphPage() {
       });
       setGraphData(data);
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to load graph data';
+      const message = err instanceof Error ? err.message : 'Failed to load graph data';
       setError(message);
       addToast(message, 'error');
     } finally {
@@ -564,40 +546,33 @@ export function GraphPage() {
     const inFocusMode = focusNodeId !== null;
 
     // Build elements.
-    const nodes: cytoscape.ElementDefinition[] = displayData.nodes.map(
-      (node) => {
-        const color = node.project_id
-          ? (colors.get(node.project_id) ?? COLORS.accentPrimary)
-          : COLORS.accentPrimary;
-        const linkCount = node.link_count ?? 0;
-        const size = Math.min(
-          NODE_SIZE_MIN + Math.sqrt(linkCount) * NODE_SIZE_SCALE,
-          NODE_SIZE_MAX,
-        );
-        return {
-          data: {
-            id: node.id,
-            label: node.title,
-            projectId: node.project_id || '',
-            projectName: node.project || '',
-            color,
-            size,
-            tags: node.tags || [],
-            createdAt: node.created_at,
-          },
-        };
-      },
-    );
-
-    const edges: cytoscape.ElementDefinition[] = displayData.edges.map(
-      (edge, i) => ({
+    const nodes: cytoscape.ElementDefinition[] = displayData.nodes.map((node) => {
+      const color = node.project_id
+        ? (colors.get(node.project_id) ?? COLORS.accentPrimary)
+        : COLORS.accentPrimary;
+      const linkCount = node.link_count ?? 0;
+      const size = Math.min(NODE_SIZE_MIN + Math.sqrt(linkCount) * NODE_SIZE_SCALE, NODE_SIZE_MAX);
+      return {
         data: {
-          id: `e${i}`,
-          source: edge.source,
-          target: edge.target,
+          id: node.id,
+          label: node.title,
+          projectId: node.project_id || '',
+          projectName: node.project || '',
+          color,
+          size,
+          tags: node.tags || [],
+          createdAt: node.created_at,
         },
-      }),
-    );
+      };
+    });
+
+    const edges: cytoscape.ElementDefinition[] = displayData.edges.map((edge, i) => ({
+      data: {
+        id: `e${i}`,
+        source: edge.source,
+        target: edge.target,
+      },
+    }));
 
     // Destroy previous instances.
     if (cyRef.current) cyRef.current.destroy();
@@ -978,10 +953,8 @@ export function GraphPage() {
           });
 
           // Recompute centroid and radius after compaction.
-          const cx2 =
-            info.nodes.reduce((s, n) => s + n.position().x, 0) / info.nodes.length;
-          const cy2 =
-            info.nodes.reduce((s, n) => s + n.position().y, 0) / info.nodes.length;
+          const cx2 = info.nodes.reduce((s, n) => s + n.position().x, 0) / info.nodes.length;
+          const cy2 = info.nodes.reduce((s, n) => s + n.position().y, 0) / info.nodes.length;
           let maxDist = 0;
           info.nodes.forEach((n) => {
             const dx = n.position().x - cx2;
@@ -1025,9 +998,7 @@ export function GraphPage() {
         // Step 5: Spread orphan nodes (no project) along the bottom edge.
         if (orphanNodes.length > 0) {
           const allPacked = packed.length > 0;
-          const baseY = allPacked
-            ? Math.max(...packed.map((c) => c.y + c.r)) + 150
-            : 0;
+          const baseY = allPacked ? Math.max(...packed.map((c) => c.y + c.r)) + 150 : 0;
           const spacing = 80;
           const startX = -((orphanNodes.length - 1) * spacing) / 2;
           orphanNodes.forEach((node, i) => {
@@ -1259,12 +1230,7 @@ export function GraphPage() {
 
     // Redraw hulls after filter change.
     if (hullCanvasRef.current && cyRef.current && !focusNodeId) {
-      drawClusterHulls(
-        hullCanvasRef.current,
-        cyRef.current,
-        projectColorMap(),
-        projectNameMap,
-      );
+      drawClusterHulls(hullCanvasRef.current, cyRef.current, projectColorMap(), projectNameMap);
     }
   }, [selectedProjects, activeTags, projectColorMap, projectNameMap, focusNodeId]);
 
@@ -1322,33 +1288,30 @@ export function GraphPage() {
     setUntilDate('');
   };
 
-  const handleSearchSelect = useCallback(
-    (nodeId: string) => {
-      if (!cyRef.current) return;
-      const cy = cyRef.current;
-      const node = cy.getElementById(nodeId);
-      if (node.length === 0) return;
+  const handleSearchSelect = useCallback((nodeId: string) => {
+    if (!cyRef.current) return;
+    const cy = cyRef.current;
+    const node = cy.getElementById(nodeId);
+    if (node.length === 0) return;
 
-      cy.elements().unselect();
-      cy.elements().removeClass('dimmed highlighted hovered');
-      node.select();
+    cy.elements().unselect();
+    cy.elements().removeClass('dimmed highlighted hovered');
+    node.select();
 
-      // Highlight its neighborhood.
-      const neighbors = node.neighborhood('node');
-      const connectedEdges = node.connectedEdges();
-      cy.startBatch();
-      cy.nodes().not(node).not(neighbors).addClass('dimmed');
-      connectedEdges.addClass('highlighted');
-      cy.edges().not(connectedEdges).addClass('dimmed');
-      cy.endBatch();
+    // Highlight its neighborhood.
+    const neighbors = node.neighborhood('node');
+    const connectedEdges = node.connectedEdges();
+    cy.startBatch();
+    cy.nodes().not(node).not(neighbors).addClass('dimmed');
+    connectedEdges.addClass('highlighted');
+    cy.edges().not(connectedEdges).addClass('dimmed');
+    cy.endBatch();
 
-      cy.animate({ center: { eles: node }, zoom: 1.2, duration: 400 });
-      setSelectedNode({ id: nodeId, title: node.data('label') });
-      setSearchOpen(false);
-      setSearchQuery('');
-    },
-    [],
-  );
+    cy.animate({ center: { eles: node }, zoom: 1.2, duration: 400 });
+    setSelectedNode({ id: nodeId, title: node.data('label') });
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, []);
 
   const handleFocusNode = useCallback((nodeId: string) => {
     setFocusNodeId(nodeId);
@@ -1362,9 +1325,7 @@ export function GraphPage() {
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedSearchIdx((prev) =>
-        Math.min(prev + 1, searchResults.length - 1),
-      );
+      setSelectedSearchIdx((prev) => Math.min(prev + 1, searchResults.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedSearchIdx((prev) => Math.max(prev - 1, 0));
@@ -1403,9 +1364,7 @@ export function GraphPage() {
         focusedNodeIndex < visibleNodes.length
       ) {
         navigate(`/notes/${visibleNodes[focusedNodeIndex].id()}`);
-      } else if (
-        ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)
-      ) {
+      } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
         if (focusedNodeIndex < 0) {
           setFocusedNodeIndex(0);
@@ -1439,9 +1398,7 @@ export function GraphPage() {
 
         if (bestNode) {
           const targetId = (bestNode as cytoscape.NodeSingular).id();
-          const idx = visibleNodes
-            .toArray()
-            .findIndex((n) => n.id() === targetId);
+          const idx = visibleNodes.toArray().findIndex((n) => n.id() === targetId);
           setFocusedNodeIndex(idx);
           cy.elements().unselect();
           (bestNode as cytoscape.NodeSingular).select();
@@ -1498,8 +1455,8 @@ export function GraphPage() {
     <div className={styles.container}>
       {/* Accessibility instructions */}
       <div className={styles.srOnly}>
-        Use Tab to focus graph nodes, Arrow keys to navigate between nodes,
-        Enter to open a note, Escape to deselect, and / to search.
+        Use Tab to focus graph nodes, Arrow keys to navigate between nodes, Enter to open a note,
+        Escape to deselect, and / to search.
       </div>
 
       {/* Hull canvas overlay (behind graph visually, above in DOM with pointer-events:none) */}
@@ -1531,9 +1488,7 @@ export function GraphPage() {
             </button>
             <span className={styles.focusTitle}>
               Exploring:{' '}
-              <span className={styles.focusTitleAccent}>
-                {selectedNode?.title || 'Note'}
-              </span>
+              <span className={styles.focusTitleAccent}>{selectedNode?.title || 'Note'}</span>
             </span>
           </motion.div>
         )}
@@ -1547,13 +1502,8 @@ export function GraphPage() {
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
           >
-            <span className={styles.nodeActionTitle}>
-              {selectedNode.title}
-            </span>
-            <button
-              className={styles.actionBtn}
-              onClick={() => handleFocusNode(selectedNode.id)}
-            >
+            <span className={styles.nodeActionTitle}>{selectedNode.title}</span>
+            <button className={styles.actionBtn} onClick={() => handleFocusNode(selectedNode.id)}>
               <Crosshair size={12} />
               Focus
             </button>
@@ -1634,9 +1584,7 @@ export function GraphPage() {
                         onClick={() => handleSearchSelect(result.id)}
                         onMouseEnter={() => setSelectedSearchIdx(idx)}
                       >
-                        <span className={styles.searchResultTitle}>
-                          {result.title}
-                        </span>
+                        <span className={styles.searchResultTitle}>{result.title}</span>
                         <span className={styles.searchResultMeta}>
                           {color && (
                             <span
@@ -1646,7 +1594,10 @@ export function GraphPage() {
                           )}
                           {result.project || ''}
                           {result.project && result.tags.length > 0 && ' · '}
-                          {result.tags.slice(0, 2).map((t) => `#${t}`).join(' ')}
+                          {result.tags
+                            .slice(0, 2)
+                            .map((t) => `#${t}`)
+                            .join(' ')}
                         </span>
                       </div>
                     );
@@ -1663,9 +1614,7 @@ export function GraphPage() {
             title="Toggle filters"
           >
             <Filter size={16} />
-            {activeFilterCount > 0 && (
-              <span className={styles.filterBadge} />
-            )}
+            {activeFilterCount > 0 && <span className={styles.filterBadge} />}
           </button>
         </div>
       </div>
@@ -1750,10 +1699,7 @@ export function GraphPage() {
 
       {/* ---- Rich tooltip ---- */}
       {tooltip && (
-        <div
-          className={styles.richTooltip}
-          style={{ left: tooltip.x, top: tooltip.y }}
-        >
+        <div className={styles.richTooltip} style={{ left: tooltip.x, top: tooltip.y }}>
           <div className={styles.tooltipTitle}>{tooltip.title}</div>
           {tooltip.project && (
             <div className={styles.tooltipProject}>
@@ -1797,8 +1743,7 @@ export function GraphPage() {
             <>
               <span className={styles.statsDot} />
               <span>
-                {visibleCounts.projects}{' '}
-                {visibleCounts.projects === 1 ? 'project' : 'projects'}
+                {visibleCounts.projects} {visibleCounts.projects === 1 ? 'project' : 'projects'}
               </span>
             </>
           )}

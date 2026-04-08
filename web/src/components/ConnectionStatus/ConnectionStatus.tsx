@@ -32,9 +32,7 @@ export function ConnectionStatus() {
       onMouseLeave={() => setShowTooltip(false)}
     >
       <span className={`${styles.dot} ${dotClass}`} />
-      {status !== 'connected' && (
-        <span className={styles.statusText}>{statusLabel}</span>
-      )}
+      {status !== 'connected' && <span className={styles.statusText}>{statusLabel}</span>}
       {status === 'disconnected' && (
         <span className={styles.statusText}>- Edits saved locally</span>
       )}
@@ -42,14 +40,10 @@ export function ConnectionStatus() {
         <div className={styles.tooltip}>
           <span className={styles.tooltipLine}>{statusLabel}</span>
           {lastConnectedText && (
-            <span className={styles.tooltipLine}>
-              Last connected {lastConnectedText}
-            </span>
+            <span className={styles.tooltipLine}>Last connected {lastConnectedText}</span>
           )}
           {status === 'reconnecting' && reconnectAttempts > 0 && (
-            <span className={styles.tooltipLine}>
-              Attempt {reconnectAttempts}
-            </span>
+            <span className={styles.tooltipLine}>Attempt {reconnectAttempts}</span>
           )}
         </div>
       )}

@@ -42,10 +42,7 @@ export function ZenModeExit({ onExit, typewriterEnabled, onToggleTypewriter }: Z
   }, [resetTimer]);
 
   return (
-    <div
-      className={styles.container}
-      style={{ opacity: visible ? 1 : 0.3 }}
-    >
+    <div className={styles.container} style={{ opacity: visible ? 1 : 0.3 }}>
       <button
         className={`${styles.typewriterToggle} ${typewriterEnabled ? styles.typewriterActive : ''}`}
         onClick={onToggleTypewriter}

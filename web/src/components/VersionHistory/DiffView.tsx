@@ -20,9 +20,7 @@ function computeDiff(oldLines: string[], newLines: string[]): DiffLine[] {
   const n = newLines.length;
 
   // Build LCS table.
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    new Array(n + 1).fill(0),
-  );
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
@@ -93,7 +91,8 @@ export function DiffView({ oldText, newText, oldLabel, newLabel }: DiffViewProps
           }
           return (
             <div key={idx} className={`${styles.line} ${className}`}>
-              {prefix}{line.content}
+              {prefix}
+              {line.content}
             </div>
           );
         })}

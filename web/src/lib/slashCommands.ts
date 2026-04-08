@@ -57,11 +57,7 @@ export function replaceSlashWithText(view: EditorView, text: string): void {
   view.focus();
 }
 
-export function replaceSlashWithBlock(
-  view: EditorView,
-  before: string,
-  after: string,
-): void {
+export function replaceSlashWithBlock(view: EditorView, before: string, after: string): void {
   const range = findSlashRange(view);
   if (!range) return;
 
@@ -198,8 +194,7 @@ export const slashCommands: SlashCommand[] = [
     label: 'Date',
     description: "Insert today's date",
     icon: 'Calendar',
-    action: (view) =>
-      replaceSlashWithText(view, new Date().toISOString().split('T')[0]),
+    action: (view) => replaceSlashWithText(view, new Date().toISOString().split('T')[0]),
     keywords: ['today'],
   },
   {

@@ -29,16 +29,10 @@ export function BulkActionBar() {
   // Close dropdowns when clicking outside.
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (
-        tagDropdownRef.current &&
-        !tagDropdownRef.current.contains(e.target as Node)
-      ) {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
         setTagDropdownOpen(false);
       }
-      if (
-        projectDropdownRef.current &&
-        !projectDropdownRef.current.contains(e.target as Node)
-      ) {
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
         setProjectDropdownOpen(false);
       }
     }
@@ -58,7 +52,10 @@ export function BulkActionBar() {
       if (!tag.trim()) return;
       const result = await bulkAction('add_tag', { tag: tag.trim() });
       if (result) {
-        addToast(`Tag added to ${result.success} note${result.success !== 1 ? 's' : ''}`, 'success');
+        addToast(
+          `Tag added to ${result.success} note${result.success !== 1 ? 's' : ''}`,
+          'success',
+        );
       }
       setTagDropdownOpen(false);
       setNewTag('');
@@ -70,7 +67,10 @@ export function BulkActionBar() {
     async (tag: string) => {
       const result = await bulkAction('remove_tag', { tag });
       if (result) {
-        addToast(`Tag removed from ${result.success} note${result.success !== 1 ? 's' : ''}`, 'success');
+        addToast(
+          `Tag removed from ${result.success} note${result.success !== 1 ? 's' : ''}`,
+          'success',
+        );
       }
       setTagDropdownOpen(false);
     },
@@ -178,10 +178,7 @@ export function BulkActionBar() {
             </button>
             {projectDropdownOpen && (
               <div className={styles.dropdown}>
-                <button
-                  className={styles.dropdownItem}
-                  onClick={() => handleMoveToProject('')}
-                >
+                <button className={styles.dropdownItem} onClick={() => handleMoveToProject('')}>
                   Inbox
                 </button>
                 {projects.map((p) => (
@@ -197,10 +194,7 @@ export function BulkActionBar() {
             )}
           </div>
 
-          <button
-            className={styles.deleteBtn}
-            onClick={() => setDeleteConfirmOpen(true)}
-          >
+          <button className={styles.deleteBtn} onClick={() => setDeleteConfirmOpen(true)}>
             <Trash2 size={14} />
             <span>Delete</span>
           </button>

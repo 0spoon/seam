@@ -8,7 +8,7 @@
 }
 
 .bgPattern {
-  composes: seamPattern from '../../styles/patterns.css';
+  composes: seamPattern from "../../styles/patterns.css";
 }
 
 .content {

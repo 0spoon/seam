@@ -51,8 +51,7 @@ function truncate(text: string, n: number): string {
 // --- generic fallback --------------------------------------------------
 
 const genericJsonRenderer: ToolRenderer = (result) => {
-  const text =
-    typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
   return <pre className={styles.jsonBlock}>{text}</pre>;
 };
 
@@ -119,9 +118,7 @@ const readNoteRenderer: ToolRenderer = (result) => {
           ))}
         </div>
       )}
-      {body && (
-        <pre className={styles.bodySnippet}>{truncate(body, 200)}</pre>
-      )}
+      {body && <pre className={styles.bodySnippet}>{truncate(body, 200)}</pre>}
       <Link to={`/notes/${id}`} className={styles.openButton}>
         <ExternalLink size={12} /> Open
       </Link>
@@ -279,16 +276,9 @@ const listTasksRenderer: ToolRenderer = (result) => {
         {tasks.map((t, i) => {
           if (!isObject(t)) return null;
           const done = t.done === true;
-          const content =
-            asString(t.content) ??
-            asString(t.text) ??
-            asString(t.title) ??
-            '';
+          const content = asString(t.content) ?? asString(t.text) ?? asString(t.title) ?? '';
           return (
-            <li
-              key={i}
-              className={`${styles.taskRow} ${done ? styles.taskDone : ''}`}
-            >
+            <li key={i} className={`${styles.taskRow} ${done ? styles.taskDone : ''}`}>
               {done ? (
                 <CheckSquare size={14} className={styles.taskIcon} />
               ) : (
@@ -378,9 +368,7 @@ const findRelatedRenderer: ToolRenderer = (result) => {
               ) : (
                 <span>{title}</span>
               )}
-              {score !== undefined && (
-                <span className={styles.badge}>{score.toFixed(2)}</span>
-              )}
+              {score !== undefined && <span className={styles.badge}>{score.toFixed(2)}</span>}
             </div>
           </li>
         );
@@ -466,9 +454,7 @@ const getProfileRenderer: ToolRenderer = (result) => {
               {k}
             </th>
             <td className={styles.kvValue}>
-              {typeof v === 'string' || typeof v === 'number'
-                ? String(v)
-                : JSON.stringify(v)}
+              {typeof v === 'string' || typeof v === 'number' ? String(v) : JSON.stringify(v)}
             </td>
           </tr>
         ))}
@@ -516,10 +502,7 @@ const REGISTRY: Record<string, ToolRenderer> = {
 // function (not a JSX element), and falls back to the generic JSON pretty
 // printer when the registry has no entry or the entry returned null
 // because the result didn't match its expected shape.
-export function renderToolResult(
-  toolName: string,
-  result: unknown,
-): React.ReactNode {
+export function renderToolResult(toolName: string, result: unknown): React.ReactNode {
   const renderer = REGISTRY[toolName];
   if (renderer) {
     const out = renderer(result);

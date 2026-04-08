@@ -92,9 +92,7 @@ describe('authStore', () => {
       isAuthenticated: true,
     });
 
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(null, { status: 204 }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     await useAuthStore.getState().logout();
 

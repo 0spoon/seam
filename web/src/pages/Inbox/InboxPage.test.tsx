@@ -23,17 +23,13 @@ vi.mock('@tanstack/react-virtual', () => ({
 vi.mock('motion/react', () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: {
-    div: ({
-      children,
-      ...props
-    }: {
-      children?: React.ReactNode;
-      [key: string]: unknown;
-    }) => {
+    div: ({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) => {
       const safe = Object.fromEntries(
         Object.entries(props).filter(
           ([k]) =>
-            !['initial', 'animate', 'exit', 'transition', 'layout', 'ref', 'data-index'].includes(k),
+            !['initial', 'animate', 'exit', 'transition', 'layout', 'ref', 'data-index'].includes(
+              k,
+            ),
         ),
       );
       return <div {...safe}>{children}</div>;
@@ -75,9 +71,7 @@ describe('InboxPage', () => {
   it('shows empty state when no notes', () => {
     renderInboxPage();
     expect(screen.getByText('Nothing in the inbox')).toBeInTheDocument();
-    expect(
-      screen.getByText('Capture a thought to get started'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Capture a thought to get started')).toBeInTheDocument();
   });
 
   it('shows tag filter pill when tag query param present', () => {

@@ -23,12 +23,13 @@ export function ReviewPage() {
     <div className={styles.page}>
       <div className={styles.header}>
         <h1 className={styles.title}>
-          <Sprout size={20} style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-2)' }} />
+          <Sprout
+            size={20}
+            style={{ verticalAlign: 'text-bottom', marginRight: 'var(--space-2)' }}
+          />
           Garden
         </h1>
-        <p className={styles.subtitle}>
-          Review and organize notes that need attention
-        </p>
+        <p className={styles.subtitle}>Review and organize notes that need attention</p>
       </div>
 
       {(stats.reviewed > 0 || stats.tagged > 0 || stats.linked > 0 || stats.moved > 0) && (

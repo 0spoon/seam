@@ -73,14 +73,9 @@ async function fetchNoteTitles(query: string): Promise<{ label: string; noteId: 
   }
 }
 
-async function wikilinkCompletions(
-  context: CompletionContext,
-): Promise<CompletionResult | null> {
+async function wikilinkCompletions(context: CompletionContext): Promise<CompletionResult | null> {
   // Look for "[[" before the cursor.
-  const beforeCursor = context.state.sliceDoc(
-    Math.max(0, context.pos - 100),
-    context.pos,
-  );
+  const beforeCursor = context.state.sliceDoc(Math.max(0, context.pos - 100), context.pos);
   const match = beforeCursor.match(/\[\[([^\]]*?)$/);
   if (!match) return null;
 
@@ -92,9 +87,7 @@ async function wikilinkCompletions(
   cachedTitles = titles;
 
   const filtered = query
-    ? titles.filter((t) =>
-        t.label.toLowerCase().includes(query.toLowerCase()),
-      )
+    ? titles.filter((t) => t.label.toLowerCase().includes(query.toLowerCase()))
     : titles;
 
   if (filtered.length === 0) return null;

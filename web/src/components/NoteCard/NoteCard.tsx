@@ -146,10 +146,7 @@ export const NoteCard = memo(function NoteCard({
         {projectName && (
           <span className={styles.project}>
             {projectColor && (
-              <span
-                className={styles.projectDot}
-                style={{ backgroundColor: projectColor }}
-              />
+              <span className={styles.projectDot} style={{ backgroundColor: projectColor }} />
             )}
             {projectName}
           </span>

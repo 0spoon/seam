@@ -39,27 +39,21 @@ describe('NoteListSkeleton', () => {
 describe('EditorSkeleton', () => {
   it('renders with loading status', () => {
     render(<EditorSkeleton />);
-    expect(
-      screen.getByRole('status', { name: 'Loading editor' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading editor' })).toBeInTheDocument();
   });
 });
 
 describe('FullPageSkeleton', () => {
   it('renders', () => {
     render(<FullPageSkeleton />);
-    expect(
-      screen.getByRole('status', { name: 'Loading' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
   });
 });
 
 describe('GenericPageSkeleton', () => {
   it('renders', () => {
     render(<GenericPageSkeleton />);
-    expect(
-      screen.getByRole('status', { name: 'Loading' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
   });
 });
 

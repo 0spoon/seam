@@ -23,10 +23,7 @@ vi.mock('motion/react', () => ({
         onKeyDown={onKeyDown}
         {...Object.fromEntries(
           Object.entries(props).filter(
-            ([k]) =>
-              !['initial', 'animate', 'exit', 'transition', 'layout'].includes(
-                k,
-              ),
+            ([k]) => !['initial', 'animate', 'exit', 'transition', 'layout'].includes(k),
           ),
         )}
       >
@@ -48,28 +45,18 @@ const defaultProps = {
 
 describe('ConfirmModal', () => {
   it('renders nothing when closed', () => {
-    const { container } = render(
-      <ConfirmModal {...defaultProps} open={false} />,
-    );
+    const { container } = render(<ConfirmModal {...defaultProps} open={false} />);
     expect(container.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
   it('renders title and message when open', () => {
     render(<ConfirmModal {...defaultProps} />);
     expect(screen.getByText('Delete note')).toBeInTheDocument();
-    expect(
-      screen.getByText('This action cannot be undone.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('This action cannot be undone.')).toBeInTheDocument();
   });
 
   it('renders custom confirm and cancel labels', () => {
-    render(
-      <ConfirmModal
-        {...defaultProps}
-        confirmLabel="Yes, delete"
-        cancelLabel="Go back"
-      />,
-    );
+    render(<ConfirmModal {...defaultProps} confirmLabel="Yes, delete" cancelLabel="Go back" />);
     expect(screen.getByText('Yes, delete')).toBeInTheDocument();
     expect(screen.getByText('Go back')).toBeInTheDocument();
   });

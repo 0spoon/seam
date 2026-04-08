@@ -13,9 +13,7 @@ vi.mock('../../api/client', () => ({
 vi.mock('../../stores/projectStore', () => ({
   useProjectStore: vi.fn((selector) =>
     selector({
-      projects: [
-        { id: 'p1', name: 'Project One', slug: 'project-one' },
-      ],
+      projects: [{ id: 'p1', name: 'Project One', slug: 'project-one' }],
     }),
   ),
 }));
@@ -23,7 +21,10 @@ vi.mock('../../stores/projectStore', () => ({
 vi.mock('../../stores/uiStore', () => ({
   useUIStore: vi.fn((selector) =>
     selector({
-      tags: [{ name: 'go', count: 5 }, { name: 'api', count: 3 }],
+      tags: [
+        { name: 'go', count: 5 },
+        { name: 'api', count: 3 },
+      ],
     }),
   ),
 }));
@@ -125,7 +126,14 @@ describe('GraphPage', () => {
   it('renders filter panel with projects and tags after toggling', async () => {
     (getGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
       nodes: [
-        { id: 'n1', title: 'Test', project_id: 'p1', tags: ['go'], created_at: '2026-01-01T00:00:00Z', link_count: 1 },
+        {
+          id: 'n1',
+          title: 'Test',
+          project_id: 'p1',
+          tags: ['go'],
+          created_at: '2026-01-01T00:00:00Z',
+          link_count: 1,
+        },
       ],
       edges: [],
     });

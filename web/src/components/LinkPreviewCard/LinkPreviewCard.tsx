@@ -39,10 +39,7 @@ export function LinkPreviewCard({
         <h4 className={styles.title}>{title}</h4>
         <p className={styles.danglingMessage}>Note does not exist</p>
         {onCreateNote && (
-          <button
-            className={styles.createButton}
-            onClick={() => onCreateNote(title)}
-          >
+          <button className={styles.createButton} onClick={() => onCreateNote(title)}>
             Create &ldquo;{title}&rdquo;
           </button>
         )}

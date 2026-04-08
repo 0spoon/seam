@@ -125,9 +125,7 @@ export function SearchPage() {
           type="text"
           className={styles.searchInput}
           placeholder={
-            mode === 'semantic'
-              ? 'Ask a question about your notes...'
-              : 'Search notes...'
+            mode === 'semantic' ? 'Ask a question about your notes...' : 'Search notes...'
           }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -151,11 +149,11 @@ export function SearchPage() {
       </div>
 
       <div className={styles.srOnly} aria-live="polite" role="status">
-        {!isLoading && query.trim() && (
-          results.length > 0
+        {!isLoading &&
+          query.trim() &&
+          (results.length > 0
             ? `${results.length} result${results.length === 1 ? '' : 's'} found`
-            : 'No results found'
-        )}
+            : 'No results found')}
       </div>
 
       {isLoading ? (
@@ -163,11 +161,7 @@ export function SearchPage() {
       ) : results.length === 0 && query.trim() ? (
         <EmptyState
           heading="No matches"
-          subtext={
-            mode === 'semantic'
-              ? 'Try rephrasing your question'
-              : 'Try different keywords'
-          }
+          subtext={mode === 'semantic' ? 'Try rephrasing your question' : 'Try different keywords'}
         />
       ) : (
         <motion.div
@@ -193,9 +187,7 @@ export function SearchPage() {
               <div className={styles.resultHeader}>
                 <h3 className={styles.resultTitle}>{result.title}</h3>
                 {result.score !== undefined && (
-                  <span className={styles.resultScore}>
-                    {Math.round(result.score * 100)}%
-                  </span>
+                  <span className={styles.resultScore}>{Math.round(result.score * 100)}%</span>
                 )}
               </div>
               <p

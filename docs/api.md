@@ -62,6 +62,39 @@ POST   /api/ai/suggest-tags           # AI tag suggestions
 POST   /api/ai/suggest-project        # AI project suggestions
 ```
 
+### Assistant
+
+The agentic assistant. Persistent profile and long-term memory live alongside chat. Mutating tools (`create_note`, `update_note`, `append_to_note`, `create_project`, `save_memory`, `update_profile`) pause the loop and require explicit approval; the client resumes via `/actions/{id}/approve` or `/actions/{id}/resume`. See [docs/ai.md](ai.md#assistant) for the full feature description and [docs/security.md](security.md#assistant-safety) for the confirmation gating model.
+
+```
+POST   /api/assistant/chat                                   # one-shot agentic chat
+POST   /api/assistant/chat/stream                            # streaming agentic chat (SSE)
+GET    /api/assistant/conversations/{conversationID}/actions # audit log of executed tool calls
+POST   /api/assistant/actions/{actionID}/approve             # approve a pending action (no resume)
+POST   /api/assistant/actions/{actionID}/resume              # approve and resume the agent loop (SSE)
+POST   /api/assistant/actions/{actionID}/reject              # reject a pending action
+
+GET    /api/assistant/profile                                # owner profile (instructions, facts)
+PUT    /api/assistant/profile                                # update profile
+
+GET    /api/assistant/memories                               # list long-term memories
+POST   /api/assistant/memories                               # create a memory
+DELETE /api/assistant/memories/{memoryID}
+```
+
+### Schedules
+
+Cron-based proactive jobs. The default daily briefing is auto-provisioned on first start (configurable via `seam-server.yaml` -> `scheduler.daily_briefing`).
+
+```
+POST   /api/schedules                 # create
+GET    /api/schedules                 # list
+GET    /api/schedules/{id}
+PUT    /api/schedules/{id}
+DELETE /api/schedules/{id}
+POST   /api/schedules/{id}/run        # run now (out of band)
+```
+
 ### Capture
 
 ```

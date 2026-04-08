@@ -4,11 +4,14 @@
 
 ```bash
 make init                 # interactive config setup (JWT, data dir, LLM provider, Chroma)
-make build                # build seamd + seam to ./bin/
+make build                # build seamd + seam + seam-reindex to ./bin/
 make run                  # build and run the server
 make dev-web              # React dev server (Vite on :5173, proxies /api to :8080)
+make reindex              # re-embed every note against the currently configured embedding model
 make clean                # remove build artifacts + web/dist
 ```
+
+`make reindex` builds and runs `cmd/seam-reindex`. Use it after switching `embeddings.provider` or `models.embeddings` in `seam-server.yaml`: each `(provider, model)` tuple gets its own ChromaDB collection, so search will return nothing until the new collection is populated. The tool is safe to run while seamd is up because the embedder upserts.
 
 ## ChromaDB container
 
@@ -45,12 +48,12 @@ cd web && npx vitest run src/api/client        # single file
 
 ### Build Tags
 
-| Tag | Purpose |
-|---|---|
-| *(default)* | Unit tests. No filesystem, no external services |
-| `integration` | Real filesystem, on-disk SQLite |
-| `external` | Requires running Ollama and/or ChromaDB |
-| `performance` | Benchmarks |
+| Tag           | Purpose                                         |
+| ------------- | ----------------------------------------------- |
+| _(default)_   | Unit tests. No filesystem, no external services |
+| `integration` | Real filesystem, on-disk SQLite                 |
+| `external`    | Requires running Ollama and/or ChromaDB         |
+| `performance` | Benchmarks                                      |
 
 ## Linting & Formatting
 

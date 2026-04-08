@@ -3,7 +3,7 @@
 ## Prerequisites
 
 | Requirement | Version | Required? |
-|---|---|---|
+| --- | --- | --- |
 | [Go](https://go.dev) | 1.25+ | Yes |
 | [Node.js](https://nodejs.org) | 22+ | For web frontend |
 | [Ollama](https://ollama.com) | Latest | For AI features |
@@ -38,7 +38,7 @@ ollama pull qwen3-embedding:8b
 ChromaDB is the vector store that powers semantic search, Ask Seam, auto-link suggestions, and synthesis. It is optional -- skip it and you still get full-text search and writing assist. When you run `make init`, it asks how you want to handle ChromaDB:
 
 | Choice | When to pick it |
-|---|---|
+| --- | --- |
 | `docker` (default) | You have Docker installed and want Seam to manage the container for you |
 | `external` | You already run ChromaDB somewhere -- locally via brew, on another host, etc. |
 | `disable` | You do not want semantic search |
@@ -89,39 +89,53 @@ cd web && npm install && npm run dev              # Vite dev server on :5173, pr
 
 ## Configuration
 
-`seam-server.yaml` with environment variable overrides:
+`seam-server.yaml` with environment variable overrides. The full reference with comments is in [`seam-server.yaml.example`](../seam-server.yaml.example); this is the abridged version.
 
 ```yaml
-listen: ":8080"                      # SEAM_LISTEN
-data_dir: "./data"                   # SEAM_DATA_DIR
-jwt_secret: ""                       # SEAM_JWT_SECRET (required, min 32 chars)
-ollama_base_url: "http://localhost:11434"  # SEAM_OLLAMA_URL
-chromadb_url: "http://localhost:8000"      # SEAM_CHROMADB_URL
+listen: ":8080" # SEAM_LISTEN
+data_dir: "./data" # SEAM_DATA_DIR
+jwt_secret: "" # SEAM_JWT_SECRET (required, min 32 chars)
+ollama_base_url: "http://localhost:11434" # SEAM_OLLAMA_URL
+chromadb_url: "http://localhost:8000" # SEAM_CHROMADB_URL (blank = disable semantic search)
 
-# AI model names (embeddings always use local Ollama)
+# AI model names. models.embeddings is interpreted by the embeddings provider
+# below; models.chat / models.background go through the llm provider.
 models:
   embeddings: "qwen3-embedding:8b"
   background: "qwen3:32b"
   chat: "qwen3:32b"
 
-# LLM provider for chat completions
-# Embeddings stay local regardless of this setting
+# LLM provider for chat completions, writing assist, synthesis, the agentic
+# assistant, and tag/project suggestions. Independent of the embeddings
+# provider below.
 llm:
-  provider: "ollama"               # SEAM_LLM_PROVIDER: "ollama", "openai", "anthropic"
+  provider: "ollama" # SEAM_LLM_PROVIDER: "ollama", "openai", "anthropic"
   openai:
-    api_key: ""                    # SEAM_OPENAI_API_KEY
-    base_url: ""                   # SEAM_OPENAI_BASE_URL (for Azure, Together, Groq, etc.)
+    api_key: "" # SEAM_OPENAI_API_KEY
+    base_url: "" # SEAM_OPENAI_BASE_URL (Azure, Together, Groq, ...)
   anthropic:
-    api_key: ""                    # SEAM_ANTHROPIC_API_KEY
+    api_key: "" # SEAM_ANTHROPIC_API_KEY
+    max_tokens: 4096
+
+# Embedding provider. Independent of llm.provider: a setup with Anthropic
+# chat may legitimately want OpenAI or Ollama embeddings (Anthropic ships no
+# embedding model). Switching the provider or embedding model invalidates
+# the existing Chroma collection -- run `make reindex` after a swap.
+embeddings:
+  provider: "ollama" # SEAM_EMBEDDINGS_PROVIDER: "ollama", "openai"
+  openai:
+    api_key: "" # SEAM_EMBEDDINGS_OPENAI_API_KEY (falls back to llm.openai.api_key)
+    base_url: "" # SEAM_EMBEDDINGS_OPENAI_BASE_URL
+    dimensions: 0 # 0 = native; only for text-embedding-3-* models
 
 # Whisper.cpp for voice transcription (optional)
 whisper:
-  model_path: ""                   # path to ggml model file
+  model_path: "" # path to ggml model file
   binary_path: "whisper-cli"
 
 auth:
   access_token_ttl: "15m"
-  refresh_token_ttl: "168h"
+  refresh_token_ttl: "168h" # 7 days
   bcrypt_cost: 12
 
 ai:
@@ -129,11 +143,19 @@ ai:
   embedding_timeout: "60s"
   chat_timeout: "5m"
 
-userdb:
-  eviction_timeout: "30m"          # close idle user DBs
-
 watcher:
   debounce_interval: "200ms"
+
+# Cron-based proactive jobs. The default daily briefing is auto-provisioned
+# on first start; manage it through /api/schedules afterwards.
+scheduler:
+  enabled: true
+  tick_interval: "1m"
+  daily_briefing:
+    enabled: true
+    cron_expr: "0 8 * * *" # 08:00 daily, server-local time
+    project_slug: "briefings"
+    lookback_hours: 24
 ```
 
 ## Graceful Degradation
@@ -142,14 +164,14 @@ No Ollama URL? AI features are disabled, you get a solid markdown note system. N
 
 ## TUI Keyboard Shortcuts
 
-| Key | Action |
-|---|---|
-| `n` | New note (opens template picker) |
-| `u` | Capture from URL |
-| `v` | Capture from voice |
-| `a` | Ask Seam (AI chat) |
-| `t` | Timeline view |
-| `/` | Search (prefix `?` for semantic) |
-| `Ctrl+S` | Save note |
-| `Ctrl+A` | AI writing assist (in editor) |
-| `Esc` | Back / close |
+| Key            | Action                                                              |
+| -------------- | ------------------------------------------------------------------- |
+| `n`            | New note (opens template picker)                                    |
+| `u`            | Capture from URL                                                    |
+| `v`            | Capture from voice                                                  |
+| `a`            | Ask Seam (AI chat)                                                  |
+| `t`            | Timeline view                                                       |
+| `/`            | Search (prefix `?` for semantic)                                    |
+| `Alt+S` / `F2` | Save note (Ctrl+S is intercepted by tmux and terminal flow control) |
+| `Ctrl+A`       | AI writing assist (in editor)                                       |
+| `Esc`          | Back / close                                                        |

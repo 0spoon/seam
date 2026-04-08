@@ -1,5 +1,10 @@
 // Package migrations embeds SQL migration files and exposes them
 // for use by other packages (auth, userdb, testutil).
+//
+// This is the first public release: the schema is intentionally a single
+// flattened migration. Future schema changes should add new numbered
+// files (002_*.sql, 003_*.sql, ...) and append them to Migrations() so
+// that existing databases upgrade in place.
 package migrations
 
 import (
@@ -9,9 +14,6 @@ import (
 
 //go:embed 001_initial.sql
 var InitialSQL string
-
-//go:embed 002_schedules.sql
-var SchedulesSQL string
 
 // Migration represents a single numbered migration step.
 type Migration struct {
@@ -27,6 +29,5 @@ type Migration struct {
 func Migrations() []Migration {
 	return []Migration{
 		{Version: 1, SQL: InitialSQL},
-		{Version: 2, SQL: SchedulesSQL},
 	}
 }

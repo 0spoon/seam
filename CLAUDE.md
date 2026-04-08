@@ -4,40 +4,43 @@ Quick-reference guide for AI assistants working in this repository. For detailed
 
 ## What is Seam?
 
-Seam is a local-first, AI-powered knowledge system built on markdown. Go backend (REST + WebSocket), React web frontend, Bubble Tea TUI. Multi-user, single machine. Notes are plain `.md` files on disk with YAML frontmatter. AI is powered by Ollama (100% local, no cloud).
+Seam is a local-first, AI-powered knowledge system built on markdown. Go backend (REST + WebSocket), React web frontend, Bubble Tea TUI. Single-user, single machine. Notes are plain `.md` files on disk with YAML frontmatter. AI is powered by Ollama by default (100% local, no cloud), with optional OpenAI and Anthropic providers.
 
 ## Project Structure
 
 ```
 cmd/seamd/          Server binary (main entry, dependency wiring)
 cmd/seam/           TUI client (Bubble Tea)
-cmd/seed/           Dev data generator
+cmd/seam-reindex/   One-shot tool to re-embed notes after switching embedding model
 internal/           Core domain packages (strict layering, no circular imports)
-  ai/               Ollama client, ChromaDB, task queue, embeddings
   agent/            MCP agent memory (sessions, knowledge, briefings)
+  ai/               Ollama/OpenAI/Anthropic clients, ChromaDB, task queue, embeddings
+  assistant/        Agentic assistant (tool-use loop, profile, long-term memory, audit)
   auth/             JWT + bcrypt authentication
+  briefing/         Daily briefing assembler (used by the scheduler)
   capture/          URL fetch (SSRF-safe), voice transcription
-  chat/             Conversational RAG with streaming
+  chat/             Conversation history persistence
   config/           YAML + env var config loading
-  graph/            Knowledge graph visualization
+  graph/            Knowledge graph (nodes, edges, orphans, two-hop)
   integration/      E2E + performance tests (build-tagged)
   mcp/              MCP server (/api/mcp)
-  note/             Note CRUD, frontmatter, wikilinks, tags
+  note/             Note CRUD, frontmatter, wikilinks, tags, versions, daily
   project/          Project CRUD, slug generation
-  reqctx/           Request context keys
+  reqctx/           Request-scoped context (user ID, request ID)
   review/           Knowledge gardening queue
+  scheduler/        Cron-based scheduler for proactive jobs (daily briefing)
   search/           FTS5 + semantic search
   server/           HTTP server, middleware, router
-  settings/         Per-user settings
+  settings/         Owner settings
+  task/             Checkbox task extraction and tracking
   template/         Note templates
   testutil/         Shared test helpers
-  userdb/           Per-user SQLite DB manager (WAL, idle eviction)
+  userdb/           SQLite database manager for the single seam.db
   validate/         Path traversal & input sanitization
-  watcher/          fsnotify file watcher
+  watcher/          fsnotify file watcher + startup reconciliation
+  webhook/          Webhook CRUD, HMAC delivery, SSRF protection
   ws/               WebSocket hub (connection registry, broadcast)
-migrations/
-  server/           server.db migrations (users, refresh tokens)
-  user/             seam.db migrations (notes, projects, links, FTS, agent)
+migrations/         Embedded SQL schema (001_initial.sql, single flattened migration)
 web/                React SPA (TypeScript, Vite, Zustand)
   src/api/          REST + WebSocket client with JWT auto-refresh
   src/components/   UI components (CSS Modules)
@@ -79,23 +82,23 @@ make fmt                # gofmt + prettier
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Backend language | Go 1.25+ (no CGO) |
-| HTTP router | chi v5 |
-| Database | SQLite (modernc.org/sqlite, WAL mode, FTS5) |
-| Vector store | ChromaDB (HTTP API) |
-| LLM | Ollama (local) |
-| Auth | JWT + bcrypt |
-| IDs | ULID everywhere (never UUID) |
-| Frontend | React 19 + TypeScript 5.9 + Vite 7 |
-| State | Zustand |
-| Editor | CodeMirror 6 |
-| Graph | Cytoscape.js + fcose |
-| Icons | Lucide (only) |
-| CSS | CSS Modules + CSS custom properties (dark theme only) |
-| Tests (Go) | testify/require, table-driven, in-memory SQLite |
-| Tests (web) | Vitest + React Testing Library |
+| Layer            | Technology                                            |
+| ---------------- | ----------------------------------------------------- |
+| Backend language | Go 1.25+ (no CGO)                                     |
+| HTTP router      | chi v5                                                |
+| Database         | SQLite (modernc.org/sqlite, WAL mode, FTS5)           |
+| Vector store     | ChromaDB (HTTP API)                                   |
+| LLM              | Ollama (local)                                        |
+| Auth             | JWT + bcrypt                                          |
+| IDs              | ULID everywhere (never UUID)                          |
+| Frontend         | React 19 + TypeScript 5.9 + Vite 7                    |
+| State            | Zustand                                               |
+| Editor           | CodeMirror 6                                          |
+| Graph            | Cytoscape.js + fcose                                  |
+| Icons            | Lucide (only)                                         |
+| CSS              | CSS Modules + CSS custom properties (dark theme only) |
+| Tests (Go)       | testify/require, table-driven, in-memory SQLite       |
+| Tests (web)      | Vitest + React Testing Library                        |
 
 ## Architecture Essentials
 
@@ -136,8 +139,7 @@ make fmt                # gofmt + prettier
 
 ```
 {data_dir}/
-  server.db                 # Owner account, refresh tokens
-  seam.db                   # Notes metadata, FTS, links, AI tasks, agent memory
+  seam.db                   # Owner account, notes metadata, FTS, links, AI tasks, agent memory, settings
   notes/                    # Markdown files on disk (source of truth)
     inbox/                  # Unsorted captures
     {project-slug}/         # One dir per project
@@ -174,7 +176,7 @@ Content with [[wikilinks]] and #tags.
 ## Key Files to Know
 
 | File | Why |
-|------|-----|
+| --- | --- |
 | `cmd/seamd/main.go` | Server entry point, dependency wiring |
 | `internal/server/server.go` | Router setup, middleware chain |
 | `internal/testutil/testutil.go` | Shared test helpers |

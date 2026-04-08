@@ -24,6 +24,7 @@ make chroma-status        # show container status
 make install-service      # install seamd as launchd (macOS) or systemd --user (Linux)
 make uninstall-service    # remove the service(s)
 ```
+
 Note: When working on tasks, use `seam` MCP tools to track session progress and store memories.
 
 ## Testing
@@ -51,6 +52,7 @@ cd web && npx vitest run src/api/client     # single file
 ```
 
 Build tags for test tiers:
+
 - Default: unit tests only. No filesystem, no external services.
 - `//go:build integration`: real filesystem, on-disk SQLite.
 - `//go:build external`: requires running Ollama and/or ChromaDB.
@@ -75,6 +77,7 @@ make fmt                  # gofmt + prettier
 ### Package structure
 
 Each domain package follows this layout:
+
 - `handler.go` -- HTTP handlers (chi router)
 - `service.go` -- business logic
 - `store.go` -- SQLite data access
@@ -82,10 +85,12 @@ Each domain package follows this layout:
 - `*_test.go` -- tests alongside source
 
 Strict layering. No circular imports:
+
 ```
 cmd/ -> internal/server -> internal/{domain packages}
 internal/{domain} -> internal/userdb, internal/ws, internal/ai
 ```
+
 No package imports `internal/server`. The server wires dependencies at startup.
 
 ### Naming conventions
@@ -154,30 +159,19 @@ No package imports `internal/server`. The server wires dependencies at startup.
 
 ## Common pitfalls
 
-The patterns below have been re-introduced multiple times across audit passes. Treat
-this section as a checklist before opening a PR.
+The patterns below have been re-introduced multiple times across audit passes. Treat this section as a checklist before opening a PR.
 
 ### Meta-rules
 
-1. **Propagate every fix.** When you fix a buggy pattern, `grep` the entire repo for
-   other instances of the same pattern and fix them all in the same change. A bug fix
-   that touches only the file flagged in the report is incomplete by default. The
-   "Forbidden APIs" and "Required APIs" lists below double as grep targets.
-2. **Never re-introduce a banned pattern in new code.** When adding a new file or
-   package, scan it against the lists below before declaring done.
-3. **After any interface, store-method, schema, or migration change, run
-   `make build && make test` before declaring done.** Search the test tree
-   (`*_test.go`, `mock*.go`, `fake*.go`) for the changed symbol and update mocks. Test
-   mocks falling out of sync with production interfaces is a recurring class of break.
-4. **No fake results on error.** Helpers must not swallow an error and return a
-   plausible-looking dummy value (e.g. `mustMarshal` returning `{"error":"..."}`). The
-   LLM and downstream code cannot distinguish a real result from a fabricated one.
-   Return the error.
+1. **Propagate every fix.** When you fix a buggy pattern, `grep` the entire repo for other instances of the same pattern and fix them all in the same change. A bug fix that touches only the file flagged in the report is incomplete by default. The "Forbidden APIs" and "Required APIs" lists below double as grep targets.
+2. **Never re-introduce a banned pattern in new code.** When adding a new file or package, scan it against the lists below before declaring done.
+3. **After any interface, store-method, schema, or migration change, run `make build && make test` before declaring done.** Search the test tree (`*_test.go`, `mock*.go`, `fake*.go`) for the changed symbol and update mocks. Test mocks falling out of sync with production interfaces is a recurring class of break.
+4. **No fake results on error.** Helpers must not swallow an error and return a plausible-looking dummy value (e.g. `mustMarshal` returning `{"error":"..."}`). The LLM and downstream code cannot distinguish a real result from a fabricated one. Return the error.
 
 ### Forbidden APIs
 
 | Pattern | Why | Use instead |
-|---------|-----|-------------|
+| --- | --- | --- |
 | `ulid.MustNew` | Panics if `crypto/rand` entropy fails. Crashes the server in request paths. | `ulid.New(ulid.Now(), rand.Reader)` + return the error |
 | `time.Parse(...)` with discarded error (`_, _ = time.Parse(...)`) | Silently produces zero-value timestamps that propagate into responses. | Capture the error and `slog.Warn(...)` (do not return zero-value times to clients) |
 | `os.WriteFile` on a `.md` file | Non-atomic; a crash mid-write corrupts the source-of-truth file. | `note.AtomicWriteFile` (writes to temp file in same dir + `fsync` + `rename`) |
@@ -193,88 +187,39 @@ this section as a checklist before opening a PR.
 | `mustMarshal`-style helpers that fabricate fake JSON on error | LLM/caller cannot distinguish real `{"error":...}` from fake. | Return `(json.RawMessage, error)` and propagate. |
 | Returning `(nil, nil)` from a store method when the row is missing | Future callers forget the nil check and dereference. | Return `(nil, ErrNotFound)`. |
 | Goroutine started with no `done` channel / `WaitGroup` for shutdown | Background work continues after `userdb.CloseAll()` and writes to a closed DB. | Constructor takes `done chan struct{}`; `Run` selects on it; shutdown closes the channel and waits. Match the existing `aiQueueDone`/`schedDone` pattern in `cmd/seamd/main.go`. |
-| New `migrations/*.sql` file without an entry in `migrations/migrations.go` | The file is created but never `go:embed`-ed; the migration silently does not run. | When adding a SQL file, also add `//go:embed user/NNN_*.sql` and append to `UserMigrations()`. Verify with a fresh `seam.db`. |
+| New `migrations/*.sql` file without an entry in `migrations/migrations.go` | The file is created but never `go:embed`-ed; the migration silently does not run. | When adding a SQL file, also add a matching `//go:embed NNN_*.sql` line and append a new `Migration` entry to `Migrations()`. Verify with a fresh `seam.db`. |
 | `time.Sleep` for synchronization | Flaky tests, masks real ordering bugs. | Channels, `sync.WaitGroup`, or `t.Eventually` patterns. |
 
 ### Required APIs and patterns
 
-- **Atomic markdown writes**: every write to a `.md` file goes through
-  `note.AtomicWriteFile` (`internal/note/service.go`). Includes `Create`, `Update`,
-  `Reindex`, the rollback path inside `Update`, the `cmd/seamd/main.go` frontmatter
-  updater closure, and `template/service.go`.
-- **DB-then-file ordering**: any operation that touches both the DB and the filesystem
-  must commit the DB transaction *first*, then perform the filesystem mutation in a
-  post-commit step. See `BulkAction` in `note/service.go` for the canonical pattern
-  (`pendingMoves`/`filesToDelete`). On rollback, also undo any partial filesystem
-  state — the `Update` move path must `os.Remove` the new-path file before reverting
-  the rename.
-- **`Set*` setter functions are mutex-protected**: any `Service.Set*` method that
-  installs a dependency callback after construction must hold a `sync.RWMutex`.
-  Reads go through a `getX()` accessor. See `capture/service.go`'s
-  `getSummarizeFunc()` for the canonical pattern.
-- **`rows.Err()` after every loop**: every `for rows.Next() { ... }` is followed by
-  `if err := rows.Err(); err != nil { ... }`. The `rowserrcheck` linter enforces this.
-- **`http.MaxBytesReader` on every body decode**: every JSON or multipart handler
-  starts with `r.Body = http.MaxBytesReader(w, r.Body, 1<<20)` (or `25<<20` for voice
-  upload). Includes `template/handler.go:apply`, `capture/handler.go` voice path,
-  every assistant handler.
-- **LIKE wildcard escaping**: any user input fed into `LIKE` must go through an
-  escape that handles `\`, `%`, and `_` *in that order* (escape `\` first so the
-  later wildcard escapes are not re-doubled), and the query must include
-  `ESCAPE '\'`. `escapeLIKE` is for `LIKE` only — never apply it to `=` comparisons
-  (it transforms `_` and `%`, which become literal characters in equality match).
-- **FTS5 MATCH sanitization**: every FTS5 `MATCH` on user input goes through
-  `sanitizeMemoryFTSQuery` (or an equivalent that strips operators and quotes terms).
-  Raw user text in `MATCH` causes SQLite errors and a class of injection.
-- **LLM message-history slicing must respect tool-use grouping**: any positional cut
-  of conversation history must use `safeRecentBoundary`-style logic to avoid
-  orphaning a `tool` message from its parent assistant `tool_calls`. OpenAI and
-  Anthropic both reject orphaned tool results with a 400.
-- **Slice copying when extending shared slices**: `append(args, ...)` may share the
-  backing array. If the resulting slice is later mutated independently, copy first:
-  `dst := append(append([]T{}, args...), extra...)`. Especially in SQL arg builders.
-- **Sentinel errors via `errors.New`**, not `fmt.Errorf` (without `%w`). Reserve
-  `fmt.Errorf` for wrapped errors with a `%w` verb.
+- **Atomic markdown writes**: every write to a `.md` file goes through `note.AtomicWriteFile` (`internal/note/service.go`). Includes `Create`, `Update`, `Reindex`, the rollback path inside `Update`, the `cmd/seamd/main.go` frontmatter updater closure, and `template/service.go`.
+- **DB-then-file ordering**: any operation that touches both the DB and the filesystem must commit the DB transaction _first_, then perform the filesystem mutation in a post-commit step. See `BulkAction` in `note/service.go` for the canonical pattern (`pendingMoves`/`filesToDelete`). On rollback, also undo any partial filesystem state — the `Update` move path must `os.Remove` the new-path file before reverting the rename.
+- **`Set*` setter functions are mutex-protected**: any `Service.Set*` method that installs a dependency callback after construction must hold a `sync.RWMutex`. Reads go through a `getX()` accessor. See `capture/service.go`'s `getSummarizeFunc()` for the canonical pattern.
+- **`rows.Err()` after every loop**: every `for rows.Next() { ... }` is followed by `if err := rows.Err(); err != nil { ... }`. The `rowserrcheck` linter enforces this.
+- **`http.MaxBytesReader` on every body decode**: every JSON or multipart handler starts with `r.Body = http.MaxBytesReader(w, r.Body, 1<<20)` (or `25<<20` for voice upload). Includes `template/handler.go:apply`, `capture/handler.go` voice path, every assistant handler.
+- **LIKE wildcard escaping**: any user input fed into `LIKE` must go through an escape that handles `\`, `%`, and `_` _in that order_ (escape `\` first so the later wildcard escapes are not re-doubled), and the query must include `ESCAPE '\'`. `escapeLIKE` is for `LIKE` only — never apply it to `=` comparisons (it transforms `_` and `%`, which become literal characters in equality match).
+- **FTS5 MATCH sanitization**: every FTS5 `MATCH` on user input goes through `sanitizeMemoryFTSQuery` (or an equivalent that strips operators and quotes terms). Raw user text in `MATCH` causes SQLite errors and a class of injection.
+- **LLM message-history slicing must respect tool-use grouping**: any positional cut of conversation history must use `safeRecentBoundary`-style logic to avoid orphaning a `tool` message from its parent assistant `tool_calls`. OpenAI and Anthropic both reject orphaned tool results with a 400.
+- **Slice copying when extending shared slices**: `append(args, ...)` may share the backing array. If the resulting slice is later mutated independently, copy first: `dst := append(append([]T{}, args...), extra...)`. Especially in SQL arg builders.
+- **Sentinel errors via `errors.New`**, not `fmt.Errorf` (without `%w`). Reserve `fmt.Errorf` for wrapped errors with a `%w` verb.
 - **`filepath.Join` everywhere**, including in tests and in `cmd/`.
 
 ### Verification before declaring done
 
-1. `make build && make test` (must include `*_test.go` updates if any interface
-   signature changed).
-2. `make lint` (catches `ulid.MustNew`, missing `rows.Err()`, blank-discarded errors,
-   and a handful of other patterns automatically — see `.golangci.yml`).
-3. For any change that touches a recurring pattern from this section, grep the repo
-   for other instances of the same pattern and fix them in the same change.
+1. `make build && make test` (must include `*_test.go` updates if any interface signature changed).
+2. `make lint` (catches `ulid.MustNew`, missing `rows.Err()`, blank-discarded errors, and a handful of other patterns automatically — see `.golangci.yml`).
+3. For any change that touches a recurring pattern from this section, grep the repo for other instances of the same pattern and fix them in the same change.
 
 ## Accepted designs (don't "fix")
 
-These look like bugs and have been flagged by past audits as bugs. They are
-intentional. Don't "fix" them without first reading the rationale and changing
-the rationale.
+These look like bugs and have been flagged by past audits as bugs. They are intentional. Don't "fix" them without first reading the rationale and changing the rationale.
 
-- **`task.Service.ToggleDone` holds a DB transaction across file I/O.** The
-  task and its parent note must be updated atomically with the file write
-  to the source-of-truth `.md`. Splitting the write out of the tx
-  re-introduces an orphan window.
-- **`task.Service.SyncNote` matches duplicate-content tasks by order, not
-  by content hash.** When a note has two tasks with the same body text, we
-  preserve their state by position rather than by collision-prone hashing.
-  Fragile-looking but deliberate.
-- **Deep semantic-search pagination + recency returns empty past
-  `limit*3`.** The fallback recency layer is bounded so a pathological
-  client cannot pin a request walking the full notes table. Empty results
-  past that boundary are the intended signal.
-- **Path-traversal validation does not resolve symlinks.** `FilePath`
-  values come from the internal `notes` table, never from request input,
-  so the source is already trusted. Adding `filepath.EvalSymlinks` here
-  would create an unrelated TOCTOU race.
-- **`note.toggleCheckboxInFile` has no file-level lock.** Single-user
-  invariant: only one writer at a time. Adding a per-file mutex here
-  buys nothing today and would have to be torn out if the architecture
-  ever returns to multi-tenant.
-- **Service / store APIs still take a `userID` parameter even though it
-  is always `userdb.DefaultUserID` in production.** This is the forward
-  path back to multi-tenant. Don't strip it.
+- **`task.Service.ToggleDone` holds a DB transaction across file I/O.** The task and its parent note must be updated atomically with the file write to the source-of-truth `.md`. Splitting the write out of the tx re-introduces an orphan window.
+- **`task.Service.SyncNote` matches duplicate-content tasks by order, not by content hash.** When a note has two tasks with the same body text, we preserve their state by position rather than by collision-prone hashing. Fragile-looking but deliberate.
+- **Deep semantic-search pagination + recency returns empty past `limit*3`.** The fallback recency layer is bounded so a pathological client cannot pin a request walking the full notes table. Empty results past that boundary are the intended signal.
+- **Path-traversal validation does not resolve symlinks.** `FilePath` values come from the internal `notes` table, never from request input, so the source is already trusted. Adding `filepath.EvalSymlinks` here would create an unrelated TOCTOU race.
+- **`note.toggleCheckboxInFile` has no file-level lock.** Single-user invariant: only one writer at a time. Adding a per-file mutex here buys nothing today and would have to be torn out if the architecture ever returns to multi-tenant.
+- **Service / store APIs still take a `userID` parameter even though it is always `userdb.DefaultUserID` in production.** This is the forward path back to multi-tenant. Don't strip it.
 
 ## Frontend style rules (web/)
 
@@ -302,7 +247,7 @@ the rationale.
 ## Key files
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | `README.md` | Project overview and quick start |
 | `BRAND.md` | Visual identity, colors, fonts, logo usage |
 | `docs/getting-started.md` | Prerequisites, installation, configuration |

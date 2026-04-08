@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import type { Note, NoteFilter, CreateNoteReq, UpdateNoteReq, BulkActionResult } from '../api/types';
+import type {
+  Note,
+  NoteFilter,
+  CreateNoteReq,
+  UpdateNoteReq,
+  BulkActionResult,
+} from '../api/types';
 import * as api from '../api/client';
 import { useToastStore } from '../components/Toast/ToastContainer';
 
@@ -138,9 +144,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     try {
       const backlinks = await api.getBacklinks(noteId);
       set({ backlinks });
-    } catch (err) {
-      const message = err instanceof api.ApiError ? err.message : 'Failed to fetch backlinks';
-      console.error('fetchBacklinks:', message, err);
+    } catch {
+      // Backlinks are non-critical UI; silently fall back to an empty list.
       set({ backlinks: [] });
     }
   },
@@ -227,11 +232,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     if (selectedNoteIds.size === 0) return null;
 
     try {
-      const result = await api.bulkUpdateNotes(
-        Array.from(selectedNoteIds),
-        action,
-        params,
-      );
+      const result = await api.bulkUpdateNotes(Array.from(selectedNoteIds), action, params);
       // Clear selection and refresh the note list.
       set({ selectedNoteIds: new Set<string>(), isSelectionMode: false });
       const { notes, total } = await api.listNotes(lastFilter);

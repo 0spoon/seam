@@ -46,11 +46,11 @@ graph TD
 ## Tech Stack
 
 | Layer | Technology | Why |
-|---|---|---|
+| --- | --- | --- |
 | **Backend** | Go + chi router | Single binary, low memory, strong concurrency. No CGO |
 | **Storage** | Plain `.md` files on disk | Portable, human-readable, yours forever. Source of truth |
 | **Metadata** | SQLite (`modernc.org/sqlite`) | ACID, FTS5, zero infrastructure. Pure Go |
-| **Vector store** | ChromaDB (optionally containerized) | Per-user collections, HTTP API. Seam can manage it via `docker/chroma-compose.yml` |
+| **Vector store** | ChromaDB (optionally containerized) | One collection per `(provider, model)` tuple, HTTP API. Seam can manage it via `docker/chroma-compose.yml` |
 | **AI** | Ollama / OpenAI / Anthropic | Local by default, cloud when you want it |
 | **TUI** | Bubble Tea | Elm architecture for your terminal |
 | **Web** | React 19 + TypeScript 5.9 + Vite 7 | CodeMirror 6 markdown editor |
@@ -81,8 +81,7 @@ Your notes here, with [[wikilinks]] and #tags inline.
 
 ```
 {data_dir}/
-  server.db                        # owner account, refresh tokens
-  seam.db                          # notes metadata, FTS, links, AI tasks, agent memory
+  seam.db                          # owner account, notes metadata, FTS, links, AI tasks, agent memory, settings
   notes/                           # your markdown files -- edit with anything
     inbox/                         # unsorted captures
     {project-slug}/                # one directory per project
@@ -98,12 +97,14 @@ Files live on disk. Edit them with whatever you want. Seam watches and re-indexe
 cmd/
   seamd/                    # server binary
   seam/                     # TUI binary
-  seed/                     # seed data generator
+  seam-reindex/             # one-shot tool to re-embed notes after switching embedding model
 internal/
   agent/                    # MCP agent sessions, memory, briefings, tool audit
   ai/                       # providers (Ollama, OpenAI, Anthropic), embedder,
                             #   synthesizer, auto-linker, writer, suggester, queue
+  assistant/                # agentic assistant: tool-use loop, profile, long-term memory, audit
   auth/                     # registration, login, JWT, bcrypt
+  briefing/                 # daily briefing assembler (consumed by the scheduler)
   capture/                  # URL fetch (SSRF-safe), voice transcription
   chat/                     # conversation history persistence
   config/                   # YAML + env config loading
@@ -113,12 +114,13 @@ internal/
   project/                  # CRUD, slugs, cascade delete
   reqctx/                   # request-scoped context (user ID, request ID)
   review/                   # knowledge gardening queue
+  scheduler/                # cron-based proactive jobs (e.g. daily briefing)
   search/                   # FTS5 + semantic search
   server/                   # HTTP server, middleware, router wiring
   settings/                 # owner settings
   task/                     # checkbox task extraction and tracking
   template/                 # note templates with variable substitution
-  userdb/                   # SQLite database manager (owner-scoped seam.db)
+  userdb/                   # SQLite database manager for the single seam.db
   validate/                 # path traversal, input sanitization
   watcher/                  # fsnotify file watcher + startup reconciliation
   webhook/                  # webhook CRUD, HMAC delivery, SSRF protection
@@ -135,8 +137,6 @@ web/
     stores/                 # Zustand (auth, notes, projects, settings, ui, review)
     lib/                    # markdown rendering, date formatting, sanitization
     styles/                 # CSS variables, global styles, CSS Modules
-migrations/
-  server/                   # server.db migrations
-  user/                     # seam.db migrations (owner-scoped data)
+migrations/                 # embedded SQL schema (single flattened 001_initial.sql)
 docs/                       # documentation
 ```

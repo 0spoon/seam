@@ -151,7 +151,12 @@ func (s *Service) AddMessage(ctx context.Context, userID string, msg Message) er
 		msg.ID = idVal.String()
 	}
 	if msg.CreatedAt == "" {
-		msg.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+		// Use nanosecond precision so rapid sequential inserts don't
+		// collide on the same created_at -- the GetConversation /
+		// SearchMessages ORDER BY relies on this for stable replay
+		// (IH-257). The agentic assistant path already uses nano
+		// precision; this aligns the public API.
+		msg.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 
 	if err := s.store.AddMessage(ctx, db, msg); err != nil {

@@ -376,6 +376,20 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 			return
 		}
 
+		// Make sure the conversation row exists before any persist.
+		// Clients that POST to /api/assistant/chat/stream with a fresh
+		// conversation_id (without first calling chat.CreateConversation)
+		// would otherwise have every persist rejected by the
+		// conversation-existence check in chat.Store.AddMessage and lose
+		// the entire turn -- including the envelope a later
+		// ResumeAction needs to find (IH-261).
+		if s.chatHistory != nil && req.ConversationID != "" {
+			if ensureErr := s.chatHistory.EnsureConversation(ctx, db, req.ConversationID); ensureErr != nil {
+				eventCh <- StreamEvent{Type: StreamEventError, Error: fmt.Sprintf("ensure conversation: %s", ensureErr)}
+				return
+			}
+		}
+
 		profile, memories := s.loadContext(ctx, db, req.Message)
 		conversationSummary, recentHistory := s.applyConversationSummary(ctx, db, req.ConversationID, req.History)
 		systemPrompt := buildSystemPrompt(profile, memories, conversationSummary)
@@ -724,6 +738,17 @@ func (s *Service) ResumeAction(ctx context.Context, userID, actionID string) (<-
 	eventCh := make(chan StreamEvent, 64)
 	go func() {
 		defer close(eventCh)
+
+		// Defensive: ensure the conversation row exists. Resume should
+		// always have a row (rebuildContextForResume reads it below) but
+		// matching ChatStream's invariant keeps the persist path uniform
+		// (IH-261).
+		if s.chatHistory != nil && action.ConversationID != "" {
+			if ensureErr := s.chatHistory.EnsureConversation(ctx, db, action.ConversationID); ensureErr != nil {
+				eventCh <- StreamEvent{Type: StreamEventError, Error: fmt.Sprintf("ensure conversation: %s", ensureErr)}
+				return
+			}
+		}
 
 		messages, envelopeIdx, skipCount, err := s.rebuildContextForResume(ctx, db, action)
 		if err != nil {

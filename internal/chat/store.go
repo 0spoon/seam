@@ -94,6 +94,30 @@ func (s *Store) CreateConversation(ctx context.Context, db DBTX, conv Conversati
 	return nil
 }
 
+// EnsureConversation inserts a conversation row only if one does not
+// already exist. It is the upsert path used by callers (notably the
+// agentic assistant) that receive a conversation_id from a client
+// without first calling CreateConversation. Without this helper,
+// AddMessage's RowsAffected check would reject every persist with
+// ErrNotFound and the chat history would silently be lost -- and a
+// later resume would fail looking for an envelope that was never
+// stored (IH-261).
+func (s *Store) EnsureConversation(ctx context.Context, db DBTX, id string) error {
+	if id == "" {
+		return fmt.Errorf("chat.Store.EnsureConversation: empty id")
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at)
+		 VALUES (?, '', ?, ?)`,
+		id, now, now,
+	)
+	if err != nil {
+		return fmt.Errorf("chat.Store.EnsureConversation: %w", err)
+	}
+	return nil
+}
+
 // ListConversations returns conversations ordered by most recent first.
 // Returns the conversations and total count for pagination.
 func (s *Store) ListConversations(ctx context.Context, db DBTX, limit, offset int) ([]Conversation, int, error) {
@@ -141,12 +165,19 @@ func (s *Store) GetConversation(ctx context.Context, db DBTX, id string) (*Conve
 		return nil, nil, fmt.Errorf("chat.Store.GetConversation: %w", err)
 	}
 
+	// Order by created_at first, then iteration, then id. The iteration
+	// column is the agentic-loop position (added in migration 001) and
+	// the deterministic tiebreaker when two persisted messages share a
+	// timestamp on platforms with coarse monotonic-clock granularity --
+	// without it, rebuildContextForResume can see an envelope/tool-result
+	// pair in the wrong order. ULIDs are monotonic within a millisecond
+	// so id ASC is a safe final tiebreaker (IH-257).
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, conversation_id, role, content, citations,
 		        tool_calls, tool_call_id, tool_name, iteration, created_at
 		 FROM messages
 		 WHERE conversation_id = ?
-		 ORDER BY created_at ASC`,
+		 ORDER BY created_at ASC, iteration ASC, id ASC`,
 		id,
 	)
 	if err != nil {
@@ -330,12 +361,15 @@ func (s *Store) SearchMessages(ctx context.Context, db DBTX, query string, limit
 	// matters: backslash must be doubled first so the wildcard escapes
 	// inserted next don't get re-escaped.
 	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(query)
+	// Tiebreak on iteration and id for the same reason as
+	// GetConversation -- see IH-257. Both directions are reversed here
+	// because SearchMessages returns most-recent-first.
 	rows, err := db.QueryContext(ctx,
 		`SELECT m.id, m.conversation_id, m.role, m.content, m.citations,
 		        m.tool_calls, m.tool_call_id, m.tool_name, m.iteration, m.created_at
 		 FROM messages m
 		 WHERE m.content LIKE ? ESCAPE '\'
-		 ORDER BY m.created_at DESC
+		 ORDER BY m.created_at DESC, m.iteration DESC, m.id DESC
 		 LIMIT ?`,
 		"%"+escaped+"%", limit,
 	)

@@ -754,11 +754,16 @@ func (c *APIClient) doAssistantStreamRequest(ctx context.Context, path string, b
 	}
 	if resp.StatusCode == http.StatusUnauthorized && c.RefreshToken != "" {
 		_ = resp.Body.Close()
-		if _, refreshErr := c.RefreshCtx(ctx); refreshErr == nil {
-			resp, err = c.assistantStreamPOST(ctx, path, body)
-			if err != nil {
-				return nil, err
-			}
+		if _, refreshErr := c.RefreshCtx(ctx); refreshErr != nil {
+			// Refresh failed: bail out instead of falling through to
+			// the closed-body read below, which would surface an empty
+			// "assistant stream HTTP 401:" with no useful detail
+			// (IH-260).
+			return nil, fmt.Errorf("token refresh after 401 failed: %w", refreshErr)
+		}
+		resp, err = c.assistantStreamPOST(ctx, path, body)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if resp.StatusCode >= 400 {

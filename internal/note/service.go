@@ -353,12 +353,38 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 		return nil, fmt.Errorf("note.Service.Update: %w", err)
 	}
 
-	// Capture pre-update state for version history.
+	notesDir := s.userDBManager.UserNotesDir(userID)
+
+	// Read the current on-disk content before any mutations. The same
+	// bytes are used for two purposes:
+	//  1. The authoritative source for the version snapshot below. The
+	//     DB row's body can lag behind disk when the fsnotify watcher's
+	//     debounce window has not fired yet (IH-256). Snapshotting from
+	//     the DB cache in that window would silently drop the user's
+	//     external edit from version history.
+	//  2. Restore-on-commit-failure once the new content has been
+	//     written.
+	oldFilePath := filepath.Join(notesDir, existing.FilePath)
+	oldContent, readErr := os.ReadFile(oldFilePath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return nil, fmt.Errorf("note.Service.Update: read old file: %w", readErr)
+	}
+
+	// Capture pre-update state for version history. Prefer the parsed
+	// disk content over the DB cache so any external edit that landed
+	// inside the watcher debounce window is preserved.
 	oldTitle := existing.Title
 	oldBody := existing.Body
 	oldContentHash := existing.ContentHash
-
-	notesDir := s.userDBManager.UserNotesDir(userID)
+	if len(oldContent) > 0 {
+		if diskFM, diskBody, parseErr := ParseFrontmatter(string(oldContent)); parseErr == nil {
+			if diskFM.Title != "" {
+				oldTitle = diskFM.Title
+			}
+			oldBody = diskBody
+			oldContentHash = computeHash(string(oldContent))
+		}
+	}
 
 	// Apply changes.
 	if req.Title != nil {
@@ -450,16 +476,10 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 
 	existing.ContentHash = computeHash(content)
 
-	// Read old file content before any mutations so we can restore on failure.
+	// absPath is the destination of the new file write. oldFilePath
+	// (read above) is the source of the old content used for the
+	// version snapshot and the restore-on-commit-failure path.
 	absPath := filepath.Join(notesDir, existing.FilePath)
-	oldFileAbs := absPath
-	if pendingMove.needed {
-		oldFileAbs = pendingMove.oldAbs
-	}
-	oldContent, readErr := os.ReadFile(oldFileAbs)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return nil, fmt.Errorf("note.Service.Update: read old file: %w", readErr)
-	}
 
 	// --- Begin DB transaction ---
 	tx, err := db.BeginTx(ctx, nil)
@@ -522,14 +542,14 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 	if err := tx.Commit(); err != nil {
 		// Commit failed: restore old file content (best effort).
 		if oldContent != nil {
-			if restoreErr := AtomicWriteFile(oldFileAbs, oldContent, 0o644); restoreErr != nil {
+			if restoreErr := AtomicWriteFile(oldFilePath, oldContent, 0o644); restoreErr != nil {
 				s.logger.Error("note.Service.Update: failed to restore file after commit error",
-					"path", oldFileAbs, "error", restoreErr)
+					"path", oldFilePath, "error", restoreErr)
 			}
 			// Undo the move if we did one.
 			if pendingMove.needed {
 				// Remove the new file written at the new path (absPath) to avoid orphans.
-				if absPath != oldFileAbs {
+				if absPath != oldFilePath {
 					if rmErr := os.Remove(absPath); rmErr != nil && !os.IsNotExist(rmErr) {
 						s.logger.Error("note.Service.Update: failed to remove new file after commit error",
 							"path", absPath, "error", rmErr)

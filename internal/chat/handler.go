@@ -192,12 +192,18 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Tool messages are produced by the agentic assistant; their content
 	// is the tool result string and may be empty when the tool returned
-	// nothing meaningful. Other roles still require a non-empty content.
+	// nothing meaningful. Assistant turns that only request tool calls
+	// (role=assistant + tool_calls non-empty + empty content) are also
+	// the canonical "I want to call these tools, no narration" wire
+	// shape and must be allowed (IH-258). Other roles still require a
+	// non-empty content.
 	if req.Role == "" {
 		writeError(w, http.StatusBadRequest, "role is required")
 		return
 	}
-	if req.Role != "tool" && req.Content == "" {
+	contentRequired := req.Role != "tool" &&
+		!(req.Role == "assistant" && len(req.ToolCalls) > 0)
+	if contentRequired && req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}

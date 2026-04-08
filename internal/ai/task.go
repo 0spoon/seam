@@ -173,7 +173,10 @@ func (s *TaskStore) UpdateStatus(ctx context.Context, db *sql.DB, id, status str
 	if err != nil {
 		return fmt.Errorf("ai.TaskStore.UpdateStatus: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("ai.TaskStore.UpdateStatus: rows affected: %w", raErr)
+	}
 	if n == 0 {
 		return ErrTaskNotFound
 	}

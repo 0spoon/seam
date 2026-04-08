@@ -38,6 +38,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/chat/stream", h.chatStream)
 	r.Get("/conversations/{conversationID}/actions", h.listActions)
 	r.Post("/actions/{actionID}/approve", h.approveAction)
+	r.Post("/actions/{actionID}/resume", h.resumeAction)
 	r.Post("/actions/{actionID}/reject", h.rejectAction)
 
 	// Profile endpoints.
@@ -214,6 +215,63 @@ func (h *Handler) listActions(w http.ResponseWriter, r *http.Request) {
 	}); encErr != nil {
 		h.logger.Error("assistant.Handler.listActions: encode response failed", "error", encErr)
 	}
+}
+
+// resumeAction approves a pending action and streams the continued
+// agent loop back to the client as SSE. The client should treat the
+// stream identically to /chat/stream -- same event types, same
+// rendering. The only difference is the URL.
+func (h *Handler) resumeAction(w http.ResponseWriter, r *http.Request) {
+	userID := reqctx.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	actionID := chi.URLParam(r, "actionID")
+	if actionID == "" {
+		writeError(w, http.StatusBadRequest, "action_id is required")
+		return
+	}
+
+	eventCh, err := h.service.ResumeAction(r.Context(), userID, actionID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "action not found")
+			return
+		}
+		h.logger.Error("assistant.Handler.resumeAction: failed",
+			"error", err, "user_id", userID, "action_id", actionID)
+		writeError(w, http.StatusInternalServerError, "failed to resume action")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	for event := range eventCh {
+		select {
+		case <-r.Context().Done():
+			return
+		default:
+		}
+		data, marshalErr := json.Marshal(event)
+		if marshalErr != nil {
+			continue
+		}
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
 }
 
 func (h *Handler) approveAction(w http.ResponseWriter, r *http.Request) {

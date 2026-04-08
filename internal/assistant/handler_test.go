@@ -155,8 +155,8 @@ func TestHandler_ListActions_Success(t *testing.T) {
 
 	// Insert a test action directly.
 	_, err = db.Exec(
-		`INSERT INTO assistant_actions (id, conversation_id, tool_name, arguments, result, status, created_at)
-		 VALUES ('act1', 'conv1', 'search_notes', '{"query":"test"}', '{"results":[]}', 'executed', '2026-03-16T10:00:00Z')`,
+		`INSERT INTO assistant_actions (id, conversation_id, tool_name, tool_call_id, iteration, arguments, result, status, created_at)
+		 VALUES ('act1', 'conv1', 'search_notes', 'call_1', 0, '{"query":"test"}', '{"results":[]}', 'executed', '2026-03-16T10:00:00Z')`,
 	)
 	require.NoError(t, err)
 
@@ -224,8 +224,8 @@ func TestHandler_ApproveAction(t *testing.T) {
 
 	// Insert a pending action.
 	_, err = db.Exec(
-		`INSERT INTO assistant_actions (id, conversation_id, tool_name, arguments, status, created_at)
-		 VALUES ('act_pending', 'conv1', 'create_note', '{"title":"Test"}', 'pending', '2026-03-16T10:00:00Z')`,
+		`INSERT INTO assistant_actions (id, conversation_id, tool_name, tool_call_id, iteration, arguments, status, created_at)
+		 VALUES ('act_pending', 'conv1', 'create_note', 'call_pending', 0, '{"title":"Test"}', 'pending', '2026-03-16T10:00:00Z')`,
 	)
 	require.NoError(t, err)
 
@@ -273,8 +273,8 @@ func TestHandler_RejectAction(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = db.Exec(
-		`INSERT INTO assistant_actions (id, conversation_id, tool_name, arguments, status, created_at)
-		 VALUES ('act_pending', 'conv1', 'create_note', '{}', 'pending', '2026-03-16T10:00:00Z')`,
+		`INSERT INTO assistant_actions (id, conversation_id, tool_name, tool_call_id, iteration, arguments, status, created_at)
+		 VALUES ('act_pending', 'conv1', 'create_note', 'call_pending', 0, '{}', 'pending', '2026-03-16T10:00:00Z')`,
 	)
 	require.NoError(t, err)
 
@@ -297,4 +297,87 @@ func TestHandler_RejectAction(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestHandler_ResumeAction_StreamsEvents(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	mock := &mockToolChatCompleter{
+		responses: []*ai.ToolChatResponse{
+			// Iteration 0: assistant envelope with the write tool call.
+			{
+				Content:      "I'll create the note.",
+				FinishReason: "tool_calls",
+				ToolCalls: []ai.ToolCall{
+					{ID: "call_create", Name: "create_note", Arguments: `{"title":"X"}`},
+				},
+			},
+			// Iteration 1 (after resume): final text.
+			{Content: "Note created.", FinishReason: "stop"},
+		},
+	}
+
+	registry := NewToolRegistry()
+	registry.Register(&Tool{
+		Name:        "create_note",
+		Description: "Create a note",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"id":"n1"}`), nil
+		},
+		ReadOnly: false,
+	})
+
+	svc := newTestService(t, db, mock, registry, ServiceConfig{
+		MaxIterations:        10,
+		ConfirmationRequired: []string{"create_note"},
+	})
+	handler := NewHandler(svc, slog.Default())
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := reqctx.WithUserID(r.Context(), "default")
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
+	r.Mount("/api/assistant", handler.Routes())
+
+	// First, drive ChatStream to a confirmation so an action exists.
+	chatBody := chatRequest{ConversationID: "conv1", Message: "create a note"}
+	chatJSON, err := json.Marshal(chatBody)
+	require.NoError(t, err)
+	chatReq := httptest.NewRequest(http.MethodPost, "/api/assistant/chat/stream", bytes.NewReader(chatJSON))
+	chatReq.Header.Set("Content-Type", "application/json")
+	chatRec := httptest.NewRecorder()
+	r.ServeHTTP(chatRec, chatReq)
+	require.Equal(t, http.StatusOK, chatRec.Code)
+
+	// Read the action ID by listing actions.
+	listReq := httptest.NewRequest(http.MethodGet, "/api/assistant/conversations/conv1/actions", nil)
+	listRec := httptest.NewRecorder()
+	r.ServeHTTP(listRec, listReq)
+	require.Equal(t, http.StatusOK, listRec.Code)
+	var listResp struct {
+		Actions []*Action `json:"actions"`
+	}
+	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &listResp))
+	require.Len(t, listResp.Actions, 1)
+	actionID := listResp.Actions[0].ID
+	require.Equal(t, ActionStatusPending, listResp.Actions[0].Status)
+
+	// Now resume via the SSE endpoint.
+	resumeReq := httptest.NewRequest(http.MethodPost, "/api/assistant/actions/"+actionID+"/resume", nil)
+	resumeRec := httptest.NewRecorder()
+	r.ServeHTTP(resumeRec, resumeReq)
+
+	require.Equal(t, http.StatusOK, resumeRec.Code)
+	require.Equal(t, "text/event-stream", resumeRec.Header().Get("Content-Type"))
+	body := resumeRec.Body.String()
+	require.Contains(t, body, "data:")
+	require.Contains(t, body, "tool_use")
+	require.Contains(t, body, "Note created.")
+	require.Contains(t, body, "[DONE]")
 }

@@ -6,7 +6,7 @@ import {
   getConversation,
   deleteConversation,
   streamAssistantChat,
-  approveAssistantAction,
+  streamResumeAction,
   rejectAssistantAction,
 } from '../../api/client';
 import { sanitizeHtml } from '../../lib/sanitize';
@@ -46,38 +46,30 @@ function localId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// historyToAssistant converts persisted ChatHistoryMessages (as returned by
-// getConversation) into the wire-format AssistantMessage shape the server
-// expects in the `history` field of /assistant/chat/stream.
+// toAssistantHistory converts persisted ChatHistoryMessages (as returned
+// by getConversation) into the wire-format AssistantMessage shape the
+// server expects in the `history` field of /assistant/chat/stream.
 //
-// Tool messages are flattened into user-prefixed system notes. We cannot
-// pass them through with role='tool' because LLM providers reject orphan
-// tool messages that don't pair with a preceding assistant tool_call
-// envelope by tool_call_id. The persisted history may contain such
-// orphans (e.g., the tool result row that the approve flow synthesizes,
-// or a reloaded conversation where the original tool_call_id was lost),
-// so we collapse them into a benign user note. Assistant rows that DO
-// have tool_calls are passed through unchanged so the LLM still sees
-// the proper envelope when both halves of a pair are present.
+// system rows are skipped because they're audit markers (e.g., "Pending
+// confirmation for X (action Y)") that would confuse the LLM. Every
+// other role is passed through unchanged. The server now produces
+// well-paired histories (assistant tool_call envelopes followed by
+// matching tool result rows), so the client just forwards them.
 function toAssistantHistory(
   msgs: ChatHistoryMessage[],
 ): AssistantMessage[] {
-  return msgs.map((m) => {
-    if (m.role === 'tool' || m.role === 'system') {
-      const label = m.tool_name ? `tool ${m.tool_name}` : 'system';
-      return {
-        role: 'user',
-        content: `[system note: ${label}] ${m.content}`,
-      };
-    }
-    return {
+  const out: AssistantMessage[] = [];
+  for (const m of msgs) {
+    if (m.role === 'system') continue;
+    out.push({
       role: m.role,
       content: m.content,
       tool_calls: m.tool_calls,
       tool_call_id: m.tool_call_id,
       tool_name: m.tool_name,
-    };
-  });
+    });
+  }
+  return out;
 }
 
 export function AskPage() {
@@ -368,49 +360,86 @@ export function AskPage() {
 
   const handleApprove = async () => {
     if (!pendingConfirmation || !conversationId) return;
-    setApprovalLoading(true);
-    try {
-      const result = await approveAssistantAction(
-        pendingConfirmation.actionId,
-      );
-      const resultJson = JSON.stringify(
-        result.result ?? { ok: true },
-        null,
-        2,
-      );
-      // KNOWN LIMITATION: the assistant package does not expose a resume
-      // API. We cannot inject a real role='tool' message into the next
-      // turn because that requires the original tool_call_id (which the
-      // approve endpoint does not return) AND a paired assistant
-      // tool_call envelope; orphan tool messages get rejected by the
-      // LLM provider. As a workaround we surface the tool result as a
-      // synthetic role='system' message in the local UI (and as a
-      // user-prefixed system note in the next stream's history) and
-      // send an explicit approval prompt that tells the LLM the action
-      // is already done. Without this hint the LLM keeps redoing the
-      // tool call and re-triggers the confirmation forever.
-      const syntheticTool: ChatHistoryMessage = {
-        id: localId(),
-        conversation_id: conversationId,
-        role: 'system',
-        content: `[tool ${pendingConfirmation.toolName} executed] ${resultJson}`,
-        tool_name: pendingConfirmation.toolName,
-        created_at: new Date().toISOString(),
-      };
-      const nextMessages = [...messages, syntheticTool];
-      setMessages(nextMessages);
-      setPendingConfirmation(null);
+    const actionId = pendingConfirmation.actionId;
 
-      const followUp = result.error
-        ? `I approved the "${pendingConfirmation.toolName}" action but it failed with: ${result.error}. Please report the failure and suggest next steps. Do not retry the same call automatically.`
-        : `I approved the "${pendingConfirmation.toolName}" action and it has been executed successfully. Result: ${resultJson}. Please confirm completion to me in plain language and do NOT call ${pendingConfirmation.toolName} again.`;
-      await runStream(conversationId, followUp, nextMessages);
+    setApprovalLoading(true);
+    setPendingConfirmation(null);
+    setStreamStatus('streaming');
+    setStreamingText('');
+    setStreamingTools([]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let finalText = '';
+    const finalTools: ToolCallView[] = [];
+    let nextConfirmation: PendingConfirmation | null = null;
+
+    const handleEvent = (e: AssistantStreamEvent) => {
+      if (e.type === 'text') {
+        finalText = e.content ?? '';
+        setStreamingText(finalText);
+      } else if (e.type === 'tool_use') {
+        const view: ToolCallView = {
+          id: localId(),
+          toolName: e.tool_name ?? 'tool',
+          status: e.error ? 'error' : 'ok',
+          resultJson: e.content,
+          errorMessage: e.error,
+        };
+        finalTools.push(view);
+        setStreamingTools((prev) => [...prev, view]);
+      } else if (e.type === 'confirmation') {
+        nextConfirmation = {
+          actionId: e.content ?? '',
+          toolName: e.tool_name ?? 'tool',
+        };
+      } else if (e.type === 'error') {
+        const msg = e.error ?? 'Stream error';
+        addToast(msg, 'error');
+        setStreamStatus('error');
+      }
+    };
+
+    try {
+      await streamResumeAction(actionId, handleEvent, controller.signal);
     } catch (err) {
+      if (controller.signal.aborted) {
+        setStreamStatus('idle');
+        setStreamingText('');
+        setStreamingTools([]);
+        return;
+      }
       const msg = err instanceof Error ? err.message : 'Approval failed';
       addToast(msg, 'error');
       setStreamStatus('error');
+      setStreamingText('');
+      setStreamingTools([]);
+      return;
     } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       setApprovalLoading(false);
+    }
+
+    // The resume stream completed cleanly. Reload the canonical
+    // conversation from the server so the UI reflects what was
+    // persisted (assistant envelopes, tool results, final text).
+    try {
+      const { messages: msgs } = await getConversation(conversationId);
+      setMessages(msgs);
+    } catch {
+      // Non-fatal: the streaming scratch state still shows the result.
+    }
+    setStreamingText('');
+    setStreamingTools([]);
+
+    if (nextConfirmation) {
+      setPendingConfirmation(nextConfirmation);
+      setStreamStatus('awaiting_approval');
+    } else {
+      setStreamStatus('idle');
     }
   };
 

@@ -9,10 +9,17 @@ import (
 )
 
 // Action represents a logged assistant action for audit.
+//
+// ToolCallID and Iteration link this action back to the LLM-issued
+// tool_call envelope that produced it. They are required for
+// Service.ResumeAction to find the right assistant message in
+// persisted chat history and continue the agent loop after approval.
 type Action struct {
 	ID             string    `json:"id"`
 	ConversationID string    `json:"conversation_id"`
 	ToolName       string    `json:"tool_name"`
+	ToolCallID     string    `json:"tool_call_id"`
+	Iteration      int       `json:"iteration"`
 	Arguments      string    `json:"arguments"` // JSON
 	Result         string    `json:"result"`    // JSON
 	Status         string    `json:"status"`    // pending, approved, executed, rejected, failed
@@ -40,10 +47,12 @@ func NewStore() *Store {
 // RecordAction inserts an action into the assistant_actions table.
 func (s *Store) RecordAction(ctx context.Context, db *sql.DB, a *Action) error {
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO assistant_actions (id, conversation_id, tool_name, arguments, result, status, created_at, executed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.ConversationID, a.ToolName, a.Arguments,
-		nullableStr(a.Result), a.Status,
+		`INSERT INTO assistant_actions
+		    (id, conversation_id, tool_name, tool_call_id, iteration,
+		     arguments, result, status, created_at, executed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.ConversationID, a.ToolName, a.ToolCallID, a.Iteration,
+		a.Arguments, nullableStr(a.Result), a.Status,
 		a.CreatedAt.Format(time.RFC3339Nano),
 		nullableTime(a.ExecutedAt),
 	)
@@ -88,7 +97,8 @@ func (s *Store) ListActions(ctx context.Context, db *sql.DB, conversationID stri
 		limit = 50
 	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, conversation_id, tool_name, arguments, result, status, created_at, executed_at
+		`SELECT id, conversation_id, tool_name, tool_call_id, iteration,
+		        arguments, result, status, created_at, executed_at
 		 FROM assistant_actions
 		 WHERE conversation_id = ?
 		 ORDER BY created_at ASC
@@ -116,7 +126,8 @@ func (s *Store) ListActions(ctx context.Context, db *sql.DB, conversationID stri
 // no row matches.
 func (s *Store) GetAction(ctx context.Context, db *sql.DB, actionID string) (*Action, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, conversation_id, tool_name, arguments, result, status, created_at, executed_at
+		`SELECT id, conversation_id, tool_name, tool_call_id, iteration,
+		        arguments, result, status, created_at, executed_at
 		 FROM assistant_actions
 		 WHERE id = ?`, actionID)
 	if err != nil {
@@ -139,13 +150,19 @@ func (s *Store) GetAction(ctx context.Context, db *sql.DB, actionID string) (*Ac
 
 func scanAction(rows *sql.Rows) (*Action, error) {
 	var a Action
+	var toolCallID sql.NullString
 	var arguments, result, status sql.NullString
 	var createdAt, executedAt sql.NullString
 
 	err := rows.Scan(&a.ID, &a.ConversationID, &a.ToolName,
+		&toolCallID, &a.Iteration,
 		&arguments, &result, &status, &createdAt, &executedAt)
 	if err != nil {
 		return nil, err
+	}
+
+	if toolCallID.Valid {
+		a.ToolCallID = toolCallID.String
 	}
 
 	if arguments.Valid {

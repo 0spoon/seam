@@ -300,6 +300,8 @@ CREATE TABLE IF NOT EXISTS assistant_actions (
     id              TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     tool_name       TEXT NOT NULL,
+    tool_call_id    TEXT NOT NULL,
+    iteration       INTEGER NOT NULL DEFAULT 0,
     arguments       TEXT NOT NULL,
     result          TEXT,
     status          TEXT NOT NULL DEFAULT 'pending',

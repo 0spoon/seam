@@ -217,6 +217,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 					ID:             actionID,
 					ConversationID: req.ConversationID,
 					ToolName:       tc.Name,
+					ToolCallID:     tc.ID,
+					Iteration:      iteration,
 					Arguments:      tc.Arguments,
 					Status:         ActionStatusPending,
 					CreatedAt:      now,
@@ -401,189 +403,618 @@ func (s *Service) ChatStream(ctx context.Context, req ChatRequest) (<-chan Strea
 
 		toolDefs := s.registry.Definitions()
 
-		for iteration := 0; iteration < s.config.MaxIterations; iteration++ {
-			select {
-			case <-ctx.Done():
-				eventCh <- StreamEvent{Type: StreamEventError, Error: "context cancelled"}
-				return
-			default:
-			}
-
-			resp, llmErr := s.llm.ChatCompletionWithTools(ctx, s.chatModel, messages, toolDefs)
-			if llmErr != nil {
-				errMsg := fmt.Sprintf("llm call failed: %s", llmErr)
-				s.persistChatMessage(ctx, db, chat.Message{
-					ConversationID: req.ConversationID,
-					Role:           "system",
-					Content:        errMsg,
-					Iteration:      iteration,
-				})
-				eventCh <- StreamEvent{Type: StreamEventError, Error: errMsg}
-				return
-			}
-
-			// No tool calls -- final response.
-			if len(resp.ToolCalls) == 0 {
-				if resp.Content != "" {
-					s.persistChatMessage(ctx, db, chat.Message{
-						ConversationID: req.ConversationID,
-						Role:           "assistant",
-						Content:        resp.Content,
-						Iteration:      iteration,
-					})
-					eventCh <- StreamEvent{
-						Type:    StreamEventText,
-						Content: resp.Content,
-					}
-				}
-				eventCh <- StreamEvent{
-					Type:       StreamEventDone,
-					Iterations: iteration + 1,
-				}
-				return
-			}
-
-			// Add assistant message with tool calls (for the LLM context
-			// AND for the persistent chat history). The chat history row
-			// uses the Iteration column so a future loader can replay
-			// turns in order even when timestamps collide.
-			messages = append(messages, ai.ToolMessage{
-				Role:      "assistant",
-				Content:   resp.Content,
-				ToolCalls: resp.ToolCalls,
-			})
-			s.persistChatMessage(ctx, db, chat.Message{
-				ConversationID: req.ConversationID,
-				Role:           "assistant",
-				Content:        resp.Content,
-				ToolCalls:      toChatToolCalls(resp.ToolCalls),
-				Iteration:      iteration,
-			})
-
-			// Execute each tool call and stream the events.
-			for _, tc := range resp.ToolCalls {
-				tool, toolErr := s.registry.Get(tc.Name)
-				if toolErr != nil {
-					messages = append(messages, ai.ToolMessage{
-						Role:       "tool",
-						Content:    fmt.Sprintf("Error: tool %q not found", tc.Name),
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-					})
-					s.persistChatMessage(ctx, db, chat.Message{
-						ConversationID: req.ConversationID,
-						Role:           "tool",
-						Content:        fmt.Sprintf("Error: tool %q not found", tc.Name),
-						ToolCallID:     tc.ID,
-						ToolName:       tc.Name,
-						Iteration:      iteration,
-					})
-					eventCh <- StreamEvent{
-						Type:     StreamEventToolUse,
-						ToolName: tc.Name,
-						Error:    toolErr.Error(),
-					}
-					continue
-				}
-
-				// Confirmation check -- for streaming, return a confirmation event.
-				if !tool.ReadOnly && s.confirmation.RequiresConfirmation(tc.Name) {
-					actionID, genErr := generateULID()
-					if genErr != nil {
-						s.logger.Warn("assistant.Service.ChatStream: failed to generate action ID", "error", genErr)
-						actionID = fmt.Sprintf("pending_%d", time.Now().UnixNano())
-					}
-					now := time.Now().UTC()
-					action := &Action{
-						ID:             actionID,
-						ConversationID: req.ConversationID,
-						ToolName:       tc.Name,
-						Arguments:      tc.Arguments,
-						Status:         ActionStatusPending,
-						CreatedAt:      now,
-					}
-					if recordErr := s.store.RecordAction(ctx, db, action); recordErr != nil {
-						s.logger.Warn("assistant.Service.ChatStream: failed to record pending action",
-							"error", recordErr)
-					}
-					s.persistChatMessage(ctx, db, chat.Message{
-						ConversationID: req.ConversationID,
-						Role:           "system",
-						Content:        fmt.Sprintf("Pending confirmation for %s (action %s)", tc.Name, actionID),
-						ToolName:       tc.Name,
-						Iteration:      iteration,
-					})
-					eventCh <- StreamEvent{
-						Type:     StreamEventConfirmation,
-						ToolName: tc.Name,
-						Content:  actionID,
-					}
-					// Stop the loop -- client must approve and re-invoke.
-					eventCh <- StreamEvent{
-						Type:       StreamEventDone,
-						Iterations: iteration + 1,
-					}
-					return
-				}
-
-				// Execute the tool and emit the event immediately.
-				tr := s.executeTool(ctx, req.UserID, db, req.ConversationID, tool, tc)
-
-				if tr.Error != "" {
-					content := fmt.Sprintf("Error: %s", tr.Error)
-					messages = append(messages, ai.ToolMessage{
-						Role:       "tool",
-						Content:    content,
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-					})
-					s.persistChatMessage(ctx, db, chat.Message{
-						ConversationID: req.ConversationID,
-						Role:           "tool",
-						Content:        content,
-						ToolCallID:     tc.ID,
-						ToolName:       tc.Name,
-						Iteration:      iteration,
-					})
-					eventCh <- StreamEvent{
-						Type:     StreamEventToolUse,
-						ToolName: tc.Name,
-						Error:    tr.Error,
-					}
-				} else {
-					resultStr := truncateResult(string(tr.Result))
-					messages = append(messages, ai.ToolMessage{
-						Role:       "tool",
-						Content:    resultStr,
-						ToolCallID: tc.ID,
-						Name:       tc.Name,
-					})
-					s.persistChatMessage(ctx, db, chat.Message{
-						ConversationID: req.ConversationID,
-						Role:           "tool",
-						Content:        resultStr,
-						ToolCallID:     tc.ID,
-						ToolName:       tc.Name,
-						Iteration:      iteration,
-					})
-					eventCh <- StreamEvent{
-						Type:     StreamEventToolUse,
-						ToolName: tc.Name,
-						Content:  resultStr,
-					}
-				}
-			}
-		}
-
-		s.persistChatMessage(ctx, db, chat.Message{
-			ConversationID: req.ConversationID,
-			Role:           "system",
-			Content:        "max iterations reached",
-		})
-		eventCh <- StreamEvent{Type: StreamEventError, Error: "max iterations reached"}
+		s.runAgentLoop(ctx, eventCh, db, req, 0, messages, toolDefs, nil, 0)
 	}()
 
 	return eventCh, nil
+}
+
+// iterStatus describes how a single iteration of the agent loop ended.
+type iterStatus int
+
+const (
+	// iterContinue: the iteration produced tool results that need to be
+	// fed back to the LLM in the next iteration.
+	iterContinue iterStatus = iota
+	// iterDone: the iteration produced a final assistant text response.
+	iterDone
+	// iterConfirm: the iteration paused on a write tool that needs user
+	// confirmation. The caller should stop the loop; the client will
+	// re-enter via Service.ResumeAction once the user approves.
+	iterConfirm
+	// iterError: the iteration aborted with an unrecoverable error that
+	// has already been emitted on eventCh as a StreamEventError.
+	iterError
+)
+
+// runAgentLoop drives the iteration loop calling runAssistantTurn until
+// it terminates (done, confirmation, error, or max iterations). It is
+// shared by ChatStream (starting from iteration 0 with no seed) and
+// ResumeAction (starting from action.Iteration+1 after the resumed turn
+// has finished). Both callers must already have persisted the user
+// message and built the initial messages slice. The function emits a
+// final StreamEventDone when the loop terminates cleanly.
+func (s *Service) runAgentLoop(
+	ctx context.Context,
+	eventCh chan<- StreamEvent,
+	db *sql.DB,
+	req ChatRequest,
+	startIteration int,
+	messages []ai.ToolMessage,
+	toolDefs []ai.ToolDefinition,
+	seedResp *ai.ToolChatResponse,
+	skipFirstNCalls int,
+) {
+	iteration := startIteration
+	for ; iteration < s.config.MaxIterations; iteration++ {
+		select {
+		case <-ctx.Done():
+			eventCh <- StreamEvent{Type: StreamEventError, Error: "context cancelled"}
+			return
+		default:
+		}
+
+		var status iterStatus
+		// The seed and skip count only apply to the first iteration of
+		// a resume; later iterations always go through the live LLM
+		// path with no skip.
+		var iterSeed *ai.ToolChatResponse
+		var iterSkip int
+		if iteration == startIteration {
+			iterSeed = seedResp
+			iterSkip = skipFirstNCalls
+		}
+		messages, status = s.runAssistantTurn(
+			ctx, eventCh, db, req, iteration, messages, toolDefs, iterSeed, iterSkip,
+		)
+
+		switch status {
+		case iterContinue:
+			continue
+		case iterDone, iterConfirm:
+			eventCh <- StreamEvent{Type: StreamEventDone, Iterations: iteration + 1}
+			return
+		case iterError:
+			return
+		}
+	}
+
+	s.persistChatMessage(ctx, db, chat.Message{
+		ConversationID: req.ConversationID,
+		Role:           "system",
+		Content:        "max iterations reached",
+	})
+	eventCh <- StreamEvent{Type: StreamEventError, Error: "max iterations reached"}
+}
+
+// runAssistantTurn executes one agent loop iteration. It calls the LLM
+// (or uses seedResp when non-nil), persists the resulting assistant
+// envelope, and iterates the tool_calls. For each call it either:
+//   - skips the call (i < skipFirstNCalls, used by ResumeAction to pick
+//     up mid-envelope after some calls already executed)
+//   - emits a tool_use event for a not-found tool
+//   - records a pending action and emits a confirmation event for a
+//     write tool that requires confirmation, then returns iterConfirm
+//   - executes the tool and persists/emits the result
+//
+// The returned messages slice is the updated LLM context that should
+// be passed to the next iteration. The status determines whether the
+// caller should keep iterating, emit done, or stop.
+func (s *Service) runAssistantTurn(
+	ctx context.Context,
+	eventCh chan<- StreamEvent,
+	db *sql.DB,
+	req ChatRequest,
+	iteration int,
+	messages []ai.ToolMessage,
+	toolDefs []ai.ToolDefinition,
+	seedResp *ai.ToolChatResponse,
+	skipFirstNCalls int,
+) ([]ai.ToolMessage, iterStatus) {
+	var resp *ai.ToolChatResponse
+	if seedResp != nil {
+		// Resume path: the assistant envelope is already in chat
+		// history and already appended to `messages` by the rebuilder.
+		// Do not re-call the LLM and do not re-append/re-persist.
+		resp = seedResp
+	} else {
+		var llmErr error
+		resp, llmErr = s.llm.ChatCompletionWithTools(ctx, s.chatModel, messages, toolDefs)
+		if llmErr != nil {
+			errMsg := fmt.Sprintf("llm call failed: %s", llmErr)
+			s.persistChatMessage(ctx, db, chat.Message{
+				ConversationID: req.ConversationID,
+				Role:           "system",
+				Content:        errMsg,
+				Iteration:      iteration,
+			})
+			eventCh <- StreamEvent{Type: StreamEventError, Error: errMsg}
+			return messages, iterError
+		}
+
+		// No tool calls -- final response.
+		if len(resp.ToolCalls) == 0 {
+			if resp.Content != "" {
+				s.persistChatMessage(ctx, db, chat.Message{
+					ConversationID: req.ConversationID,
+					Role:           "assistant",
+					Content:        resp.Content,
+					Iteration:      iteration,
+				})
+				eventCh <- StreamEvent{
+					Type:    StreamEventText,
+					Content: resp.Content,
+				}
+			}
+			return messages, iterDone
+		}
+
+		// Append the assistant envelope to the LLM context AND persist
+		// it to chat history. The Iteration column lets a future loader
+		// replay turns in order even when timestamps collide.
+		messages = append(messages, ai.ToolMessage{
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+		s.persistChatMessage(ctx, db, chat.Message{
+			ConversationID: req.ConversationID,
+			Role:           "assistant",
+			Content:        resp.Content,
+			ToolCalls:      toChatToolCalls(resp.ToolCalls),
+			Iteration:      iteration,
+		})
+	}
+
+	// Iterate tool calls, skipping the first N (resume case where some
+	// calls in the same envelope already executed before the user paused
+	// on a write tool).
+	for i, tc := range resp.ToolCalls {
+		if i < skipFirstNCalls {
+			continue
+		}
+
+		tool, toolErr := s.registry.Get(tc.Name)
+		if toolErr != nil {
+			content := fmt.Sprintf("Error: tool %q not found", tc.Name)
+			messages = append(messages, ai.ToolMessage{
+				Role:       "tool",
+				Content:    content,
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+			})
+			s.persistChatMessage(ctx, db, chat.Message{
+				ConversationID: req.ConversationID,
+				Role:           "tool",
+				Content:        content,
+				ToolCallID:     tc.ID,
+				ToolName:       tc.Name,
+				Iteration:      iteration,
+			})
+			eventCh <- StreamEvent{
+				Type:     StreamEventToolUse,
+				ToolName: tc.Name,
+				Error:    toolErr.Error(),
+			}
+			continue
+		}
+
+		// Confirmation check -- for streaming, emit a confirmation event
+		// and stop the loop. The client will re-enter via ResumeAction.
+		if !tool.ReadOnly && s.confirmation.RequiresConfirmation(tc.Name) {
+			actionID, genErr := generateULID()
+			if genErr != nil {
+				s.logger.Warn("assistant.Service.runAssistantTurn: failed to generate action ID", "error", genErr)
+				actionID = fmt.Sprintf("pending_%d", time.Now().UnixNano())
+			}
+			now := time.Now().UTC()
+			action := &Action{
+				ID:             actionID,
+				ConversationID: req.ConversationID,
+				ToolName:       tc.Name,
+				ToolCallID:     tc.ID,
+				Iteration:      iteration,
+				Arguments:      tc.Arguments,
+				Status:         ActionStatusPending,
+				CreatedAt:      now,
+			}
+			if recordErr := s.store.RecordAction(ctx, db, action); recordErr != nil {
+				s.logger.Warn("assistant.Service.runAssistantTurn: failed to record pending action",
+					"error", recordErr)
+			}
+			s.persistChatMessage(ctx, db, chat.Message{
+				ConversationID: req.ConversationID,
+				Role:           "system",
+				Content:        fmt.Sprintf("Pending confirmation for %s (action %s)", tc.Name, actionID),
+				ToolName:       tc.Name,
+				Iteration:      iteration,
+			})
+			eventCh <- StreamEvent{
+				Type:     StreamEventConfirmation,
+				ToolName: tc.Name,
+				Content:  actionID,
+			}
+			return messages, iterConfirm
+		}
+
+		// Execute the tool and emit the event immediately.
+		tr := s.executeTool(ctx, req.UserID, db, req.ConversationID, tool, tc)
+
+		if tr.Error != "" {
+			content := fmt.Sprintf("Error: %s", tr.Error)
+			messages = append(messages, ai.ToolMessage{
+				Role:       "tool",
+				Content:    content,
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+			})
+			s.persistChatMessage(ctx, db, chat.Message{
+				ConversationID: req.ConversationID,
+				Role:           "tool",
+				Content:        content,
+				ToolCallID:     tc.ID,
+				ToolName:       tc.Name,
+				Iteration:      iteration,
+			})
+			eventCh <- StreamEvent{
+				Type:     StreamEventToolUse,
+				ToolName: tc.Name,
+				Error:    tr.Error,
+			}
+		} else {
+			resultStr := truncateResult(string(tr.Result))
+			messages = append(messages, ai.ToolMessage{
+				Role:       "tool",
+				Content:    resultStr,
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+			})
+			s.persistChatMessage(ctx, db, chat.Message{
+				ConversationID: req.ConversationID,
+				Role:           "tool",
+				Content:        resultStr,
+				ToolCallID:     tc.ID,
+				ToolName:       tc.Name,
+				Iteration:      iteration,
+			})
+			eventCh <- StreamEvent{
+				Type:     StreamEventToolUse,
+				ToolName: tc.Name,
+				Content:  resultStr,
+			}
+		}
+	}
+
+	return messages, iterContinue
+}
+
+// ResumeAction approves a pending action, executes its tool, persists
+// the matching tool result chat row, and continues the agent loop
+// streaming events on the returned channel. It is the proper streaming
+// counterpart to Service.ApproveAction (which is kept as a synchronous
+// fallback for callers that cannot consume an SSE stream).
+//
+// The flow:
+//  1. Load and validate the action (must exist and be pending).
+//  2. Rebuild the LLM message context from persisted chat history.
+//  3. Locate the assistant envelope that owns this action's tool_call_id
+//     and count how many of its tool calls already have a matching
+//     tool result row in chat history.
+//  4. Replay the envelope via runAssistantTurn with the seed and skip
+//     count, executing the action's tool and any subsequent calls.
+//  5. Continue the agent loop on subsequent iterations until the LLM
+//     produces a final text response or another confirmation fires.
+func (s *Service) ResumeAction(ctx context.Context, userID, actionID string) (<-chan StreamEvent, error) {
+	db, err := s.userDBManager.Open(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("assistant.Service.ResumeAction: open db: %w", err)
+	}
+
+	action, err := s.store.GetAction(ctx, db, actionID)
+	if err != nil {
+		return nil, err
+	}
+	if action.Status != ActionStatusPending {
+		return nil, fmt.Errorf(
+			"assistant.Service.ResumeAction: action is %s, not pending",
+			action.Status,
+		)
+	}
+
+	eventCh := make(chan StreamEvent, 64)
+	go func() {
+		defer close(eventCh)
+
+		messages, envelopeIdx, skipCount, err := s.rebuildContextForResume(ctx, db, action)
+		if err != nil {
+			eventCh <- StreamEvent{Type: StreamEventError, Error: err.Error()}
+			return
+		}
+
+		envelope := messages[envelopeIdx]
+
+		// Locate the tool call within the envelope so we have its
+		// arguments and call ID for the post-execution event/persist.
+		var tc *ai.ToolCall
+		for i := range envelope.ToolCalls {
+			if envelope.ToolCalls[i].ID == action.ToolCallID {
+				tc = &envelope.ToolCalls[i]
+				break
+			}
+		}
+		if tc == nil {
+			// Defensive: rebuildContextForResume already verifies this,
+			// but fail loud if the invariant somehow breaks.
+			eventCh <- StreamEvent{
+				Type:  StreamEventError,
+				Error: fmt.Sprintf("resume: tool_call_id %q missing from envelope", action.ToolCallID),
+			}
+			return
+		}
+
+		tool, toolErr := s.registry.Get(action.ToolName)
+		if toolErr != nil {
+			content := fmt.Sprintf("Error: tool %q not found", action.ToolName)
+			s.persistChatMessage(ctx, db, chat.Message{
+				ConversationID: action.ConversationID,
+				Role:           "tool",
+				Content:        content,
+				ToolCallID:     tc.ID,
+				ToolName:       action.ToolName,
+				Iteration:      action.Iteration,
+			})
+			if updErr := s.store.UpdateActionStatus(ctx, db, action.ID, ActionStatusFailed, toolErr.Error()); updErr != nil {
+				s.logger.Warn("assistant.Service.ResumeAction: update action status",
+					"error", updErr, "action_id", action.ID)
+			}
+			eventCh <- StreamEvent{
+				Type:     StreamEventToolUse,
+				ToolName: action.ToolName,
+				Error:    toolErr.Error(),
+			}
+			eventCh <- StreamEvent{Type: StreamEventDone, Iterations: action.Iteration + 1}
+			return
+		}
+
+		// Execute the previously-pending tool. Use the action's stored
+		// arguments rather than re-reading them from the envelope so a
+		// caller that wants to mutate args (e.g. a future edit-then-
+		// approve flow) gets the right inputs.
+		result, execErr := tool.Func(ctx, userID, json.RawMessage(action.Arguments))
+
+		var resultContent string
+		var newStatus string
+		if execErr != nil {
+			resultContent = fmt.Sprintf("Error: %s", execErr)
+			newStatus = ActionStatusFailed
+		} else {
+			resultContent = truncateResult(string(result))
+			newStatus = ActionStatusExecuted
+		}
+
+		// Update the existing action row instead of recording a new
+		// one -- preserves the audit trail of "was pending, then user
+		// approved, then executed".
+		if updErr := s.store.UpdateActionStatus(ctx, db, action.ID, newStatus, resultContent); updErr != nil {
+			s.logger.Warn("assistant.Service.ResumeAction: update action status",
+				"error", updErr, "action_id", action.ID)
+		}
+
+		// Persist the tool result chat row so a future reload sees a
+		// well-paired envelope. Append to the in-memory LLM context too.
+		s.persistChatMessage(ctx, db, chat.Message{
+			ConversationID: action.ConversationID,
+			Role:           "tool",
+			Content:        resultContent,
+			ToolCallID:     tc.ID,
+			ToolName:       action.ToolName,
+			Iteration:      action.Iteration,
+		})
+		messages = append(messages, ai.ToolMessage{
+			Role:       "tool",
+			Content:    resultContent,
+			ToolCallID: tc.ID,
+			Name:       action.ToolName,
+		})
+
+		if execErr != nil {
+			eventCh <- StreamEvent{
+				Type:     StreamEventToolUse,
+				ToolName: action.ToolName,
+				Error:    execErr.Error(),
+			}
+		} else {
+			eventCh <- StreamEvent{
+				Type:     StreamEventToolUse,
+				ToolName: action.ToolName,
+				Content:  resultContent,
+			}
+		}
+
+		// Resume the rest of the envelope. Seed runAssistantTurn with
+		// the original envelope and skip skipCount+1 calls (the ones
+		// that already executed, plus the one we just executed). Any
+		// further write tools in the same envelope will trigger their
+		// own confirmation events.
+		seedResp := &ai.ToolChatResponse{
+			Content:   envelope.Content,
+			ToolCalls: envelope.ToolCalls,
+		}
+		toolDefs := s.registry.Definitions()
+		req := ChatRequest{
+			UserID:         userID,
+			ConversationID: action.ConversationID,
+		}
+
+		s.runAgentLoop(
+			ctx, eventCh, db, req, action.Iteration, messages,
+			toolDefs, seedResp, skipCount+1,
+		)
+	}()
+
+	return eventCh, nil
+}
+
+// rebuildContextForResume reads the persisted chat history for the
+// action's conversation and reconstructs the LLM message slice the
+// original ChatStream had at the moment it returned with the
+// confirmation event.
+//
+// Returns:
+//   - the rebuilt []ai.ToolMessage slice (system prompt + history,
+//     including the assistant envelope that owns the pending action
+//     and any tool result rows that already executed before the pause)
+//   - envelopeIdx: the index in the returned slice of the assistant
+//     message whose tool_calls contains action.ToolCallID
+//   - skipCount: how many of that envelope's tool_calls already have
+//     a matching tool result row in chat history (i.e. how many leading
+//     calls runAssistantTurn should skip when replaying the envelope)
+//
+// Returns an error if the assistant envelope cannot be found, the
+// action's tool_call_id is not in any envelope, or the persisted state
+// is otherwise inconsistent.
+func (s *Service) rebuildContextForResume(
+	ctx context.Context,
+	db *sql.DB,
+	action *Action,
+) ([]ai.ToolMessage, int, int, error) {
+	if s.chatHistory == nil {
+		return nil, 0, 0, fmt.Errorf("assistant.Service.rebuildContextForResume: chat history disabled")
+	}
+
+	_, persisted, err := s.chatHistory.GetConversation(ctx, db, action.ConversationID)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("assistant.Service.rebuildContextForResume: load conversation: %w", err)
+	}
+
+	// Build the system prompt the same way ChatStream does at startup.
+	// The user message is already in persisted history, so pass an
+	// empty string to loadContext (it only uses the message for FTS
+	// memory search and is allowed to be empty).
+	profile, memories := s.loadContext(ctx, db, "")
+
+	// Apply the conversation summary against the persisted history so
+	// long conversations stay within the LLM's context window. Convert
+	// persisted Messages to ai.ToolMessages for the summary helper to
+	// reason about.
+	historical := persistedToToolMessages(persisted)
+	conversationSummary, recent := s.applyConversationSummary(ctx, db, action.ConversationID, historical)
+	systemPrompt := buildSystemPrompt(profile, memories, conversationSummary)
+
+	messages := make([]ai.ToolMessage, 0, len(recent)+1)
+	messages = append(messages, ai.ToolMessage{Role: "system", Content: systemPrompt})
+	messages = append(messages, recent...)
+
+	// Walk messages in reverse to find the most recent assistant
+	// envelope whose tool_calls contains action.ToolCallID. Skip the
+	// system message at index 0.
+	envelopeIdx := -1
+	for i := len(messages) - 1; i >= 1; i-- {
+		m := messages[i]
+		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			if tc.ID == action.ToolCallID {
+				envelopeIdx = i
+				break
+			}
+		}
+		if envelopeIdx >= 0 {
+			break
+		}
+	}
+	if envelopeIdx < 0 {
+		return nil, 0, 0, fmt.Errorf(
+			"assistant.Service.rebuildContextForResume: could not find tool_call envelope for action %s (tool_call_id %q)",
+			action.ID, action.ToolCallID,
+		)
+	}
+
+	// Count how many of the envelope's calls already have matching
+	// tool result rows after the envelope. Verify the action's
+	// tool_call_id is the FIRST un-paired call (sanity check on
+	// persisted ordering).
+	envelope := messages[envelopeIdx]
+	executed := make(map[string]bool, len(envelope.ToolCalls))
+	for i := envelopeIdx + 1; i < len(messages); i++ {
+		m := messages[i]
+		// Stop scanning if we hit another assistant envelope -- the
+		// envelope we care about is fully described by its own row
+		// plus the contiguous tool/result rows that follow.
+		if m.Role == "assistant" {
+			break
+		}
+		if m.Role == "tool" && m.ToolCallID != "" {
+			executed[m.ToolCallID] = true
+		}
+	}
+
+	skipCount := 0
+	for _, tc := range envelope.ToolCalls {
+		if executed[tc.ID] {
+			skipCount++
+			continue
+		}
+		// First un-paired call -- this MUST be the action we're
+		// resuming, otherwise the persisted state is inconsistent.
+		if tc.ID != action.ToolCallID {
+			return nil, 0, 0, fmt.Errorf(
+				"assistant.Service.rebuildContextForResume: action %s tool_call_id %q is not the next un-paired call (next is %q)",
+				action.ID, action.ToolCallID, tc.ID,
+			)
+		}
+		break
+	}
+
+	return messages, envelopeIdx, skipCount, nil
+}
+
+// persistedToToolMessages converts persisted chat.Messages to the
+// ai.ToolMessage shape the LLM context expects. role='system' rows are
+// skipped because they're audit markers (e.g. "Pending confirmation
+// for X") that would confuse the LLM if replayed. Other roles map
+// straight through.
+func persistedToToolMessages(msgs []chat.Message) []ai.ToolMessage {
+	out := make([]ai.ToolMessage, 0, len(msgs))
+	for _, m := range msgs {
+		switch m.Role {
+		case "system":
+			// Audit marker, not real LLM context.
+			continue
+		case "user":
+			out = append(out, ai.ToolMessage{Role: "user", Content: m.Content})
+		case "assistant":
+			out = append(out, ai.ToolMessage{
+				Role:      "assistant",
+				Content:   m.Content,
+				ToolCalls: toAIToolCalls(m.ToolCalls),
+			})
+		case "tool":
+			out = append(out, ai.ToolMessage{
+				Role:       "tool",
+				Content:    m.Content,
+				ToolCallID: m.ToolCallID,
+				Name:       m.ToolName,
+			})
+		}
+	}
+	return out
+}
+
+// toAIToolCalls converts chat.ToolCall to ai.ToolCall. The two types
+// are kept structurally identical to avoid coupling chat to internal/ai
+// (matching the Citation precedent). It is the inverse of
+// toChatToolCalls.
+func toAIToolCalls(calls []chat.ToolCall) []ai.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]ai.ToolCall, len(calls))
+	for i, c := range calls {
+		out[i] = ai.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments}
+	}
+	return out
 }
 
 // persistChatMessage writes a chat message to the persistent conversation

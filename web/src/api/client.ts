@@ -586,22 +586,16 @@ export async function addChatMessage(
 
 // Agentic assistant endpoints
 
-// streamAssistantChat POSTs to /assistant/chat/stream and dispatches each
-// parsed SSE event via onEvent. The request honors the caller's AbortSignal
-// so the stream can be cancelled. On a 401 it will refresh once and retry.
-export async function streamAssistantChat(
-  conversationId: string,
-  message: string,
-  history: AssistantMessage[],
+// postAssistantSSE is the shared SSE POST helper for assistant streaming
+// endpoints. It handles auth, 401 refresh, frame buffering across chunk
+// boundaries, and the [DONE] sentinel. Both streamAssistantChat and
+// streamResumeAction call into it.
+async function postAssistantSSE(
+  path: string,
+  body: string,
   onEvent: (e: AssistantStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const body = JSON.stringify({
-    conversation_id: conversationId,
-    message,
-    history,
-  });
-
   const doFetch = async (): Promise<Response> => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -610,7 +604,7 @@ export async function streamAssistantChat(
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
-    return fetch(`${BASE_URL}/assistant/chat/stream`, {
+    return fetch(`${BASE_URL}${path}`, {
       method: 'POST',
       headers,
       body,
@@ -687,6 +681,46 @@ export async function streamAssistantChat(
   }
 }
 
+// streamAssistantChat POSTs to /assistant/chat/stream and dispatches each
+// parsed SSE event via onEvent. The request honors the caller's AbortSignal
+// so the stream can be cancelled. On a 401 it will refresh once and retry.
+export async function streamAssistantChat(
+  conversationId: string,
+  message: string,
+  history: AssistantMessage[],
+  onEvent: (e: AssistantStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const body = JSON.stringify({
+    conversation_id: conversationId,
+    message,
+    history,
+  });
+  await postAssistantSSE('/assistant/chat/stream', body, onEvent, signal);
+}
+
+// streamResumeAction POSTs to /assistant/actions/{id}/resume to approve a
+// pending tool action and stream the continued agent loop. The server
+// handles execution, persistence, and continuation -- the client just
+// renders events as they arrive.
+export async function streamResumeAction(
+  actionId: string,
+  onEvent: (e: AssistantStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  await postAssistantSSE(
+    `/assistant/actions/${encodeURIComponent(actionId)}/resume`,
+    '',
+    onEvent,
+    signal,
+  );
+}
+
+/**
+ * @deprecated Use streamResumeAction. This synchronous helper does NOT
+ * continue the agent loop after execution and is kept only as a fallback
+ * for callers that cannot consume an SSE stream.
+ */
 export async function approveAssistantAction(
   actionId: string,
 ): Promise<AssistantToolResult> {

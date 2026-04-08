@@ -50,15 +50,17 @@ type assistantConvErrMsg struct {
 	err error
 }
 
-// assistantApprovedMsg delivers the approve endpoint result.
-type assistantApprovedMsg struct {
-	result *AssistantToolResult
-	err    error
-}
-
 // assistantRejectedMsg signals the reject endpoint completed.
 type assistantRejectedMsg struct {
 	err error
+}
+
+// assistantReloadMsg delivers a fresh canonical conversation snapshot
+// after a resume completes. The TUI replaces its local turns with the
+// persisted history so the visible state matches the server.
+type assistantReloadMsg struct {
+	turns []chatTurn
+	err   error
 }
 
 // -- Model state -------------------------------------------------------------
@@ -179,37 +181,18 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 		m.streamCancel = nil
 		return m, nil
 
-	case assistantApprovedMsg:
+	case assistantReloadMsg:
 		if msg.err != nil {
+			// Non-fatal: streaming scratch state already shows the
+			// result. Keep the local turn list as-is.
 			m.err = msg.err.Error()
 			return m, nil
 		}
-		if msg.result != nil {
-			status := "ok"
-			if msg.result.Error != "" {
-				status = "error"
-			}
-			raw := msg.result.Result
-			if status == "error" {
-				raw = json.RawMessage(fmt.Sprintf("%q", msg.result.Error))
-			}
-			m.turns = append(m.turns, chatTurn{
-				kind:     "tool",
-				toolName: msg.result.ToolName,
-				status:   status,
-				raw:      raw,
-			})
+		if msg.turns != nil {
+			m.turns = msg.turns
 			m.scrollY = m.maxScroll()
 		}
-		// KNOWN LIMITATION: The assistant has no resume-after-approval
-		// API. We fake continuation by sending the tool result as a user
-		// message and explicitly telling the LLM the action is already
-		// done. Without this hint the LLM keeps redoing the tool call
-		// (re-triggering the confirmation prompt forever) because the
-		// chat history doesn't carry the tool result back into its
-		// context. buildHistory also flattens the tool turn into a
-		// system-style note so the LLM sees the chronology.
-		return m.startStream(approvedFollowupMessage(msg.result))
+		return m, nil
 
 	case assistantRejectedMsg:
 		if msg.err != nil {
@@ -286,7 +269,7 @@ func (m askModel) handleKey(msg tea.KeyPressMsg) (askModel, tea.Cmd) {
 		case "a":
 			actionID := m.pendingConfirm.actionID
 			m.pendingConfirm = nil
-			return m, m.approveAction(actionID)
+			return m.startResumeStream(actionID)
 		case "r":
 			actionID := m.pendingConfirm.actionID
 			m.pendingConfirm = nil
@@ -476,14 +459,58 @@ func (m askModel) startStream(query string) (askModel, tea.Cmd) {
 	return m, cmd
 }
 
-// approveAction returns a Cmd that calls the approve endpoint and wraps
-// the result in an assistantApprovedMsg.
-func (m askModel) approveAction(actionID string) tea.Cmd {
+// startResumeStream spawns the resume SSE stream after the user
+// approves a pending tool action. It uses the same channel pattern as
+// startStream so the existing assistantStreamEventMsg / Done / Err
+// handling drives the UI state machine. After the stream closes
+// cleanly, the model schedules a reload to reconcile local turns with
+// the canonical persisted history.
+func (m askModel) startResumeStream(actionID string) (askModel, tea.Cmd) {
+	m.streamingText = ""
+	m.streaming = true
+	m.scrollY = m.maxScroll()
+
 	client := m.client
-	return func() tea.Msg {
-		result, err := client.ApproveAssistantAction(context.Background(), actionID)
-		return assistantApprovedMsg{result: result, err: err}
+	convID := m.conversationID
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.streamCancel = cancel
+
+	ch := make(chan tea.Msg, 64)
+	go func() {
+		defer close(ch)
+		err := client.AssistantResumeStream(ctx, actionID, func(ev AssistantStreamEvent) {
+			select {
+			case ch <- assistantStreamEventMsg{event: ev}:
+			case <-ctx.Done():
+			}
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			ch <- assistantStreamErrMsg{err: err}
+			return
+		}
+		// Stream finished cleanly. Reload the canonical conversation
+		// from the server so the visible turns match what was
+		// persisted (including the assistant envelope, the tool
+		// result, and the final assistant text). The reload runs
+		// inside the goroutine so it shares the same cancel context.
+		conv, msgs, reloadErr := client.GetAssistantConversation(ctx, convID)
+		_ = conv
+		ch <- assistantReloadMsg{
+			turns: persistedToTurns(msgs),
+			err:   reloadErr,
+		}
+		ch <- assistantStreamDoneMsg{}
+	}()
+
+	cmd := func() tea.Msg {
+		first, ok := <-ch
+		if !ok {
+			return assistantStreamDoneMsg{}
+		}
+		return assistantStreamStartMsg{first: first, ch: ch}
 	}
+	return m, cmd
 }
 
 // rejectAction returns a Cmd that calls the reject endpoint and wraps
@@ -508,8 +535,11 @@ func waitForAssistantStreamMsg(ch <-chan tea.Msg) tea.Cmd {
 }
 
 // buildHistory converts internal turns into the API history format.
-// Only user and assistant text turns are included -- tool cards are
-// re-derived by the backend from the persisted conversation.
+// Only user and assistant text turns are included -- the server reads
+// the canonical history (assistant tool_call envelopes, tool results,
+// system markers) directly from chat.Store via the persisted conversation
+// row, so the client only needs to send the bits the server can't
+// reconstruct from its own state (the in-flight user message context).
 func buildHistory(turns []chatTurn) []AssistantHistoryMessage {
 	var out []AssistantHistoryMessage
 	for _, t := range turns {
@@ -518,50 +548,47 @@ func buildHistory(turns []chatTurn) []AssistantHistoryMessage {
 			out = append(out, AssistantHistoryMessage{Role: "user", Content: t.content})
 		case "assistant":
 			out = append(out, AssistantHistoryMessage{Role: "assistant", Content: t.content})
-		case "tool", "stream-tool":
-			// Surface previously executed tool results as user-prefixed
-			// system notes so the next LLM call sees them. We can't use
-			// role="tool" here because the tool message would need to
-			// pair with a preceding assistant tool_call envelope; the
-			// approval flow doesn't have access to the original
-			// tool_call_id, so role="user" with a system-style label is
-			// the safest cross-provider fallback.
-			content := fmt.Sprintf("[system note] tool %q already executed. result: %s",
-				t.toolName, truncateToolResult(string(t.raw)))
-			out = append(out, AssistantHistoryMessage{Role: "user", Content: content})
 		}
+		// tool / stream-tool / system turns are display-only.
 	}
 	return out
 }
 
-// approvedFollowupMessage is the synthetic user message we send after the
-// user approves a pending tool action. It tells the LLM the action is
-// already complete and includes the result so the LLM can produce a
-// final response without redoing the tool call.
-func approvedFollowupMessage(result *AssistantToolResult) string {
-	if result == nil {
-		return "I approved the previous action. Please continue based on the result already in the conversation history. Do not repeat the same tool call."
+// persistedToTurns converts canonical persisted chat messages from the
+// server into the local chatTurn slice the TUI renders. system rows
+// are dropped (audit markers, not real conversation), assistant rows
+// with tool_calls fall back to a "(used N tools)" placeholder so the
+// chronology stays intact, and tool rows render as tool cards.
+func persistedToTurns(msgs []AssistantPersistedMessage) []chatTurn {
+	var out []chatTurn
+	for _, m := range msgs {
+		switch m.Role {
+		case "user":
+			out = append(out, chatTurn{kind: "user", content: m.Content})
+		case "assistant":
+			if len(m.ToolCalls) > 0 && m.Content == "" {
+				// The envelope row carries no body text; the
+				// individual tool result rows that follow will
+				// render the visible cards.
+				continue
+			}
+			out = append(out, chatTurn{kind: "assistant", content: m.Content})
+		case "tool":
+			status := "ok"
+			if strings.HasPrefix(m.Content, "Error:") {
+				status = "error"
+			}
+			out = append(out, chatTurn{
+				kind:     "tool",
+				toolName: m.ToolName,
+				status:   status,
+				raw:      json.RawMessage(m.Content),
+			})
+		case "system":
+			// Audit marker -- skip.
+		}
 	}
-	if result.Error != "" {
-		return fmt.Sprintf(
-			"I approved the %q action but it failed with: %s. Please report the failure and suggest next steps. Do not retry the same call automatically.",
-			result.ToolName, result.Error,
-		)
-	}
-	return fmt.Sprintf(
-		"I approved the %q action and it has been executed successfully. Result: %s. Please confirm completion to me in plain language and do NOT call %q again.",
-		result.ToolName, truncateToolResult(string(result.Result)), result.ToolName,
-	)
-}
-
-// truncateToolResult caps a tool result string to keep the synthetic
-// follow-up message from blowing past the LLM context window.
-func truncateToolResult(s string) string {
-	const maxLen = 1500
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "... (truncated)"
+	return out
 }
 
 // -- View --------------------------------------------------------------------

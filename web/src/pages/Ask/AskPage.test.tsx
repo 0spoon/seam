@@ -16,7 +16,7 @@ vi.mock('../../api/client', () => ({
   getConversation: vi.fn(),
   deleteConversation: vi.fn(),
   streamAssistantChat: vi.fn(),
-  approveAssistantAction: vi.fn(),
+  streamResumeAction: vi.fn(),
   rejectAssistantAction: vi.fn(),
 }));
 
@@ -31,7 +31,9 @@ vi.mock('../../lib/sanitize', () => ({
 import {
   createConversation,
   listConversations,
+  getConversation,
   streamAssistantChat,
+  streamResumeAction,
 } from '../../api/client';
 
 /**
@@ -207,5 +209,75 @@ describe('AskPage', () => {
         screen.queryByText(/Ask anything.*Seam finds the answer/),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it('handleApprove streams resume events and reloads conversation', async () => {
+    // streamAssistantChat fires a confirmation event so the page enters
+    // awaiting_approval. The resume stream then emits tool_use + done.
+    vi.mocked(streamAssistantChat).mockImplementationOnce(
+      async (_convId, _msg, _hist, onEvent) => {
+        onEvent({
+          type: 'confirmation',
+          tool_name: 'create_note',
+          content: 'act_pending_1',
+        });
+        onEvent({ type: 'done' });
+      },
+    );
+    vi.mocked(streamResumeAction).mockImplementationOnce(
+      async (_actionId, onEvent) => {
+        onEvent({
+          type: 'tool_use',
+          tool_name: 'create_note',
+          content: '{"id":"n1"}',
+        });
+        onEvent({ type: 'text', content: 'Note created.' });
+        onEvent({ type: 'done' });
+      },
+    );
+    vi.mocked(getConversation).mockResolvedValue({
+      id: 'conv1',
+      title: '',
+      messages: [
+        {
+          id: 'm1',
+          conversation_id: 'conv1',
+          role: 'user',
+          content: 'create a note',
+          created_at: '',
+        },
+        {
+          id: 'm2',
+          conversation_id: 'conv1',
+          role: 'assistant',
+          content: 'Note created.',
+          created_at: '',
+        },
+      ],
+    } as never);
+
+    await renderAskPage();
+
+    const input = screen.getByLabelText('Ask a question');
+    fireEvent.change(input, { target: { value: 'create a note' } });
+    fireEvent.submit(input.closest('form')!);
+
+    // Wait for the confirmation card to appear.
+    const approveBtn = await screen.findByRole('button', { name: /approve/i });
+    fireEvent.click(approveBtn);
+
+    // After resume completes, getConversation is called and the
+    // canonical assistant text becomes visible.
+    await waitFor(() => {
+      expect(getConversation).toHaveBeenCalledWith('conv1');
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText('Note created.').length).toBeGreaterThan(0);
+    });
+    expect(streamResumeAction).toHaveBeenCalledWith(
+      'act_pending_1',
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
   });
 });

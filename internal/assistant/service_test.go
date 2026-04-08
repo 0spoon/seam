@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/chat"
@@ -939,4 +940,344 @@ func TestService_ChatStream_PersistsConfirmation(t *testing.T) {
 	require.Contains(t, msgs[2].Content, "create_note")
 	require.Contains(t, msgs[2].Content, actionID)
 	require.Equal(t, "create_note", msgs[2].ToolName)
+}
+
+// triggerConfirmation runs ChatStream until it pauses on a confirmation
+// event and returns the action ID. It is shared by ResumeAction tests.
+func triggerConfirmation(t *testing.T, svc *Service) string {
+	t.Helper()
+	eventCh, err := svc.ChatStream(context.Background(), ChatRequest{
+		UserID:         "default",
+		ConversationID: "conv1",
+		Message:        "do the thing",
+	})
+	require.NoError(t, err)
+	var actionID string
+	for ev := range eventCh {
+		if ev.Type == StreamEventConfirmation {
+			actionID = ev.Content
+		}
+	}
+	require.NotEmpty(t, actionID, "expected a confirmation event with an action ID")
+	return actionID
+}
+
+func TestService_ResumeAction_ContinuesAgentLoopAfterConfirmation(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	mock := &mockToolChatCompleter{
+		responses: []*ai.ToolChatResponse{
+			// Iteration 0: write tool that triggers confirmation.
+			{
+				Content:      "I'll create that note.",
+				FinishReason: "tool_calls",
+				ToolCalls: []ai.ToolCall{
+					{ID: "call_create", Name: "create_note", Arguments: `{"title":"X"}`},
+				},
+			},
+			// Iteration 1: final text after the resumed tool executes.
+			{Content: "Done. Note created.", FinishReason: "stop"},
+		},
+	}
+
+	var executed bool
+	registry := NewToolRegistry()
+	registry.Register(&Tool{
+		Name:        "create_note",
+		Description: "Create a note",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
+			executed = true
+			return json.RawMessage(`{"id":"n1","title":"X"}`), nil
+		},
+		ReadOnly: false,
+	})
+
+	svc := newTestService(t, db, mock, registry, ServiceConfig{
+		MaxIterations:        10,
+		ConfirmationRequired: []string{"create_note"},
+	})
+
+	actionID := triggerConfirmation(t, svc)
+	require.False(t, executed, "tool should not have executed before resume")
+
+	// Resume the action -- expect the tool to execute, then the LLM
+	// to be called for iteration 1, then a final text and done event.
+	resumeCh, err := svc.ResumeAction(context.Background(), "default", actionID)
+	require.NoError(t, err)
+	events := drainEvents(t, resumeCh)
+
+	require.True(t, executed, "tool should have executed after resume")
+
+	var seenToolUse, seenText, seenDone bool
+	for _, ev := range events {
+		switch ev.Type {
+		case StreamEventToolUse:
+			seenToolUse = true
+			require.Equal(t, "create_note", ev.ToolName)
+			require.Empty(t, ev.Error)
+		case StreamEventText:
+			seenText = true
+			require.Equal(t, "Done. Note created.", ev.Content)
+		case StreamEventDone:
+			seenDone = true
+		}
+	}
+	require.True(t, seenToolUse, "expected a tool_use event")
+	require.True(t, seenText, "expected a text event")
+	require.True(t, seenDone, "expected a done event")
+
+	// Verify the action row was marked executed.
+	store := NewStore()
+	action, err := store.GetAction(context.Background(), db, actionID)
+	require.NoError(t, err)
+	require.Equal(t, ActionStatusExecuted, action.Status)
+	require.Equal(t, "call_create", action.ToolCallID)
+
+	// Verify the persisted chat history now has a tool result row paired
+	// with the assistant envelope, plus a final assistant text row.
+	chatStore := chat.NewStore()
+	_, msgs, err := chatStore.GetConversation(context.Background(), db, "conv1")
+	require.NoError(t, err)
+
+	// Find the tool result row matching call_create.
+	var toolRow *chat.Message
+	for i := range msgs {
+		if msgs[i].Role == "tool" && msgs[i].ToolCallID == "call_create" {
+			toolRow = &msgs[i]
+			break
+		}
+	}
+	require.NotNil(t, toolRow, "expected a tool result row for call_create")
+	require.Contains(t, toolRow.Content, "n1")
+
+	// Last message should be the final assistant text (no tool calls).
+	last := msgs[len(msgs)-1]
+	require.Equal(t, "assistant", last.Role)
+	require.Equal(t, "Done. Note created.", last.Content)
+	require.Empty(t, last.ToolCalls)
+
+	// Verify the second LLM call saw a properly paired tool message.
+	require.Len(t, mock.messages, 2, "expected exactly two LLM calls (initial + post-resume)")
+	postResume := mock.messages[1]
+	var foundPair bool
+	for _, m := range postResume {
+		if m.Role == "tool" && m.ToolCallID == "call_create" {
+			foundPair = true
+		}
+	}
+	require.True(t, foundPair, "post-resume LLM call must include tool result for call_create")
+}
+
+func TestService_ResumeAction_RejectsAlreadyExecutedAction(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	mock := &mockToolChatCompleter{
+		responses: []*ai.ToolChatResponse{
+			{
+				Content:      "",
+				FinishReason: "tool_calls",
+				ToolCalls: []ai.ToolCall{
+					{ID: "call_create", Name: "create_note", Arguments: `{}`},
+				},
+			},
+		},
+	}
+	registry := NewToolRegistry()
+	registry.Register(&Tool{
+		Name: "create_note", Description: "create",
+		Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{}`), nil
+		},
+		ReadOnly: false,
+	})
+
+	svc := newTestService(t, db, mock, registry, ServiceConfig{
+		MaxIterations:        10,
+		ConfirmationRequired: []string{"create_note"},
+	})
+
+	actionID := triggerConfirmation(t, svc)
+
+	// Manually mark the action as executed to simulate a race.
+	_, err = db.Exec(`UPDATE assistant_actions SET status = 'executed' WHERE id = ?`, actionID)
+	require.NoError(t, err)
+
+	_, err = svc.ResumeAction(context.Background(), "default", actionID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "executed")
+}
+
+func TestService_ResumeAction_HandlesMultipleToolCallsInOneEnvelope(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	mock := &mockToolChatCompleter{
+		responses: []*ai.ToolChatResponse{
+			// Iteration 0: read tool followed by write tool. The read
+			// executes inline; the write triggers confirmation.
+			{
+				Content:      "",
+				FinishReason: "tool_calls",
+				ToolCalls: []ai.ToolCall{
+					{ID: "call_read", Name: "search_notes", Arguments: `{"query":"x"}`},
+					{ID: "call_write", Name: "create_note", Arguments: `{"title":"X"}`},
+				},
+			},
+			// Iteration 1: final text after both tools have completed.
+			{Content: "All done.", FinishReason: "stop"},
+		},
+	}
+
+	var readExec, writeExec bool
+	registry := NewToolRegistry()
+	registry.Register(&Tool{
+		Name: "search_notes", Description: "search",
+		Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
+			readExec = true
+			return json.RawMessage(`{"results":["a"]}`), nil
+		},
+		ReadOnly: true,
+	})
+	registry.Register(&Tool{
+		Name: "create_note", Description: "create",
+		Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
+			writeExec = true
+			return json.RawMessage(`{"id":"n1"}`), nil
+		},
+		ReadOnly: false,
+	})
+
+	svc := newTestService(t, db, mock, registry, ServiceConfig{
+		MaxIterations:        10,
+		ConfirmationRequired: []string{"create_note"},
+	})
+
+	actionID := triggerConfirmation(t, svc)
+	require.True(t, readExec, "read tool should have executed before confirmation")
+	require.False(t, writeExec, "write tool should not yet have executed")
+
+	resumeCh, err := svc.ResumeAction(context.Background(), "default", actionID)
+	require.NoError(t, err)
+	events := drainEvents(t, resumeCh)
+
+	require.True(t, writeExec, "write tool should have executed after resume")
+
+	var hasText bool
+	for _, ev := range events {
+		if ev.Type == StreamEventText {
+			hasText = true
+			require.Equal(t, "All done.", ev.Content)
+		}
+	}
+	require.True(t, hasText, "expected final text event after resume")
+
+	// Confirm the action row is marked executed and persists the
+	// correct tool_call_id.
+	store := NewStore()
+	action, err := store.GetAction(context.Background(), db, actionID)
+	require.NoError(t, err)
+	require.Equal(t, ActionStatusExecuted, action.Status)
+	require.Equal(t, "call_write", action.ToolCallID)
+
+	// Confirm the persisted history has BOTH tool result rows paired
+	// with the same envelope.
+	chatStore := chat.NewStore()
+	_, msgs, err := chatStore.GetConversation(context.Background(), db, "conv1")
+	require.NoError(t, err)
+	var sawRead, sawWrite bool
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			switch m.ToolCallID {
+			case "call_read":
+				sawRead = true
+			case "call_write":
+				sawWrite = true
+			}
+		}
+	}
+	require.True(t, sawRead, "expected persisted tool row for call_read")
+	require.True(t, sawWrite, "expected persisted tool row for call_write")
+}
+
+func TestService_ResumeAction_RejectsMissingEnvelope(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	// Insert a pending action with a tool_call_id that does NOT match
+	// any persisted assistant envelope (no chat history rows exist).
+	_, err = db.Exec(
+		`INSERT INTO assistant_actions
+		    (id, conversation_id, tool_name, tool_call_id, iteration,
+		     arguments, status, created_at)
+		 VALUES ('orphan', 'conv1', 'create_note', 'missing_call', 0,
+		         '{}', 'pending', '2026-03-16T10:00:00Z')`,
+	)
+	require.NoError(t, err)
+
+	svc := newTestService(t, db, &mockToolChatCompleter{}, NewToolRegistry(), ServiceConfig{
+		MaxIterations:        10,
+		ConfirmationRequired: []string{"create_note"},
+	})
+
+	resumeCh, err := svc.ResumeAction(context.Background(), "default", "orphan")
+	require.NoError(t, err)
+	events := drainEvents(t, resumeCh)
+
+	var sawErr bool
+	for _, ev := range events {
+		if ev.Type == StreamEventError {
+			sawErr = true
+			require.Contains(t, ev.Error, "envelope")
+		}
+	}
+	require.True(t, sawErr, "expected error event when envelope cannot be located")
+}
+
+func TestStore_RecordAction_RoundTripsToolCallIDAndIteration(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	store := NewStore()
+
+	in := &Action{
+		ID:             "act1",
+		ConversationID: "conv1",
+		ToolName:       "create_note",
+		ToolCallID:     "call_xyz",
+		Iteration:      3,
+		Arguments:      `{"title":"x"}`,
+		Status:         ActionStatusPending,
+		CreatedAt:      mustParseTime(t, "2026-03-16T10:00:00Z"),
+	}
+	require.NoError(t, store.RecordAction(context.Background(), db, in))
+
+	out, err := store.GetAction(context.Background(), db, "act1")
+	require.NoError(t, err)
+	require.Equal(t, "call_xyz", out.ToolCallID)
+	require.Equal(t, 3, out.Iteration)
+	require.Equal(t, "create_note", out.ToolName)
+
+	listed, err := store.ListActions(context.Background(), db, "conv1", 10)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, "call_xyz", listed[0].ToolCallID)
+	require.Equal(t, 3, listed[0].Iteration)
+}
+
+func mustParseTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	require.NoError(t, err)
+	return parsed
 }

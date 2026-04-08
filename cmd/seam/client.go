@@ -646,6 +646,36 @@ func (c *APIClient) CreateAssistantConversation(ctx context.Context) (*Assistant
 	return &conv, nil
 }
 
+// AssistantPersistedMessage is a row returned by /api/chat/conversations/{id}.
+// It mirrors chat.Message and is used by the TUI to reload canonical
+// turns after a resume completes.
+type AssistantPersistedMessage struct {
+	ID             string              `json:"id"`
+	ConversationID string              `json:"conversation_id"`
+	Role           string              `json:"role"`
+	Content        string              `json:"content"`
+	ToolCalls      []AssistantToolCall `json:"tool_calls,omitempty"`
+	ToolCallID     string              `json:"tool_call_id,omitempty"`
+	ToolName       string              `json:"tool_name,omitempty"`
+	Iteration      int                 `json:"iteration,omitempty"`
+	CreatedAt      string              `json:"created_at"`
+}
+
+// GetAssistantConversation fetches a conversation and its persisted
+// messages from /api/chat/conversations/{id}. Used by the TUI to
+// reconcile its local turn list with server-side truth after a resume.
+func (c *APIClient) GetAssistantConversation(ctx context.Context, conversationID string) (*AssistantConversation, []AssistantPersistedMessage, error) {
+	var resp struct {
+		Conversation AssistantConversation       `json:"conversation"`
+		Messages     []AssistantPersistedMessage `json:"messages"`
+	}
+	path := "/api/chat/conversations/" + url.PathEscape(conversationID)
+	if err := c.GetCtx(ctx, path, nil, &resp); err != nil {
+		return nil, nil, err
+	}
+	return &resp.Conversation, resp.Messages, nil
+}
+
 // ApproveAssistantAction approves a pending tool action and returns the
 // execution result. POSTs to /api/assistant/actions/{id}/approve with an
 // empty body.
@@ -679,53 +709,79 @@ func (c *APIClient) AssistantChatStream(
 		Message:        message,
 		History:        history,
 	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshal assistant request: %w", err)
+	}
+	return c.assistantSSEPost(ctx, "/api/assistant/chat/stream", body, onEvent)
+}
 
-	resp, err := c.doAssistantStreamRequest(ctx, reqBody)
+// AssistantResumeStream POSTs to /api/assistant/actions/{id}/resume and
+// reads the SSE response. The server approves the action, executes the
+// tool, persists the matching tool result, and continues the agent loop
+// inline -- the client just renders events as they arrive.
+func (c *APIClient) AssistantResumeStream(
+	ctx context.Context,
+	actionID string,
+	onEvent func(AssistantStreamEvent),
+) error {
+	path := "/api/assistant/actions/" + url.PathEscape(actionID) + "/resume"
+	return c.assistantSSEPost(ctx, path, nil, onEvent)
+}
+
+// assistantSSEPost is the shared SSE POST helper for assistant streaming
+// endpoints. It handles auth, single 401 retry, body parsing of error
+// responses, and dispatch into readAssistantSSE.
+func (c *APIClient) assistantSSEPost(
+	ctx context.Context,
+	path string,
+	body []byte,
+	onEvent func(AssistantStreamEvent),
+) error {
+	resp, err := c.doAssistantStreamRequest(ctx, path, body)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
 	return readAssistantSSE(ctx, resp.Body, onEvent)
 }
 
 // doAssistantStreamRequest performs the POST with a single 401 retry.
-func (c *APIClient) doAssistantStreamRequest(ctx context.Context, reqBody assistantChatRequest) (*http.Response, error) {
-	resp, err := c.assistantStreamPOST(ctx, reqBody)
+func (c *APIClient) doAssistantStreamRequest(ctx context.Context, path string, body []byte) (*http.Response, error) {
+	resp, err := c.assistantStreamPOST(ctx, path, body)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized && c.RefreshToken != "" {
 		_ = resp.Body.Close()
 		if _, refreshErr := c.RefreshCtx(ctx); refreshErr == nil {
-			resp, err = c.assistantStreamPOST(ctx, reqBody)
+			resp, err = c.assistantStreamPOST(ctx, path, body)
 			if err != nil {
 				return nil, err
 			}
 		}
 	}
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		var apiErr APIError
-		if json.Unmarshal(body, &apiErr) == nil && apiErr.Message != "" {
+		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Message != "" {
 			return nil, &apiErr
 		}
-		return nil, fmt.Errorf("assistant stream HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("assistant stream HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return resp, nil
 }
 
 // assistantStreamPOST issues a single streaming POST request. The caller
-// must close resp.Body on success.
-func (c *APIClient) assistantStreamPOST(ctx context.Context, reqBody assistantChatRequest) (*http.Response, error) {
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal assistant request: %w", err)
+// must close resp.Body on success. A nil body is sent as an empty body.
+func (c *APIClient) assistantStreamPOST(ctx context.Context, path string, body []byte) (*http.Response, error) {
+	u := strings.TrimRight(c.BaseURL, "/") + path
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
 	}
-
-	u := strings.TrimRight(c.BaseURL, "/") + "/api/assistant/chat/stream"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, reader)
 	if err != nil {
 		return nil, fmt.Errorf("create assistant request: %w", err)
 	}

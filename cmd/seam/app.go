@@ -14,6 +14,7 @@ const (
 	screenSearch
 	screenAsk
 	screenTimeline
+	screenSettings
 )
 
 // appModel is the root Bubble Tea model that delegates to sub-models.
@@ -29,6 +30,7 @@ type appModel struct {
 	searchModel   searchModel
 	askModel      askModel
 	timelineModel timelineModel
+	settingsModel settingsModel
 }
 
 func newAppModel(client *APIClient, authenticated bool, username string) appModel {
@@ -96,9 +98,20 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAsk(msg)
 	case screenTimeline:
 		return m.updateTimeline(msg)
+	case screenSettings:
+		return m.updateSettings(msg)
 	}
 
 	return m, nil
+}
+
+func (m appModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.settingsModel, cmd = m.settingsModel.Update(msg)
+	if m.settingsModel.saved {
+		m.screen = screenMain
+	}
+	return m, cmd
 }
 
 func (m appModel) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -148,6 +161,11 @@ func (m appModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenTimeline
 		m.timelineModel = newTimelineModel(m.client, m.width, m.height)
 		return m, m.timelineModel.Init()
+
+	case openSettingsMsg:
+		m.screen = screenSettings
+		m.settingsModel = newSettingsModel(m.width, m.height)
+		return m, m.settingsModel.Init()
 	}
 
 	var cmd tea.Cmd
@@ -233,6 +251,8 @@ func (m appModel) View() tea.View {
 		content = m.askModel.View()
 	case screenTimeline:
 		content = m.timelineModel.View()
+	case screenSettings:
+		content = m.settingsModel.View()
 	}
 
 	v := tea.NewView(content)

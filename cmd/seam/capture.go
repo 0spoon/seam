@@ -141,11 +141,11 @@ func (m captureModel) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(styleTitle.Render("New Note"))
+	b.WriteString(styles.Title.Render("New Note"))
 	b.WriteString("\n\n")
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(colorMuted).
+		Foreground(activeTheme.Muted).
 		Width(8).
 		Align(lipgloss.Right)
 
@@ -159,17 +159,17 @@ func (m captureModel) View() string {
 	b.WriteString("\n\n")
 
 	if m.err != "" {
-		b.WriteString(styleError.Render(m.err))
+		b.WriteString(styles.Error.Render(m.err))
 		b.WriteString("\n\n")
 	}
 
 	if m.loading {
-		b.WriteString(styleMuted.Render("Saving..."))
+		b.WriteString(styles.Muted.Render("Saving..."))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
-	help := styleMuted.Render("Alt+S: save | Tab: switch field | Esc: cancel")
+	help := styles.Muted.Render("Alt+S: save | Tab: switch field | Esc: cancel")
 	b.WriteString(help)
 
 	content := b.String()
@@ -178,7 +178,7 @@ func (m captureModel) View() string {
 		Width(formWidth).
 		Padding(2, 4).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary)
+		BorderForeground(activeTheme.Primary)
 
 	rendered := box.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, rendered)

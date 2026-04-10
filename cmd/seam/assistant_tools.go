@@ -11,7 +11,7 @@ import (
 // pretty-printed JSON dump truncated to 10 lines.
 func renderToolResult(toolName string, raw json.RawMessage) string {
 	if len(raw) == 0 {
-		return marioMutedStyle.Render("(empty result)")
+		return assistantStyles.Muted.Render("(empty result)")
 	}
 
 	switch toolName {
@@ -46,7 +46,7 @@ func renderToolResult(toolName string, raw json.RawMessage) string {
 	case "get_profile":
 		return renderProfile(raw)
 	case "update_profile":
-		return marioToolStatusOk.Render("✔ ") + marioToolBlockStyle.Render(marioBlock+" Profile updated")
+		return assistantStyles.ToolStatusOk.Render("✔ ") + assistantStyles.ToolBlock.Render(marioBlock+" Profile updated")
 	default:
 		return fallback(raw)
 	}
@@ -57,11 +57,11 @@ func fallback(raw json.RawMessage) string {
 	var v interface{}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		// Not valid JSON -- show raw bytes.
-		return marioMutedStyle.Render(strings.TrimSpace(string(raw)))
+		return assistantStyles.Muted.Render(strings.TrimSpace(string(raw)))
 	}
 	pretty, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return marioMutedStyle.Render(strings.TrimSpace(string(raw)))
+		return assistantStyles.Muted.Render(strings.TrimSpace(string(raw)))
 	}
 	lines := strings.Split(string(pretty), "\n")
 	const maxLines = 10
@@ -72,9 +72,9 @@ func fallback(raw json.RawMessage) string {
 		lines = lines[:maxLines]
 		truncated = true
 	}
-	out := marioMutedStyle.Render(strings.Join(lines, "\n"))
+	out := assistantStyles.Muted.Render(strings.Join(lines, "\n"))
 	if truncated {
-		out += "\n" + marioMutedStyle.Render(fmt.Sprintf("... (%d more lines)", remaining))
+		out += "\n" + assistantStyles.Muted.Render(fmt.Sprintf("... (%d more lines)", remaining))
 	}
 	return out
 }
@@ -118,7 +118,7 @@ func renderNoteList(raw json.RawMessage) string {
 		return fallback(raw)
 	}
 	if len(notes) == 0 {
-		return marioMutedStyle.Render("(no notes)")
+		return assistantStyles.Muted.Render("(no notes)")
 	}
 	var out []string
 	for i, n := range notes {
@@ -135,13 +135,13 @@ func renderNoteList(raw json.RawMessage) string {
 			if len(n.Tags) > 0 {
 				parts = append(parts, strings.Join(n.Tags, ", "))
 			}
-			meta = " " + marioMutedStyle.Render("("+strings.Join(parts, " · ")+")")
+			meta = " " + assistantStyles.Muted.Render("("+strings.Join(parts, " · ")+")")
 		}
-		head := fmt.Sprintf("[%d] %s%s", i+1, marioMessageAssistStyle.Render(title), meta)
+		head := fmt.Sprintf("[%d] %s%s", i+1, assistantStyles.MessageAssist.Render(title), meta)
 		out = append(out, head)
 		snippet := strings.TrimSpace(n.Snippet)
 		if snippet != "" {
-			out = append(out, "    "+marioMutedStyle.Render(truncateOneLine(snippet, 120)))
+			out = append(out, "    "+assistantStyles.Muted.Render(truncateOneLine(snippet, 120)))
 		}
 	}
 	return strings.Join(out, "\n")
@@ -157,9 +157,9 @@ func renderNoteContent(raw json.RawMessage) string {
 		title = "(untitled)"
 	}
 	var out []string
-	out = append(out, marioToolBlockStyle.Render(title))
+	out = append(out, assistantStyles.ToolBlock.Render(title))
 	if len(n.Tags) > 0 {
-		out = append(out, marioMutedStyle.Render("  tags: ")+marioMessageUserStyle.Render(strings.Join(n.Tags, ", ")))
+		out = append(out, assistantStyles.Muted.Render("  tags: ")+assistantStyles.MessageUser.Render(strings.Join(n.Tags, ", ")))
 	}
 	body := strings.TrimSpace(n.Body)
 	if body == "" {
@@ -172,7 +172,7 @@ func renderNoteContent(raw json.RawMessage) string {
 			lines = lines[:maxLines]
 		}
 		for _, l := range lines {
-			out = append(out, marioMessageAssistStyle.Render("  "+l))
+			out = append(out, assistantStyles.MessageAssist.Render("  "+l))
 		}
 	}
 	return strings.Join(out, "\n")
@@ -187,9 +187,9 @@ func renderNoteOp(action string, raw json.RawMessage) string {
 	if title == "" {
 		title = "(untitled)"
 	}
-	return marioToolStatusOk.Render("✔ ") +
-		marioToolBlockStyle.Render(marioBlock+" "+action+": ") +
-		marioMessageAssistStyle.Render(title)
+	return assistantStyles.ToolStatusOk.Render("✔ ") +
+		assistantStyles.ToolBlock.Render(marioBlock+" "+action+": ") +
+		assistantStyles.MessageAssist.Render(title)
 }
 
 func renderProjectCreate(raw json.RawMessage) string {
@@ -206,11 +206,11 @@ func renderProjectCreate(raw json.RawMessage) string {
 	}
 	suffix := ""
 	if p.Slug != "" {
-		suffix = " " + marioMutedStyle.Render("("+p.Slug+")")
+		suffix = " " + assistantStyles.Muted.Render("("+p.Slug+")")
 	}
-	return marioToolStatusOk.Render("✔ ") +
-		marioToolBlockStyle.Render(marioBlock+" Created project: ") +
-		marioMessageAssistStyle.Render(name) + suffix
+	return assistantStyles.ToolStatusOk.Render("✔ ") +
+		assistantStyles.ToolBlock.Render(marioBlock+" Created project: ") +
+		assistantStyles.MessageAssist.Render(name) + suffix
 }
 
 func renderProjectChips(raw json.RawMessage) string {
@@ -231,7 +231,7 @@ func renderProjectChips(raw json.RawMessage) string {
 		direct = wrapper.Projects
 	}
 	if len(direct) == 0 {
-		return marioMutedStyle.Render("(no projects)")
+		return assistantStyles.Muted.Render("(no projects)")
 	}
 	names := make([]string, 0, len(direct))
 	for _, p := range direct {
@@ -239,9 +239,9 @@ func renderProjectChips(raw json.RawMessage) string {
 		if n == "" {
 			n = p.Slug
 		}
-		names = append(names, marioMessageAssistStyle.Render(n))
+		names = append(names, assistantStyles.MessageAssist.Render(n))
 	}
-	return strings.Join(names, marioMutedStyle.Render(", "))
+	return strings.Join(names, assistantStyles.Muted.Render(", "))
 }
 
 func renderTaskList(raw json.RawMessage) string {
@@ -262,7 +262,7 @@ func renderTaskList(raw json.RawMessage) string {
 		direct = wrapper.Tasks
 	}
 	if len(direct) == 0 {
-		return marioMutedStyle.Render("(no tasks)")
+		return assistantStyles.Muted.Render("(no tasks)")
 	}
 	var out []string
 	for _, t := range direct {
@@ -270,11 +270,11 @@ func renderTaskList(raw json.RawMessage) string {
 		if t.Done {
 			box = "[x]"
 		}
-		style := marioMessageAssistStyle
+		style := assistantStyles.MessageAssist
 		if t.Done {
-			style = marioMutedStyle
+			style = assistantStyles.Muted
 		}
-		out = append(out, marioToolBlockStyle.Render(box)+" "+style.Render(strings.TrimSpace(t.Content)))
+		out = append(out, assistantStyles.ToolBlock.Render(box)+" "+style.Render(strings.TrimSpace(t.Content)))
 	}
 	return strings.Join(out, "\n")
 }
@@ -291,13 +291,13 @@ func renderTaskToggle(raw json.RawMessage) string {
 	if t.Done {
 		label = "Marked task done"
 	}
-	return marioToolStatusOk.Render("✔ ") + marioToolBlockStyle.Render(marioBlock+" "+label)
+	return assistantStyles.ToolStatusOk.Render("✔ ") + assistantStyles.ToolBlock.Render(marioBlock+" "+label)
 }
 
 func renderCurrentTime(raw json.RawMessage) string {
 	var asString string
 	if err := json.Unmarshal(raw, &asString); err == nil && asString != "" {
-		return marioMessageAssistStyle.Render(asString)
+		return assistantStyles.MessageAssist.Render(asString)
 	}
 	var obj struct {
 		Time string `json:"time"`
@@ -313,7 +313,7 @@ func renderCurrentTime(raw json.RawMessage) string {
 			v = obj.Date
 		}
 		if v != "" {
-			return marioMessageAssistStyle.Render(v)
+			return assistantStyles.MessageAssist.Render(v)
 		}
 	}
 	return fallback(raw)
@@ -327,9 +327,9 @@ func renderGraphSummary(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &g); err != nil {
 		return fallback(raw)
 	}
-	return marioToolBlockStyle.Render(marioBlock+" ") +
-		marioMessageAssistStyle.Render(fmt.Sprintf("%d nodes, %d edges", len(g.Nodes), len(g.Edges))) +
-		" " + marioMutedStyle.Render("(open the web for visualization)")
+	return assistantStyles.ToolBlock.Render(marioBlock+" ") +
+		assistantStyles.MessageAssist.Render(fmt.Sprintf("%d nodes, %d edges", len(g.Nodes), len(g.Edges))) +
+		" " + assistantStyles.Muted.Render("(open the web for visualization)")
 }
 
 func renderConversationSearch(raw json.RawMessage) string {
@@ -352,7 +352,7 @@ func renderConversationSearch(raw json.RawMessage) string {
 		direct = wrapper.Results
 	}
 	if len(direct) == 0 {
-		return marioMutedStyle.Render("(no matches)")
+		return assistantStyles.Muted.Render("(no matches)")
 	}
 	var out []string
 	for _, r := range direct {
@@ -365,7 +365,7 @@ func renderConversationSearch(raw json.RawMessage) string {
 		if role == "" {
 			role = "?"
 		}
-		out = append(out, marioToolBlockStyle.Render(role+":")+" "+marioMessageAssistStyle.Render(body))
+		out = append(out, assistantStyles.ToolBlock.Render(role+":")+" "+assistantStyles.MessageAssist.Render(body))
 	}
 	return strings.Join(out, "\n")
 }
@@ -381,9 +381,9 @@ func renderSaveMemory(raw json.RawMessage) string {
 	if cat == "" {
 		cat = "general"
 	}
-	return marioToolStatusOk.Render("✔ ") +
-		marioToolBlockStyle.Render(marioBlock+" Saved memory in ") +
-		marioMessageUserStyle.Render(cat)
+	return assistantStyles.ToolStatusOk.Render("✔ ") +
+		assistantStyles.ToolBlock.Render(marioBlock+" Saved memory in ") +
+		assistantStyles.MessageUser.Render(cat)
 }
 
 func renderMemoryList(raw json.RawMessage) string {
@@ -404,7 +404,7 @@ func renderMemoryList(raw json.RawMessage) string {
 		direct = wrapper.Memories
 	}
 	if len(direct) == 0 {
-		return marioMutedStyle.Render("(no memories)")
+		return assistantStyles.Muted.Render("(no memories)")
 	}
 	var out []string
 	for i, m := range direct {
@@ -413,9 +413,9 @@ func renderMemoryList(raw json.RawMessage) string {
 			cat = "general"
 		}
 		body := truncateOneLine(strings.TrimSpace(m.Content), 120)
-		head := fmt.Sprintf("[%d] ", i+1) + marioMessageUserStyle.Render(cat)
+		head := fmt.Sprintf("[%d] ", i+1) + assistantStyles.MessageUser.Render(cat)
 		out = append(out, head)
-		out = append(out, "    "+marioMessageAssistStyle.Render(body))
+		out = append(out, "    "+assistantStyles.MessageAssist.Render(body))
 	}
 	return strings.Join(out, "\n")
 }
@@ -426,11 +426,11 @@ func renderProfile(raw json.RawMessage) string {
 		return fallback(raw)
 	}
 	if len(v) == 0 {
-		return marioMutedStyle.Render("(empty profile)")
+		return assistantStyles.Muted.Render("(empty profile)")
 	}
 	var out []string
 	for k, val := range v {
-		out = append(out, marioToolBlockStyle.Render(k+":")+" "+marioMessageAssistStyle.Render(stringifyValue(val)))
+		out = append(out, assistantStyles.ToolBlock.Render(k+":")+" "+assistantStyles.MessageAssist.Render(stringifyValue(val)))
 	}
 	return strings.Join(out, "\n")
 }

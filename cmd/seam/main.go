@@ -19,7 +19,22 @@ func main() {
 
 func run() error {
 	serverURL := flag.String("server", "http://localhost:8080", "Seam server URL")
+	themeFlag := flag.String("theme", "", "TUI theme (catppuccin-mocha|catppuccin-macchiato|catppuccin-frappe|catppuccin-latte|seam)")
+	assistantThemeFlag := flag.String("assistant-theme", "", "Assistant screen theme (mario|follow_global)")
 	flag.Parse()
+
+	// Resolve theme preference (flag > env > file > default) and apply
+	// it before constructing any models so the initial render uses the
+	// chosen palette. Apply errors are non-fatal: ResolveTUIConfig has
+	// already filtered unknown values, so any failure here is a logic
+	// bug and we keep running with whatever the package init set.
+	tuiCfg := ResolveTUIConfig(*themeFlag, *assistantThemeFlag)
+	if err := ApplyTheme(tuiCfg.Theme); err != nil {
+		fmt.Fprintf(os.Stderr, "seam: apply theme: %v\n", err)
+	}
+	if err := ApplyAssistantTheme(tuiCfg.AssistantTheme); err != nil {
+		fmt.Fprintf(os.Stderr, "seam: apply assistant theme: %v\n", err)
+	}
 
 	client := NewAPIClient(*serverURL)
 

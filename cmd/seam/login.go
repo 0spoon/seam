@@ -223,13 +223,13 @@ func (m loginModel) View() string {
 		modeLabel = "Register"
 	}
 
-	title := styleTitle.Render("Seam - " + modeLabel)
+	title := styles.Title.Render("Seam - " + modeLabel)
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
 	labelStyle := lipgloss.NewStyle().
 		Width(12).
-		Foreground(colorMuted).
+		Foreground(activeTheme.Muted).
 		Align(lipgloss.Right)
 
 	b.WriteString(labelStyle.Render("Server: "))
@@ -251,17 +251,17 @@ func (m loginModel) View() string {
 	b.WriteString("\n\n")
 
 	if m.err != "" {
-		b.WriteString(styleError.Render(m.err))
+		b.WriteString(styles.Error.Render(m.err))
 		b.WriteString("\n\n")
 	}
 
 	if m.loading {
-		b.WriteString(styleMuted.Render("Authenticating..."))
+		b.WriteString(styles.Muted.Render("Authenticating..."))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
-	help := styleMuted.Render("Enter: submit | Tab: next field | Ctrl+R: toggle login/register | Ctrl+C: quit")
+	help := styles.Muted.Render("Enter: submit | Tab: next field | Ctrl+R: toggle login/register | Ctrl+C: quit")
 	b.WriteString(help)
 
 	// Center the form in the terminal.
@@ -271,7 +271,7 @@ func (m loginModel) View() string {
 		Width(formWidth).
 		Padding(2, 4).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorBorder)
+		BorderForeground(activeTheme.Border)
 
 	rendered := box.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, rendered)

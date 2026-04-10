@@ -598,7 +598,7 @@ func (m askModel) View() string {
 		return ""
 	}
 
-	header := marioHeaderStyle.Width(m.width).Render(" " + marioBlock + "  ASK SEAM")
+	header := assistantStyles.Header.Width(m.width).Render(" " + marioBlock + "  ASK SEAM")
 
 	lines := m.buildConversationLines()
 
@@ -623,7 +623,7 @@ func (m askModel) View() string {
 	conversation := strings.Join(visible, "\n")
 
 	if m.err != "" {
-		conversation += "\n" + marioErrorStyle.Render("  "+m.err)
+		conversation += "\n" + assistantStyles.Error.Render("  "+m.err)
 	}
 
 	// Confirmation prompt replaces the input when pending.
@@ -634,10 +634,7 @@ func (m askModel) View() string {
 		bottom = "\n " + m.input.View() + "\n"
 	}
 
-	statusBar := lipgloss.NewStyle().
-		Foreground(marioWhite).
-		Background(marioBrickBrn).
-		Padding(0, 1).
+	statusBar := assistantStyles.StatusBar.
 		Width(m.width).
 		Render("Enter: send | Shift+Enter: newline | Tab/Shift+Tab: focus tool | Enter (on tool): expand | Ctrl+Up/Down: scroll | Esc: stop/back")
 
@@ -659,7 +656,7 @@ func (m askModel) buildConversationLines() []string {
 
 	if len(m.turns) == 0 && !m.streaming {
 		lines = append(lines, "")
-		lines = append(lines, marioMutedStyle.Render("  "+marioBlock+"  Ask the assistant anything -- it can search, read, write, and remember."))
+		lines = append(lines, assistantStyles.Muted.Render("  "+marioBlock+"  Ask the assistant anything -- it can search, read, write, and remember."))
 		lines = append(lines, "")
 	}
 
@@ -667,27 +664,27 @@ func (m askModel) buildConversationLines() []string {
 		focused := i == m.focusToolIdx
 		switch t.kind {
 		case "user":
-			lines = append(lines, marioMessageUserStyle.Render("  You: "))
+			lines = append(lines, assistantStyles.MessageUser.Render("  You: "))
 			for _, line := range strings.Split(t.content, "\n") {
 				wrapped := wrapText(line, wrapWidth)
 				for _, wl := range strings.Split(wrapped, "\n") {
-					lines = append(lines, "    "+marioMessageAssistStyle.Render(wl))
+					lines = append(lines, "    "+assistantStyles.MessageAssist.Render(wl))
 				}
 			}
 			lines = append(lines, "")
 
 		case "assistant":
-			lines = append(lines, marioToolBlockStyle.Render("  Seam: "))
+			lines = append(lines, assistantStyles.ToolBlock.Render("  Seam: "))
 			for _, line := range strings.Split(t.content, "\n") {
 				wrapped := wrapText(line, wrapWidth)
 				for _, wl := range strings.Split(wrapped, "\n") {
-					lines = append(lines, "    "+marioMessageAssistStyle.Render(wl))
+					lines = append(lines, "    "+assistantStyles.MessageAssist.Render(wl))
 				}
 			}
 			lines = append(lines, "")
 
 		case "system":
-			lines = append(lines, marioMutedStyle.Render("  · "+t.content))
+			lines = append(lines, assistantStyles.Muted.Render("  · "+t.content))
 			lines = append(lines, "")
 
 		case "tool", "stream-tool":
@@ -698,16 +695,16 @@ func (m askModel) buildConversationLines() []string {
 
 	// Streaming text bubble.
 	if m.streaming && m.streamingText != "" {
-		lines = append(lines, marioToolBlockStyle.Render("  Seam: "))
+		lines = append(lines, assistantStyles.ToolBlock.Render("  Seam: "))
 		for _, line := range strings.Split(m.streamingText, "\n") {
 			wrapped := wrapText(line, wrapWidth)
 			for _, wl := range strings.Split(wrapped, "\n") {
-				lines = append(lines, "    "+marioMessageAssistStyle.Render(wl))
+				lines = append(lines, "    "+assistantStyles.MessageAssist.Render(wl))
 			}
 		}
 		lines = append(lines, "")
 	} else if m.streaming && m.streamingText == "" {
-		lines = append(lines, marioMutedStyle.Render("  "+marioBlock+" thinking..."))
+		lines = append(lines, assistantStyles.Muted.Render("  "+marioBlock+" thinking..."))
 		lines = append(lines, "")
 	}
 
@@ -717,13 +714,13 @@ func (m askModel) buildConversationLines() []string {
 // renderToolCard formats a single tool turn as one or more lines.
 func (m askModel) renderToolCard(idx int, t chatTurn, focused bool, wrapWidth int) []string {
 	cursor := "  "
-	nameStyle := marioToolBlockStyle
+	nameStyle := assistantStyles.ToolBlock
 	if focused {
-		cursor = marioToolBlockStyle.Render("> ")
-		nameStyle = marioToolBlockStyle.Bold(true).Underline(true)
+		cursor = assistantStyles.ToolBlock.Render("> ")
+		nameStyle = assistantStyles.ToolBlock.Bold(true).Underline(true)
 	}
-	glyph := marioStatusStyle(t.status).Render(marioStatusGlyph(t.status))
-	head := cursor + marioToolBlockStyle.Render(marioBlock+" ") + nameStyle.Render(t.toolName) + "  " + glyph
+	glyph := assistantStatusStyle(t.status).Render(marioStatusGlyph(t.status))
+	head := cursor + assistantStyles.ToolBlock.Render(marioBlock+" ") + nameStyle.Render(t.toolName) + "  " + glyph
 
 	lines := []string{head}
 	if m.expanded[idx] {
@@ -743,16 +740,16 @@ func (m askModel) renderConfirmPrompt() string {
 		innerWidth = 40
 	}
 	body := []string{
-		marioMessageAssistStyle.Render("The assistant wants to use ") + marioToolBlockStyle.Render(m.pendingConfirm.toolName) + marioMessageAssistStyle.Render("."),
-		marioMutedStyle.Render("Action ID: " + m.pendingConfirm.actionID),
+		assistantStyles.MessageAssist.Render("The assistant wants to use ") + assistantStyles.ToolBlock.Render(m.pendingConfirm.toolName) + assistantStyles.MessageAssist.Render("."),
+		assistantStyles.Muted.Render("Action ID: " + m.pendingConfirm.actionID),
 		"",
-		marioToolStatusOk.Render("[a] Approve") + "     " +
-			marioToolStatusErr.Render("[r] Reject") + "     " +
-			marioMutedStyle.Render("[Esc] Cancel"),
+		assistantStyles.ToolStatusOk.Render("[a] Approve") + "     " +
+			assistantStyles.ToolStatusErr.Render("[r] Reject") + "     " +
+			assistantStyles.Muted.Render("[Esc] Cancel"),
 	}
-	title := marioToolBlockStyle.Render(" " + marioBlock + "  Action required ")
+	title := assistantStyles.ToolBlock.Render(" " + marioBlock + "  Action required ")
 	joined := lipgloss.JoinVertical(lipgloss.Left, title, "") + "\n" + strings.Join(body, "\n")
-	return "\n" + marioConfirmPaneStyle.Width(innerWidth).Render(joined) + "\n"
+	return "\n" + assistantStyles.ConfirmPane.Width(innerWidth).Render(joined) + "\n"
 }
 
 // -- Scroll helpers ----------------------------------------------------------

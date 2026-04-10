@@ -266,20 +266,20 @@ func (m editorModel) View() string {
 	// Title section: editable input or static display.
 	var titleView string
 	if m.editingTitle {
-		titleLabel := styleMuted.Render("Title: ")
-		titleView = styleHeader.Width(m.width).Render(titleLabel + m.titleInput.View())
+		titleLabel := styles.Muted.Render("Title: ")
+		titleView = styles.Header.Width(m.width).Render(titleLabel + m.titleInput.View())
 	} else {
 		headerText := fmt.Sprintf(" %s", m.titleInput.Value())
 		if m.modified {
 			headerText += " [modified]"
 		}
-		titleView = styleHeader.Width(m.width).Render(headerText)
+		titleView = styles.Header.Width(m.width).Render(headerText)
 	}
 
 	// Editor body.
 	var bodyView string
 	if m.loading {
-		bodyView = styleMuted.Render("Loading note...")
+		bodyView = styles.Muted.Render("Loading note...")
 	} else {
 		bodyView = m.body.View()
 	}
@@ -290,13 +290,13 @@ func (m editorModel) View() string {
 	// Status bar.
 	var statusParts []string
 	if m.err != "" {
-		statusParts = append(statusParts, styleError.Render(m.err))
+		statusParts = append(statusParts, styles.Error.Render(m.err))
 	}
 	if m.status != "" {
-		statusParts = append(statusParts, styleSuccess.Render(m.status))
+		statusParts = append(statusParts, styles.Success.Render(m.status))
 	}
-	statusParts = append(statusParts, styleMuted.Render("Alt+S/F2: save | Ctrl+T: title | Ctrl+A: AI | Esc: back"))
-	statusBar := styleStatusBar.Width(m.width).Render(strings.Join(statusParts, "  |  "))
+	statusParts = append(statusParts, styles.Muted.Render("Alt+S/F2: save | Ctrl+T: title | Ctrl+A: AI | Esc: back"))
+	statusBar := styles.StatusBar.Width(m.width).Render(strings.Join(statusParts, "  |  "))
 
 	parts := []string{titleView, bodyView}
 	if mdHint != "" {
@@ -328,9 +328,9 @@ func renderMarkdownHint(body string, width int) string {
 		return ""
 	}
 
-	headingStyle := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	codeStyle := lipgloss.NewStyle().Foreground(colorSecondary)
-	linkStyle := lipgloss.NewStyle().Foreground(colorPrimary).Underline(true)
+	headingStyle := lipgloss.NewStyle().Foreground(activeTheme.Primary).Bold(true)
+	codeStyle := lipgloss.NewStyle().Foreground(activeTheme.Secondary)
+	linkStyle := lipgloss.NewStyle().Foreground(activeTheme.Primary).Underline(true)
 
 	lines := strings.Split(body, "\n")
 	var hints []string
@@ -346,11 +346,11 @@ func renderMarkdownHint(body string, width int) string {
 	}
 	boldCount := len(reBold.FindAllString(body, -1))
 	if boldCount > 0 {
-		hints = append(hints, lipgloss.NewStyle().Bold(true).Foreground(colorFg).Render(fmt.Sprintf("%d bold", boldCount)))
+		hints = append(hints, lipgloss.NewStyle().Bold(true).Foreground(activeTheme.Fg).Render(fmt.Sprintf("%d bold", boldCount)))
 	}
 	italicCount := len(reItalic.FindAllString(body, -1)) - boldCount
 	if italicCount > 0 {
-		hints = append(hints, lipgloss.NewStyle().Italic(true).Foreground(colorFg).Render(fmt.Sprintf("%d italic", italicCount)))
+		hints = append(hints, lipgloss.NewStyle().Italic(true).Foreground(activeTheme.Fg).Render(fmt.Sprintf("%d italic", italicCount)))
 	}
 	codeCount := len(reCode.FindAllString(body, -1))
 	if codeCount > 0 {
@@ -364,5 +364,5 @@ func renderMarkdownHint(body string, width int) string {
 	if len(hints) == 0 {
 		return ""
 	}
-	return styleMuted.Render(" md: ") + strings.Join(hints, styleMuted.Render(" | "))
+	return styles.Muted.Render(" md: ") + strings.Join(hints, styles.Muted.Render(" | "))
 }

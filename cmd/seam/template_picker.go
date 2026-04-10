@@ -236,32 +236,32 @@ func (m templatePickerModel) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(styleTitle.Render("New Note from Template"))
+	b.WriteString(styles.Title.Render("New Note from Template"))
 	b.WriteString("\n\n")
 
 	switch m.phase {
 	case tplPhaseLoading:
-		b.WriteString(styleMuted.Render("Loading templates..."))
+		b.WriteString(styles.Muted.Render("Loading templates..."))
 
 	case tplPhaseList:
 		for i, t := range m.templates {
 			name := t.Name
 			desc := t.Description
 			if desc != "" {
-				desc = styleMuted.Render(" - " + desc)
+				desc = styles.Muted.Render(" - " + desc)
 			}
 
 			if i == m.cursor {
-				b.WriteString(styleSelected.Render(fmt.Sprintf("> %s", name)))
+				b.WriteString(styles.Selected.Render(fmt.Sprintf("> %s", name)))
 				b.WriteString(desc)
 			} else {
-				b.WriteString(styleNormal.Render(fmt.Sprintf("  %s", name)))
+				b.WriteString(styles.Normal.Render(fmt.Sprintf("  %s", name)))
 				b.WriteString(desc)
 			}
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		help := styleMuted.Render("j/k: navigate | Enter: select | Esc: cancel")
+		help := styles.Muted.Render("j/k: navigate | Enter: select | Esc: cancel")
 		b.WriteString(help)
 
 	case tplPhaseTitle:
@@ -269,11 +269,11 @@ func (m templatePickerModel) View() string {
 		if m.cursor < len(m.templates) {
 			selected = m.templates[m.cursor].Name
 		}
-		b.WriteString(styleMuted.Render(fmt.Sprintf("Template: %s", selected)))
+		b.WriteString(styles.Muted.Render(fmt.Sprintf("Template: %s", selected)))
 		b.WriteString("\n\n")
 
 		labelStyle := lipgloss.NewStyle().
-			Foreground(colorMuted).
+			Foreground(activeTheme.Muted).
 			Width(8).
 			Align(lipgloss.Right)
 
@@ -282,18 +282,18 @@ func (m templatePickerModel) View() string {
 		b.WriteString("\n\n")
 
 		if m.applying {
-			b.WriteString(styleMuted.Render("Creating note..."))
+			b.WriteString(styles.Muted.Render("Creating note..."))
 			b.WriteString("\n")
 		}
 
 		b.WriteString("\n")
-		help := styleMuted.Render("Enter: create | Esc: back")
+		help := styles.Muted.Render("Enter: create | Esc: back")
 		b.WriteString(help)
 	}
 
 	if m.err != "" {
 		b.WriteString("\n\n")
-		b.WriteString(styleError.Render(m.err))
+		b.WriteString(styles.Error.Render(m.err))
 	}
 
 	content := b.String()
@@ -302,7 +302,7 @@ func (m templatePickerModel) View() string {
 		Width(formWidth).
 		Padding(2, 4).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary)
+		BorderForeground(activeTheme.Primary)
 
 	rendered := box.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, rendered)

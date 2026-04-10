@@ -190,27 +190,27 @@ func (m timelineModel) Update(msg tea.Msg) (timelineModel, tea.Cmd) {
 
 func (m timelineModel) View() string {
 	if m.loading {
-		return styleMuted.Render("Loading timeline...")
+		return styles.Muted.Render("Loading timeline...")
 	}
 
 	headerStyle := lipgloss.NewStyle().
-		Foreground(colorPrimary).
+		Foreground(activeTheme.Primary).
 		Bold(true)
 	dateStyle := lipgloss.NewStyle().
-		Foreground(colorMuted).
+		Foreground(activeTheme.Muted).
 		Bold(true)
 	activeDate := lipgloss.NewStyle().
-		Foreground(colorPrimary).
+		Foreground(activeTheme.Primary).
 		Bold(true)
 	noteStyle := lipgloss.NewStyle().
-		Foreground(colorFg)
+		Foreground(activeTheme.Fg)
 	selectedNote := lipgloss.NewStyle().
-		Foreground(colorPrimary).
+		Foreground(activeTheme.Primary).
 		Bold(true)
 	dimStyle := lipgloss.NewStyle().
-		Foreground(colorDim)
+		Foreground(activeTheme.Dim)
 	todayDot := lipgloss.NewStyle().
-		Foreground(colorPrimary).
+		Foreground(activeTheme.Primary).
 		SetString("*")
 
 	var b strings.Builder
@@ -297,7 +297,7 @@ func (m timelineModel) View() string {
 	}
 
 	if m.err != "" {
-		b.WriteString("\n" + styleError.Render(m.err))
+		b.WriteString("\n" + styles.Error.Render(m.err))
 	}
 
 	return b.String()

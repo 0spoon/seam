@@ -287,32 +287,32 @@ func (m voiceCaptureModel) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(styleTitle.Render("Voice Capture"))
+	b.WriteString(styles.Title.Render("Voice Capture"))
 	b.WriteString("\n\n")
 
 	if m.recording {
 		remaining := maxRecordingDuration - m.seconds
-		b.WriteString(styleError.Render("  Recording..."))
+		b.WriteString(styles.Error.Render("  Recording..."))
 		b.WriteString(fmt.Sprintf("  %02d:%02d / %02d:%02d", m.seconds/60, m.seconds%60, maxRecordingDuration/60, maxRecordingDuration%60))
 		if remaining <= 30 {
-			b.WriteString(styleError.Render(fmt.Sprintf("  (%ds left)", remaining)))
+			b.WriteString(styles.Error.Render(fmt.Sprintf("  (%ds left)", remaining)))
 		}
 		b.WriteString("\n\n")
-		b.WriteString(styleMuted.Render("Press Enter or Space to stop recording"))
+		b.WriteString(styles.Muted.Render("Press Enter or Space to stop recording"))
 	} else if m.loading {
-		b.WriteString(styleMuted.Render("  Transcribing audio..."))
+		b.WriteString(styles.Muted.Render("  Transcribing audio..."))
 	} else {
-		b.WriteString(styleMuted.Render("  Press Enter or Space to start recording"))
+		b.WriteString(styles.Muted.Render("  Press Enter or Space to start recording"))
 	}
 
 	b.WriteString("\n\n")
 
 	if m.err != "" {
-		b.WriteString(styleError.Render(m.err))
+		b.WriteString(styles.Error.Render(m.err))
 		b.WriteString("\n\n")
 	}
 
-	help := styleMuted.Render("Enter/Space: start/stop | Esc: cancel")
+	help := styles.Muted.Render("Enter/Space: start/stop | Esc: cancel")
 	b.WriteString(help)
 
 	content := b.String()
@@ -321,7 +321,7 @@ func (m voiceCaptureModel) View() string {
 		Width(formWidth).
 		Padding(2, 4).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary)
+		BorderForeground(activeTheme.Primary)
 
 	rendered := box.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, rendered)

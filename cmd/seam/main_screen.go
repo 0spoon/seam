@@ -264,6 +264,11 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 				return openTimelineMsg{}
 			}
 
+		case ",":
+			return m, func() tea.Msg {
+				return openSettingsMsg{}
+			}
+
 		case "d":
 			if m.activePane == paneNotes && len(m.notes) > 0 {
 				if !m.confirmDelete {
@@ -403,7 +408,7 @@ func (m mainScreenModel) View() string {
 	}
 
 	// Header.
-	header := styleHeader.Width(m.width).Render(
+	header := styles.Header.Width(m.width).Render(
 		fmt.Sprintf(" Seam  |  %s  |  %d notes", m.username, m.totalNotes),
 	)
 
@@ -413,11 +418,11 @@ func (m mainScreenModel) View() string {
 	if totalPages > 1 {
 		pageInfo = fmt.Sprintf(" | Page %d/%d (Ctrl+F/B)", m.page+1, totalPages)
 	}
-	statusText := "j/k: nav | Tab: pane | Enter: open | c: capture | n: template | u: URL | v: voice | /: search | a: ask | d: del | q: quit" + pageInfo
+	statusText := "j/k: nav | Tab: pane | Enter: open | c: capture | n: template | u: URL | v: voice | /: search | a: ask | ,: settings | d: del | q: quit" + pageInfo
 	if m.err != "" {
-		statusText = styleError.Render(m.err)
+		statusText = styles.Error.Render(m.err)
 	}
-	statusBar := styleStatusBar.Width(m.width).Render(statusText)
+	statusBar := styles.StatusBar.Width(m.width).Render(statusText)
 
 	// Calculate pane dimensions.
 	contentHeight := m.height - 3 // header + status + borders
@@ -434,17 +439,17 @@ func (m mainScreenModel) View() string {
 	}
 
 	// Project list pane.
-	leftPaneStyle := stylePane
+	leftPaneStyle := styles.Pane
 	if m.activePane == paneProjects {
-		leftPaneStyle = stylePaneActive
+		leftPaneStyle = styles.PaneActive
 	}
 	projectList := m.renderProjectList(leftWidth, contentHeight-2)
 	leftPane := leftPaneStyle.Width(leftWidth).Height(contentHeight - 2).Render(projectList)
 
 	// Note list pane.
-	rightPaneStyle := stylePane
+	rightPaneStyle := styles.Pane
 	if m.activePane == paneNotes {
-		rightPaneStyle = stylePaneActive
+		rightPaneStyle = styles.PaneActive
 	}
 	noteList := m.renderNoteList(rightWidth, contentHeight-2)
 	rightPane := rightPaneStyle.Width(rightWidth).Height(contentHeight - 2).Render(noteList)
@@ -456,25 +461,25 @@ func (m mainScreenModel) View() string {
 
 func (m mainScreenModel) renderProjectList(width, height int) string {
 	var b strings.Builder
-	title := styleTitle.Render("Projects")
+	title := styles.Title.Render("Projects")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
 	if len(m.projects) == 0 {
-		b.WriteString(styleMuted.Render("  No projects"))
+		b.WriteString(styles.Muted.Render("  No projects"))
 		return b.String()
 	}
 
 	for i, p := range m.projects {
 		if i >= height-2 {
-			b.WriteString(styleMuted.Render(fmt.Sprintf("  ... +%d more", len(m.projects)-i)))
+			b.WriteString(styles.Muted.Render(fmt.Sprintf("  ... +%d more", len(m.projects)-i)))
 			break
 		}
 		label := p.name
 		if i == m.projectIdx {
-			b.WriteString(styleSelected.Width(width - 2).Render("> " + label))
+			b.WriteString(styles.Selected.Width(width - 2).Render("> " + label))
 		} else {
-			b.WriteString(styleNormal.Width(width - 2).Render("  " + label))
+			b.WriteString(styles.Normal.Width(width - 2).Render("  " + label))
 		}
 		if i < len(m.projects)-1 {
 			b.WriteString("\n")
@@ -486,21 +491,21 @@ func (m mainScreenModel) renderProjectList(width, height int) string {
 
 func (m mainScreenModel) renderNoteList(width, height int) string {
 	var b strings.Builder
-	title := styleTitle.Render("Notes")
+	title := styles.Title.Render("Notes")
 	if m.loading {
-		title += styleMuted.Render(" (loading...)")
+		title += styles.Muted.Render(" (loading...)")
 	}
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
 	if len(m.notes) == 0 {
-		b.WriteString(styleMuted.Render("  No notes"))
+		b.WriteString(styles.Muted.Render("  No notes"))
 		return b.String()
 	}
 
 	for i, n := range m.notes {
 		if i >= height-2 {
-			b.WriteString(styleMuted.Render(fmt.Sprintf("  ... +%d more", len(m.notes)-i)))
+			b.WriteString(styles.Muted.Render(fmt.Sprintf("  ... +%d more", len(m.notes)-i)))
 			break
 		}
 
@@ -520,14 +525,14 @@ func (m mainScreenModel) renderNoteList(width, height int) string {
 
 		line := noteTitle
 		if len(n.Tags) > 0 {
-			tags := styleMuted.Render(" [" + strings.Join(n.Tags, ", ") + "]")
+			tags := styles.Muted.Render(" [" + strings.Join(n.Tags, ", ") + "]")
 			line += tags
 		}
 
 		if i == m.noteIdx {
-			b.WriteString(styleSelected.Width(width - 2).Render("> " + line))
+			b.WriteString(styles.Selected.Width(width - 2).Render("> " + line))
 		} else {
-			b.WriteString(styleNormal.Width(width - 2).Render("  " + line))
+			b.WriteString(styles.Normal.Width(width - 2).Render("  " + line))
 		}
 		if i < len(m.notes)-1 {
 			b.WriteString("\n")

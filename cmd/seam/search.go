@@ -217,7 +217,7 @@ func (m searchModel) View() string {
 	if m.mode == searchModeSemantic {
 		modeLabel = "Semantic"
 	}
-	header := styleHeader.Width(m.width).Render(fmt.Sprintf(" Search (%s)", modeLabel))
+	header := styles.Header.Width(m.width).Render(fmt.Sprintf(" Search (%s)", modeLabel))
 
 	// Search input.
 	var b strings.Builder
@@ -226,28 +226,28 @@ func (m searchModel) View() string {
 	b.WriteString("\n")
 
 	if m.mode == searchModeSemantic {
-		b.WriteString(styleMuted.Render("  Prefix ? for semantic search"))
+		b.WriteString(styles.Muted.Render("  Prefix ? for semantic search"))
 		b.WriteString("\n")
 	}
 
 	if m.loading {
-		b.WriteString(styleMuted.Render("  Searching..."))
+		b.WriteString(styles.Muted.Render("  Searching..."))
 		b.WriteString("\n")
 	}
 
 	if m.err != "" {
 		b.WriteString("  ")
-		b.WriteString(styleError.Render(m.err))
+		b.WriteString(styles.Error.Render(m.err))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
 
 	if m.lastQuery != "" && len(m.lastQuery) < 2 {
-		b.WriteString(styleMuted.Render("  Type 2+ characters to search"))
+		b.WriteString(styles.Muted.Render("  Type 2+ characters to search"))
 		b.WriteString("\n")
 	} else if len(m.results) == 0 && m.lastQuery != "" && !m.loading {
-		b.WriteString(styleMuted.Render("  No results found"))
+		b.WriteString(styles.Muted.Render("  No results found"))
 		b.WriteString("\n")
 	}
 
@@ -258,7 +258,7 @@ func (m searchModel) View() string {
 
 	for i, r := range m.results {
 		if i >= maxResults {
-			b.WriteString(styleMuted.Render(fmt.Sprintf("  ... +%d more results", len(m.results)-i)))
+			b.WriteString(styles.Muted.Render(fmt.Sprintf("  ... +%d more results", len(m.results)-i)))
 			b.WriteString("\n")
 			break
 		}
@@ -275,9 +275,9 @@ func (m searchModel) View() string {
 		}
 
 		if i == m.resultIdx {
-			b.WriteString(styleSelected.Width(m.width - 4).Render("> " + displayTitle))
+			b.WriteString(styles.Selected.Width(m.width - 4).Render("> " + displayTitle))
 		} else {
-			b.WriteString(styleNormal.Width(m.width - 4).Render("  " + displayTitle))
+			b.WriteString(styles.Normal.Width(m.width - 4).Render("  " + displayTitle))
 		}
 		b.WriteString("\n")
 
@@ -291,13 +291,13 @@ func (m searchModel) View() string {
 					snippet = string(runes[:m.width-11]) + "..."
 				}
 			}
-			b.WriteString(styleMuted.Render("    " + snippet))
+			b.WriteString(styles.Muted.Render("    " + snippet))
 			b.WriteString("\n")
 		}
 	}
 
 	// Status bar.
-	statusBar := styleStatusBar.Width(m.width).Render("Enter: open | Up/Down: navigate | ?query: semantic | Esc: back")
+	statusBar := styles.StatusBar.Width(m.width).Render("Enter: open | Up/Down: navigate | ?query: semantic | Esc: back")
 
 	content := b.String()
 	return lipgloss.JoinVertical(lipgloss.Left, header, content, statusBar)

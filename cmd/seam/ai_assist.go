@@ -165,12 +165,12 @@ func (m aiAssistModel) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(styleTitle.Render("AI Writing Assist"))
+	b.WriteString(styles.Title.Render("AI Writing Assist"))
 	b.WriteString("\n\n")
 
 	if m.result != "" {
 		// Show scrollable result preview.
-		b.WriteString(styleMuted.Render("Result:"))
+		b.WriteString(styles.Muted.Render("Result:"))
 		b.WriteString("\n\n")
 
 		lines := strings.Split(m.result, "\n")
@@ -187,52 +187,52 @@ func (m aiAssistModel) View() string {
 			end = len(lines)
 		}
 		visible := lines[start:end]
-		b.WriteString(styleNormal.Render(strings.Join(visible, "\n")))
+		b.WriteString(styles.Normal.Render(strings.Join(visible, "\n")))
 		if end < len(lines) {
-			b.WriteString("\n" + styleMuted.Render(fmt.Sprintf("... (+%d more lines, j/k to scroll)", len(lines)-end)))
+			b.WriteString("\n" + styles.Muted.Render(fmt.Sprintf("... (+%d more lines, j/k to scroll)", len(lines)-end)))
 		}
 		b.WriteString("\n\n")
 
-		help := styleMuted.Render("Enter/y: insert | Esc/n: dismiss | j/k: scroll")
+		help := styles.Muted.Render("Enter/y: insert | Esc/n: dismiss | j/k: scroll")
 		b.WriteString(help)
 	} else if m.loading {
 		action := aiAssistActions[m.cursor].label
-		b.WriteString(styleMuted.Render(fmt.Sprintf("Running %s...", action)))
+		b.WriteString(styles.Muted.Render(fmt.Sprintf("Running %s...", action)))
 	} else {
 		if m.selection != "" {
 			preview := m.selection
 			if runes := []rune(preview); len(runes) > 80 {
 				preview = string(runes[:77]) + "..."
 			}
-			b.WriteString(styleMuted.Render(fmt.Sprintf("Selection: %q", preview)))
+			b.WriteString(styles.Muted.Render(fmt.Sprintf("Selection: %q", preview)))
 			b.WriteString("\n\n")
 		} else {
-			b.WriteString(styleMuted.Render("No selection - will use full note"))
+			b.WriteString(styles.Muted.Render("No selection - will use full note"))
 			b.WriteString("\n\n")
 		}
 
 		for i, a := range aiAssistActions {
 			label := fmt.Sprintf("  %s", a.label)
-			desc := styleMuted.Render(" - " + a.description)
+			desc := styles.Muted.Render(" - " + a.description)
 
 			if i == m.cursor {
-				b.WriteString(styleSelected.Render(fmt.Sprintf("> %s", a.label)))
+				b.WriteString(styles.Selected.Render(fmt.Sprintf("> %s", a.label)))
 				b.WriteString(desc)
 			} else {
-				b.WriteString(styleNormal.Render(label))
+				b.WriteString(styles.Normal.Render(label))
 				b.WriteString(desc)
 			}
 			b.WriteString("\n")
 		}
 
 		b.WriteString("\n")
-		help := styleMuted.Render("j/k: navigate | Enter: run | Esc: cancel")
+		help := styles.Muted.Render("j/k: navigate | Enter: run | Esc: cancel")
 		b.WriteString(help)
 	}
 
 	if m.err != "" {
 		b.WriteString("\n\n")
-		b.WriteString(styleError.Render(m.err))
+		b.WriteString(styles.Error.Render(m.err))
 	}
 
 	content := b.String()
@@ -241,7 +241,7 @@ func (m aiAssistModel) View() string {
 		Width(formWidth).
 		Padding(2, 4).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSecondary)
+		BorderForeground(activeTheme.Secondary)
 
 	rendered := box.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, rendered)

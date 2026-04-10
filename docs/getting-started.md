@@ -1,16 +1,18 @@
 # Getting Started
 
+You'll have Seam running in under five minutes. The only hard requirement is Go -- everything else is optional and adds capabilities incrementally.
+
 ## Prerequisites
 
-| Requirement | Version | Required? |
-| --- | --- | --- |
-| [Go](https://go.dev) | 1.25+ | Yes |
-| [Node.js](https://nodejs.org) | 22+ | For web frontend |
-| [Ollama](https://ollama.com) | Latest | For AI features |
-| [Docker](https://www.docker.com) | Latest | For Seam-managed ChromaDB (recommended) |
-| [ChromaDB](https://www.trychroma.com) | Latest | Only if you run it yourself instead of via Docker |
+| Requirement | Version | Required? | What it unlocks |
+| --- | --- | --- | --- |
+| [Go](https://go.dev) | 1.25+ | Yes | Build the server and TUI |
+| [Node.js](https://nodejs.org) | 22+ | For web frontend | React web app |
+| [Ollama](https://ollama.com) | Latest | For AI features | Chat, search, writing assist, the assistant |
+| [Docker](https://www.docker.com) | Latest | For ChromaDB (recommended) | Seam manages the container for you |
+| [ChromaDB](https://www.trychroma.com) | Latest | Only if self-hosted | Semantic search, Ask Seam, auto-linking |
 
-Seam works without AI -- you get a solid markdown note system with full-text search. Add Ollama when you want AI features. Add ChromaDB (or let Seam run it for you in Docker) for semantic search. Add OpenAI or Anthropic when your GPU starts crying.
+Seam degrades gracefully. Without Ollama, you get a solid markdown note system with full-text search. Add Ollama for AI. Add ChromaDB for semantic search. Switch to OpenAI or Anthropic when you want cloud-grade models -- one config line.
 
 ## Installation
 

@@ -151,6 +151,16 @@
   background: var(--bg-elevated);
 }
 
+.previewLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+}
+
 /* Responsive: stacked layout on narrow screens */
 @media (max-width: 640px) {
   .splitLayout {

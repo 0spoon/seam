@@ -1,10 +1,20 @@
-# MCP Agent Memory
+# MCP Server
 
-Seam exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp`, giving AI coding agents persistent long-term memory. Your agents can track sessions, store knowledge, search your notes, create new ones, manage tasks, and register webhooks -- all through standard MCP tools.
+AI coding agents are stateless by default. Every conversation starts from scratch -- no memory of what happened last session, no awareness of what other agents found, no access to the context sitting in your notes. You end up repeating yourself, re-explaining decisions, and watching agents rediscover things you already know.
+
+Seam fixes this. It exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp` that gives any compatible agent -- Claude Code, Cursor, Windsurf, or anything that speaks MCP -- persistent long-term memory, structured session tracking, and direct access to your knowledge base.
+
+**What this means in practice:**
+
+- Your agent starts a session and gets a **briefing** -- recent activity, relevant memories from past sessions, open tasks, and context from your notes.
+- During work, it **stores findings** as persistent memory that survives across conversations.
+- When it finishes, it **records what it learned** so the next session (or a different agent) picks up where it left off.
+- Multiple agents can **collaborate** on the same investigation through session hierarchies and shared research labs.
+- Your agent can **search, read, and create notes** in your knowledge base -- turning your notes into shared context between you and your tools.
 
 ## Connecting
 
-Any MCP-compatible client (Claude Code, Cursor, etc.) connects via Streamable HTTP:
+Any MCP-compatible client connects via Streamable HTTP:
 
 ```json
 {

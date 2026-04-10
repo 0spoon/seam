@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowUpDown, CheckSquare, Plus, Sparkles } from 'lucide-react';
 import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
+import * as api from '../../api/client';
 import { NoteCard } from '../../components/NoteCard/NoteCard';
 import { NotePreview } from '../../components/NotePreview/NotePreview';
 import { BulkActionBar } from '../../components/BulkActionBar/BulkActionBar';
@@ -49,9 +50,28 @@ export function ProjectPage() {
   const projectIndex = projects.findIndex((p) => p.id === id);
   const projectColor = getProjectColor(projectIndex >= 0 ? projectIndex : 0);
 
-  const previewNote = previewNoteId
-    ? (loadedNotes.find((n) => n.id === previewNoteId) ?? null)
-    : null;
+  const [previewNote, setPreviewNote] = useState<Note | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Fetch the full note (with body) when preview selection changes.
+  useEffect(() => {
+    if (!previewNoteId) {
+      setPreviewNote(null);
+      setPreviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPreviewLoading(true);
+    api.getNote(previewNoteId).then((note) => {
+      if (!cancelled) {
+        setPreviewNote(note);
+        setPreviewLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewNoteId]);
 
   // -- Drag resize logic --
   const handleDragStart = useCallback((e: React.MouseEvent) => {
@@ -346,7 +366,7 @@ export function ProjectPage() {
       </div>
 
       <AnimatePresence>
-        {previewNote && (
+        {previewNoteId && (
           <>
             {/* Drag handle */}
             <div
@@ -376,7 +396,11 @@ export function ProjectPage() {
               exit={{ opacity: 0, x: 20 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              <NotePreview note={previewNote} />
+              {previewNote ? (
+                <NotePreview note={previewNote} />
+              ) : previewLoading ? (
+                <div className={styles.previewLoading}>Loading...</div>
+              ) : null}
             </motion.div>
           </>
         )}

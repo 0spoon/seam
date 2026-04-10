@@ -26,27 +26,43 @@
   <img src="./resources/feature-image.webp" alt="Seam -- where things connect" width="100%">
 </p>
 
-Seam is a knowledge system where your notes are plain `.md` files on disk and AI helps you find things again later. It runs locally by default via [Ollama](https://ollama.com) -- no cloud, no API costs, no one reading your notes. Switch to OpenAI or Anthropic with one config line. Your notes stay local either way.
+Seam is a personal knowledge system where your notes are plain `.md` files on disk and AI helps you think, find, and connect ideas. It runs entirely on your machine by default -- your notes never leave, your AI never phones home, and you never pay per token. Switch to OpenAI or Anthropic with one config line when you want to.
 
-> **Seam** -- _where things connect._ The seam is the join between two pieces; knowledge gains meaning at the intersections.
+> **Seam** -- _the join between two pieces._ Knowledge gains meaning at the intersections.
 
-## What it Does
+## Why Seam
 
-**Capture** -- Quick capture, URL-to-note, voice transcription, daily notes, templates, inbox.
+**Your notes are files.** Not rows in someone else's database. Plain markdown with YAML frontmatter, organized in folders. Edit them with Seam, vim, VS Code, or anything else. Back them up with git, sync them with Syncthing, grep them from the terminal. No export step because there's nothing to export from.
 
-**Organize** -- Projects, `[[wikilinks]]`, `#tags`, bulk actions, version history, task extraction.
+**AI runs on your machine.** [Ollama](https://ollama.com) powers everything by default -- embeddings, chat, search, writing assist. Zero cloud dependencies, zero API costs, zero privacy trade-offs. Need more horsepower? Switch to OpenAI or Anthropic with one config line. Your notes stay local either way.
 
-**Retrieve** -- Full-text search (FTS5), semantic search, Ask Seam (RAG chat with citations), AI synthesis, backlinks, related notes, review queue.
+**AI agents get memory.** Seam exposes an [MCP server](docs/mcp.md) that gives tools like Claude Code and Cursor persistent long-term memory, session tracking, and direct access to your knowledge base. Your AI assistant remembers what happened last session, knows what you're working on, and can search your notes for context -- across conversations, across tools.
 
-**Visualize** -- Knowledge graph, timeline view, orphan detection.
+## What You Can Do
 
-**AI** -- Three LLM providers (Ollama, OpenAI, Anthropic). Embeddings always local. Auto-link suggestions, writing assist, tag/project suggestions, voice transcription with Whisper.
+### Ask your notes anything
 
-**Assistant** -- Agentic chat that actually does things. Tool-use loop calls into your notes, projects, tasks, search, graph, profile, and memory (19 tools), with explicit approval gates for writes and a full audit trail. Persistent owner profile and long-term memory (facts, preferences, decisions, commitments) with FTS5 search and recency decay. Streaming responses over SSE.
+"What did I write about caching strategies?" works even if you never used the word "caching." Semantic search finds meaning, not just keywords. **Ask Seam** combines retrieval with generation to answer questions grounded in things you actually wrote, with citations back to specific notes. Or synthesize across up to 50 notes at once -- "Summarize everything I know about project X."
 
-**Daily Briefing** -- In-process cron scheduler assembles a daily summary note from recent activity. Auto-provisioned on first run; manage schedules via `/api/schedules` or trigger on demand.
+### Work with an assistant that acts
 
-**Agent Memory** -- MCP server gives AI coding agents persistent long-term memory, session tracking, and access to your knowledge base.
+The agentic assistant doesn't just answer questions about your knowledge base -- it works inside it. Ask it to capture a meeting summary, plan a project, find connections between ideas, or rewrite a section. It has [19 tools](docs/ai.md#tools) spanning notes, projects, tasks, search, the knowledge graph, and its own long-term memory. Six tools that write data pause and ask for your explicit approval. Every action is recorded in a full audit trail.
+
+### Capture fast, find later
+
+Quick capture for passing thoughts. URL-to-note for articles. Voice transcription via local Whisper -- no audio leaves your machine. Daily notes. Templates. Everything lands in your inbox until you or the Librarian sorts it.
+
+### See how ideas connect
+
+The knowledge graph shows connections between notes through `[[wikilinks]]`, shared `#tags`, and projects. Related notes surface semantically similar content you forgot you wrote. Two-hop backlinks reveal indirect connections. Orphan detection finds notes that need linking.
+
+### Let AI organize for you
+
+The [Librarian](docs/ai.md#librarian) is an autonomous background service that reviews orphaned and untagged notes, assigns them to projects, and adds tags from your existing taxonomy. It never touches your content, never invents new categories, and only processes notes that have been quiet for 15+ minutes. A library that shelves its own books.
+
+### Give your AI agents memory
+
+Seam's [MCP server](docs/mcp.md) turns AI coding tools into persistent collaborators. Start a session and your agent gets a briefing -- recent activity, relevant memories, open tasks. End it and findings are preserved for next time. Multiple agents can collaborate on the same investigation through session hierarchies and shared [research labs](docs/mcp.md#research-lab). Your coding agent and your knowledge base, connected.
 
 ## Quick Start
 
@@ -54,31 +70,59 @@ Seam is a knowledge system where your notes are plain `.md` files on disk and AI
 git clone https://github.com/katata/seam.git
 cd seam
 make build          # builds bin/seamd (server), bin/seam (TUI), bin/seam-reindex (re-embed tool)
-make init           # interactive config (JWT secret, data dir, LLM provider, Chroma)
-make chroma-up      # optional: start the Seam-managed ChromaDB container (if you picked Docker in init)
+make init           # interactive setup: JWT secret, data dir, LLM provider, ChromaDB
 make run            # starts server on :8080
 
 # In separate terminals:
 ./bin/seam --server http://localhost:8080          # TUI client
 cd web && npm install && npm run dev               # Web frontend on :5173
-
-# After switching embedding model or provider:
-make reindex        # re-embed every note against the new (provider, model) tuple
 ```
 
-`make init` asks how you want to handle ChromaDB -- a Seam-managed Docker container (recommended), an external instance you already run, or disable semantic search entirely. See [Getting Started](docs/getting-started.md) for prerequisites, the optional supervisor service, and full configuration.
+Seam works without AI -- you get a solid markdown note system with full-text search out of the box. Add Ollama for AI features. Add ChromaDB for semantic search (`make init` can manage a Docker container for you). See [Getting Started](docs/getting-started.md) for prerequisites and the full setup walkthrough.
+
+## How It Works
+
+```
+You write .md files       Seam watches and indexes       AI connects the dots
+       |                           |                            |
+       v                           v                            v
+    notes/                      seam.db                     ChromaDB
+    inbox/                    (SQLite FTS5)                 (embeddings)
+    project-a/               metadata, links               similarity
+    project-b/              tasks, versions                  search
+       |                           |                            |
+       +------------+--------------+----------------------------+
+                    |
+              seamd (Go binary)
+              |       |       |
+            Web     TUI    MCP Server
+          (React) (Bubble  (AI coding
+                   Tea)    agents)
+```
+
+A single Go binary serves the REST API, WebSocket events, and the MCP endpoint. SQLite handles metadata and full-text search. Your `.md` files on disk are the source of truth -- Seam watches for external edits and re-indexes automatically. ChromaDB stores vector embeddings for semantic search (optional, degrades gracefully if absent).
+
+Three interfaces to the same data: a web app, a terminal TUI, and a full REST API.
+
+### Graceful Degradation
+
+| Missing | What happens |
+| --- | --- |
+| Ollama | AI features disabled. Markdown notes + FTS5 search still work. |
+| ChromaDB | No semantic search. Full-text search and AI chat still work. |
+| Whisper | No voice capture. Everything else works. |
 
 ## Documentation
 
 | Document | Description |
 | --- | --- |
 | [Getting Started](docs/getting-started.md) | Prerequisites, installation, configuration |
-| [AI](docs/ai.md) | LLM providers, features, task queue, models |
-| [Architecture](docs/architecture.md) | System diagram, tech stack, data format, project structure |
+| [AI & Assistant](docs/ai.md) | LLM providers, Ask Seam, agentic assistant, Librarian |
+| [Architecture](docs/architecture.md) | System diagram, tech stack, data format, project layout |
 | [API Reference](docs/api.md) | REST endpoints, WebSocket events |
-| [MCP Agent Memory](docs/mcp.md) | MCP tools for AI coding agents |
+| [MCP Server](docs/mcp.md) | Persistent memory and knowledge base access for AI coding agents |
 | [Development](docs/development.md) | Build, test, lint, project structure |
-| [Security](docs/security.md) | Security model and invariants |
+| [Security](docs/security.md) | Threat model, auth, input validation, assistant safety |
 | [Brand Guidelines](BRAND.md) | Visual identity, colors, fonts, logo usage |
 
 ## License

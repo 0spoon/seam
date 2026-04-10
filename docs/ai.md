@@ -1,10 +1,10 @@
-# AI
+# AI & Assistant
 
-Seam treats AI as a core tool, not a sidebar widget.
+AI in Seam isn't a chat widget bolted onto the side -- it's woven into how you capture, organize, search, and think. Everything runs locally by default through Ollama. No API keys, no usage meters, no one reading your notes. When you need more power, switch providers with one config line.
 
 ## Providers
 
-Seam supports three LLM providers. Embeddings always run locally on Ollama (your vectors, your machine), but chat completions can come from wherever you want:
+Three LLM providers, mixable. Embeddings run locally by default (your vectors stay on your machine), while chat completions can come from wherever you want:
 
 | Provider | Config | Good for |
 | --- | --- | --- |

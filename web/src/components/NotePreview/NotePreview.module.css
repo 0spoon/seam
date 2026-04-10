@@ -1,21 +1,27 @@
 .preview {
   height: 100%;
   overflow-y: auto;
-  padding: var(--space-6);
+  padding: var(--space-8) var(--space-6);
+}
+
+.inner {
+  max-width: var(--preview-max-width);
+  margin: 0 auto;
 }
 
 .header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .title {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-2xl);
+  line-height: var(--line-height-tight);
   color: var(--text-primary);
   flex: 1;
   min-width: 0;
@@ -25,21 +31,24 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-3);
   font-family: var(--font-ui);
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   flex-shrink: 0;
+  margin-top: var(--space-1);
   transition:
     background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard);
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .openButton:hover {
   background: var(--bg-elevated);
   color: var(--text-primary);
+  border-color: var(--border-strong);
 }
 
 .meta {
@@ -52,19 +61,33 @@
 .timestamp {
   font-family: var(--font-ui);
   font-weight: 300;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-tertiary);
+}
+
+.sourceLink {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--accent-primary);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color var(--duration-fast) var(--ease-standard);
+}
+
+.sourceLink:hover {
+  text-decoration-color: var(--accent-primary);
 }
 
 .tags {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
+  margin-bottom: var(--space-4);
 }
 
 .tag {
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
   font-family: var(--font-ui);
   font-weight: 400;
   font-size: var(--font-size-xs);
@@ -73,96 +96,171 @@
 .divider {
   height: 1px;
   background: var(--border-subtle);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-6);
 }
 
-/* Rendered markdown styles -- matching NoteEditorPage preview pane */
+.emptyBody {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------
+   Rich markdown rendering
+   --------------------------------------------------------------- */
+
 .renderedMarkdown {
   font-family: var(--font-content);
   font-size: var(--font-size-md);
   line-height: var(--line-height-relaxed);
   color: var(--text-primary);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
+
+/* -- Headings -- */
 
 .renderedMarkdown h1 {
   font-family: var(--font-display);
   font-weight: 600;
   font-size: var(--font-size-xl);
+  line-height: var(--line-height-tight);
+  color: var(--text-primary);
   margin-top: var(--space-10);
   margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.renderedMarkdown h1:first-child {
+  margin-top: 0;
 }
 
 .renderedMarkdown h2 {
   font-family: var(--font-display);
   font-weight: 500;
   font-size: var(--font-size-lg);
+  line-height: var(--line-height-tight);
+  color: var(--text-primary);
   margin-top: var(--space-8);
   margin-bottom: var(--space-3);
+}
+
+.renderedMarkdown h2:first-child {
+  margin-top: 0;
 }
 
 .renderedMarkdown h3 {
   font-family: var(--font-display);
   font-weight: 500;
   font-size: var(--font-size-md);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
   margin-top: var(--space-6);
   margin-bottom: var(--space-2);
 }
+
+.renderedMarkdown h4,
+.renderedMarkdown h5,
+.renderedMarkdown h6 {
+  font-family: var(--font-ui);
+  font-weight: 500;
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-2);
+}
+
+/* -- Paragraphs -- */
 
 .renderedMarkdown p {
   margin-bottom: var(--space-4);
 }
 
+.renderedMarkdown p:last-child {
+  margin-bottom: 0;
+}
+
+/* -- Links -- */
+
 .renderedMarkdown a {
   color: var(--accent-primary);
   text-decoration: underline;
+  text-decoration-color: rgba(196, 145, 92, 0.3);
+  text-underline-offset: 2px;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    text-decoration-color var(--duration-fast) var(--ease-standard);
 }
 
 .renderedMarkdown a:hover {
   color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
 }
+
+.renderedMarkdown a.wikilink {
+  color: var(--accent-tertiary);
+  text-decoration-color: rgba(123, 142, 196, 0.3);
+}
+
+.renderedMarkdown a.wikilink:hover {
+  color: var(--accent-tertiary);
+  text-decoration-color: var(--accent-tertiary);
+}
+
+/* -- Inline code -- */
 
 .renderedMarkdown code {
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: 0.875em;
   background: var(--bg-surface);
-  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  padding: 1px 6px;
   border-radius: var(--radius-sm);
+  color: var(--accent-primary);
 }
+
+/* -- Code blocks -- */
 
 .renderedMarkdown pre {
   font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed);
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
   overflow-x: auto;
   margin-bottom: var(--space-4);
 }
 
 .renderedMarkdown pre code {
   background: none;
+  border: none;
   padding: 0;
+  color: var(--text-primary);
+  font-size: inherit;
 }
+
+/* -- Blockquotes -- */
 
 .renderedMarkdown blockquote {
   border-left: 3px solid var(--accent-primary);
-  padding-left: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  margin-left: 0;
+  margin-bottom: var(--space-4);
+  background: var(--accent-muted);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   color: var(--text-secondary);
   font-style: italic;
-  margin-bottom: var(--space-4);
 }
 
-.renderedMarkdown hr {
-  border: none;
-  height: 1px;
-  background: var(--border-subtle);
-  margin: var(--space-8) 0;
+.renderedMarkdown blockquote p:last-child {
+  margin-bottom: 0;
 }
 
-.renderedMarkdown img {
-  max-width: 100%;
-  border-radius: var(--radius-md);
-}
+/* -- Lists -- */
 
 .renderedMarkdown ul,
 .renderedMarkdown ol {
@@ -172,9 +270,127 @@
 
 .renderedMarkdown li {
   margin-bottom: var(--space-1);
+}
+
+.renderedMarkdown ul > li {
   list-style: disc;
 }
 
-.renderedMarkdown ol li {
+.renderedMarkdown ul > li > ul > li {
+  list-style: circle;
+}
+
+.renderedMarkdown ol > li {
   list-style: decimal;
+}
+
+.renderedMarkdown li > p {
+  margin-bottom: var(--space-1);
+}
+
+/* Nested lists get tighter spacing */
+.renderedMarkdown li > ul,
+.renderedMarkdown li > ol {
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+/* -- Task list checkboxes (rendered as <input type="checkbox">) -- */
+
+.renderedMarkdown input[type="checkbox"] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  vertical-align: middle;
+  margin-right: var(--space-2);
+  position: relative;
+  top: -1px;
+  cursor: default;
+}
+
+.renderedMarkdown input[type="checkbox"]:checked {
+  background: var(--accent-secondary);
+  border-color: var(--accent-secondary);
+}
+
+/* -- Horizontal rules -- */
+
+.renderedMarkdown hr {
+  border: none;
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--space-8) 0;
+}
+
+/* -- Images -- */
+
+.renderedMarkdown img {
+  max-width: 100%;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-4);
+}
+
+/* -- Tables -- */
+
+.renderedMarkdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--space-4);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+.renderedMarkdown th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 2px solid var(--border-default);
+}
+
+.renderedMarkdown td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.renderedMarkdown tr:last-child td {
+  border-bottom: none;
+}
+
+/* -- Strong / emphasis -- */
+
+.renderedMarkdown strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.renderedMarkdown em {
+  font-style: italic;
+}
+
+/* -- Definition lists (if rendered) -- */
+
+.renderedMarkdown dt {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: var(--space-3);
+}
+
+.renderedMarkdown dd {
+  margin-left: var(--space-6);
+  margin-bottom: var(--space-2);
+  color: var(--text-secondary);
+}
+
+/* -- Footnotes -- */
+
+.renderedMarkdown sup {
+  font-size: 0.75em;
+}
+
+.renderedMarkdown sup a {
+  text-decoration: none;
 }

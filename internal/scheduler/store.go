@@ -25,6 +25,8 @@ const (
 	ActionAutomation ActionType = "automation"
 	// ActionReminder sends a reminder (placeholder for Phase 4).
 	ActionReminder ActionType = "reminder"
+	// ActionLibrarian runs the autonomous note organizer.
+	ActionLibrarian ActionType = "librarian"
 )
 
 // ValidActionTypes lists all action types the scheduler currently supports.
@@ -32,6 +34,7 @@ var ValidActionTypes = map[ActionType]bool{
 	ActionBriefing:   true,
 	ActionAutomation: true,
 	ActionReminder:   true,
+	ActionLibrarian: true,
 }
 
 // Schedule represents a row in the schedules table.

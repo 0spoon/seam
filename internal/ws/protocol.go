@@ -16,11 +16,19 @@ const (
 	MsgTypeAssistantToolUse = "assistant.tool_use"
 	MsgTypeAssistantDone    = "assistant.done"
 	MsgTypeAssistantError   = "assistant.error"
+	MsgTypeLibrarianAction  = "librarian.action"
 )
 
 // AuthPayload is the payload for an auth message.
 type AuthPayload struct {
 	Token string `json:"token"`
+}
+
+// LibrarianActionPayload is the payload for a librarian.action message.
+type LibrarianActionPayload struct {
+	NoteID    string   `json:"note_id"`
+	NoteTitle string   `json:"note_title"`
+	Actions   []string `json:"actions"`
 }
 
 // NoteChangedPayload is the payload for a note.changed message.

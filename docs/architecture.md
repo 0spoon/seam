@@ -109,6 +109,7 @@ internal/
   chat/                     # conversation history persistence
   config/                   # YAML + env config loading
   graph/                    # knowledge graph (nodes, edges, orphans, two-hop)
+  librarian/                # autonomous note organizer (scheduler-driven, LLM classification)
   mcp/                      # MCP server, Streamable HTTP, tool handlers
   note/                     # CRUD, frontmatter, wikilinks, tags, versions, daily
   project/                  # CRUD, slugs, cascade delete

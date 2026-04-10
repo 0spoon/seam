@@ -23,6 +23,7 @@ internal/           Core domain packages (strict layering, no circular imports)
   config/           YAML + env var config loading
   graph/            Knowledge graph (nodes, edges, orphans, two-hop)
   integration/      E2E + performance tests (build-tagged)
+  librarian/        Autonomous note organizer (scheduler-driven, LLM classification)
   mcp/              MCP server (/api/mcp)
   note/             Note CRUD, frontmatter, wikilinks, tags, versions, daily
   project/          Project CRUD, slug generation
@@ -172,6 +173,26 @@ Content with [[wikilinks]] and #tags.
 - Fonts: Fraunces (display), Outfit (UI), Lora (content), IBM Plex Mono (code).
 - All tokens in `web/src/styles/variables.css`.
 - Components use CSS Modules (`.module.css`, camelCase class names).
+
+## MCP Server (Agent Tools)
+
+Seam exposes an MCP server at `/api/mcp` that gives you persistent memory and access to the user's knowledge base. If configured, prefer these tools over asking the user to look things up manually.
+
+**When to use it:**
+
+- **Starting a work session** -- call `session_start` at the beginning of a non-trivial task. This returns a briefing with recent activity, relevant memories, and open tasks, giving you context you would otherwise lack. Call `session_end` when done to persist findings for next time.
+- **Remembering things across conversations** -- use `memory_write` / `memory_read` to store and retrieve knowledge that should survive beyond this conversation (architectural decisions, debugging insights, user preferences specific to their notes). This is the agent's own scratchpad, separate from Claude Code's `~/.claude/` memory system.
+- **Searching the user's notes** -- call `notes_search` or `context_gather` when the user references a topic, project, or idea that likely exists in their knowledge base. This is faster and more accurate than asking them to find it.
+- **Creating notes** -- use `notes_create` to capture work output (meeting summaries, research findings, decision records) as notes in the user's system. These are auto-tagged `created-by:agent`.
+- **Checking tasks** -- call `tasks_list` or `tasks_summary` to see what the user has on their plate before suggesting priorities or next steps.
+
+**When NOT to use it:**
+
+- For information already in the codebase -- use `grep`/`read` instead.
+- For ephemeral scratch work -- just think in-context.
+- For things the user just told you -- don't parrot it back into memory.
+
+**Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), webhooks (`webhook_*`), context search (`context_gather`). Full reference: `docs/mcp.md`.
 
 ## Key Files to Know
 

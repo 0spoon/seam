@@ -25,6 +25,7 @@ import (
 	"github.com/katata/seam/internal/chat"
 	"github.com/katata/seam/internal/config"
 	"github.com/katata/seam/internal/graph"
+	"github.com/katata/seam/internal/librarian"
 	seamMCP "github.com/katata/seam/internal/mcp"
 	"github.com/katata/seam/internal/note"
 	"github.com/katata/seam/internal/project"
@@ -97,6 +98,42 @@ func provisionDailyBriefing(ctx context.Context, svc *scheduler.Service, cfg con
 		return fmt.Errorf("create schedule: %w", err)
 	}
 	logger.Info("provisioned daily briefing schedule",
+		"id", created.ID, "cron", created.CronExpr, "next_run", created.NextRunAt)
+	return nil
+}
+
+// defaultLibrarianID is the stable schedule ID for the librarian.
+const defaultLibrarianID = "default_librarian"
+
+// provisionLibrarian creates the default librarian schedule on startup
+// if it has not been provisioned before. The schedule runs every 10
+// minutes; actual processing is gated on the librarian_enabled setting.
+func provisionLibrarian(ctx context.Context, svc *scheduler.Service, logger *slog.Logger) error {
+	const librarianName = "Librarian"
+
+	existing, err := svc.Get(ctx, userdb.DefaultUserID, defaultLibrarianID)
+	if err == nil {
+		logger.Debug("librarian schedule already provisioned",
+			"id", existing.ID, "name", existing.Name, "next_run", existing.NextRunAt)
+		return nil
+	}
+	if !errors.Is(err, scheduler.ErrNotFound) {
+		return fmt.Errorf("lookup default librarian schedule: %w", err)
+	}
+
+	enabled := true
+	created, err := svc.Create(ctx, userdb.DefaultUserID, scheduler.CreateReq{
+		ID:           defaultLibrarianID,
+		Name:         librarianName,
+		CronExpr:     "*/10 * * * *",
+		ActionType:   scheduler.ActionLibrarian,
+		ActionConfig: json.RawMessage(`{}`),
+		Enabled:      &enabled,
+	})
+	if err != nil {
+		return fmt.Errorf("create librarian schedule: %w", err)
+	}
+	logger.Info("provisioned librarian schedule",
 		"id", created.ID, "cron", created.CronExpr, "next_run", created.NextRunAt)
 	return nil
 }
@@ -794,13 +831,16 @@ func run() error {
 		Logger:         logger,
 	})
 	mcpSrv := seamMCP.New(seamMCP.Config{
-		AgentService:   agentSvc,
-		TaskService:    taskSvc,
-		WebhookService: webhookSvc,
-		ToolCallLogger: agentSvc,
-		Logger:         logger,
+		AgentService:    agentSvc,
+		TaskService:     taskSvc,
+		WebhookService:  webhookSvc,
+		GraphService:    graphSvc,
+		ReviewService:   reviewSvc,
+		TemplateService: templateSvc,
+		ToolCallLogger:  agentSvc,
+		Logger:          logger,
 	})
-	mcpHandler := mcpSrv.Handler(jwtMgr)
+	mcpHandler := mcpSrv.Handler(jwtMgr, cfg.MCP.APIKey)
 
 	// Create assistant (agentic AI with tool use).
 	var assistantHandler *assistant.Handler
@@ -887,6 +927,26 @@ func run() error {
 		if cfg.Scheduler.DailyBriefing.Enabled == nil || *cfg.Scheduler.DailyBriefing.Enabled {
 			if err := provisionDailyBriefing(ctx, schedSvc, cfg.Scheduler.DailyBriefing, logger); err != nil {
 				logger.Warn("failed to provision daily briefing schedule", "error", err)
+			}
+		}
+
+		// Register the librarian (autonomous note organizer). It requires
+		// an LLM provider; skip registration when AI is not configured.
+		if chatCompleter != nil {
+			librarianSvc := librarian.NewService(librarian.Config{
+				NoteService:     noteSvc,
+				ProjectService:  projectSvc,
+				ReviewService:   reviewSvc,
+				SettingsService: settingsSvc,
+				Chat:            chatCompleter,
+				ChatModel:       cfg.Models.Background,
+				Hub:             hub,
+				Logger:          logger,
+			})
+			schedSvc.RegisterRunner(scheduler.ActionLibrarian, librarianSvc.Action())
+
+			if err := provisionLibrarian(ctx, schedSvc, logger); err != nil {
+				logger.Warn("failed to provision librarian schedule", "error", err)
 			}
 		}
 

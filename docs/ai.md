@@ -74,6 +74,50 @@ The agentic assistant is a tool-use loop that can actually do things in your kno
 | `get_profile`          |         | Read the owner profile                              |
 | `update_profile`       | yes     | Update the owner profile (instructions, facts)      |
 
+## Librarian
+
+The librarian is an autonomous background service that organizes your knowledge base. Think of it as a library that automatically shelves returned books: agents and users dump notes into the inbox, and the librarian periodically reviews them, assigns projects, and adds tags.
+
+**How it works.** The librarian runs as a scheduler action (every 10 minutes by default). Each sweep:
+
+1. Checks the `librarian_enabled` setting -- exits immediately if disabled.
+2. Pulls candidates from the review queue (orphan, untagged, inbox notes).
+3. Fetches all existing projects and tags as classification context.
+4. For each candidate (up to `max_per_run`, default 10):
+   - Skips notes updated within the cooldown window (default 15 minutes).
+   - Skips notes already tagged `librarian:reviewed`.
+   - Sends the note title and body to the LLM with the list of available projects and tags.
+   - Verifies the note's content hash has not changed during the LLM call (protects against concurrent edits).
+   - Applies the classification: assigns a project (only if the note has none) and merges suggested tags.
+   - Tags the note `librarian:reviewed` so it is not reprocessed.
+5. Sends a `librarian.action` WebSocket message for each note it organizes.
+
+**Safety constraints:**
+
+- Never modifies note content, titles, or creates new projects/tags -- only uses what already exists.
+- Only processes notes that have been quiet for 15+ minutes (configurable cooldown).
+- Content hash guard: re-reads the note after the LLM call and aborts if anything changed.
+- Never overwrites an existing project assignment.
+- Defaults to disabled -- must be explicitly turned on.
+
+**Enabling.** Toggle via the settings API:
+
+```bash
+curl -X PUT http://localhost:8080/api/settings \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"librarian_enabled": "true"}'
+```
+
+**Configuration.** The schedule's `action_config` JSON supports:
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `cooldown_minutes` | 15 | Minimum quiet time before a note is eligible |
+| `max_per_run` | 10 | Maximum notes processed per sweep |
+
+**Requirements.** The librarian requires an LLM provider to be configured (`llm.provider` in `seam-server.yaml`). It uses the `models.background` model for classification. If no LLM is configured, the librarian is not registered.
+
 ## Default Models
 
 | Role             | Default Model        | Swappable?                                |

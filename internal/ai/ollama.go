@@ -27,9 +27,17 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
+// TokenUsage holds token consumption counts returned by LLM providers.
+type TokenUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
 // ChatResponse represents a complete (non-streaming) chat response.
 type ChatResponse struct {
-	Content string `json:"content"`
+	Content string      `json:"content"`
+	Usage   *TokenUsage `json:"usage,omitempty"`
 }
 
 // OllamaClient is an HTTP client for the Ollama REST API.
@@ -159,7 +167,9 @@ type ollamaChatResponse struct {
 		Content   string           `json:"content"`
 		ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
 	} `json:"message"`
-	Done bool `json:"done"`
+	Done            bool `json:"done"`
+	PromptEvalCount int  `json:"prompt_eval_count,omitempty"`
+	EvalCount       int  `json:"eval_count,omitempty"`
 }
 
 // ChatCompletion sends messages to the chat endpoint and returns a complete response.
@@ -199,7 +209,15 @@ func (c *OllamaClient) ChatCompletion(ctx context.Context, model string, message
 		return nil, fmt.Errorf("ai.OllamaClient.ChatCompletion: decode: %w", err)
 	}
 
-	return &ChatResponse{Content: result.Message.Content}, nil
+	resp2 := &ChatResponse{Content: result.Message.Content}
+	if result.PromptEvalCount > 0 || result.EvalCount > 0 {
+		resp2.Usage = &TokenUsage{
+			InputTokens:  result.PromptEvalCount,
+			OutputTokens: result.EvalCount,
+			TotalTokens:  result.PromptEvalCount + result.EvalCount,
+		}
+	}
+	return resp2, nil
 }
 
 // ChatCompletionStream sends messages to the chat endpoint with streaming enabled.
@@ -354,6 +372,13 @@ func (c *OllamaClient) ChatCompletionWithTools(ctx context.Context, model string
 	tcr := &ToolChatResponse{
 		Content:      result.Message.Content,
 		FinishReason: "stop",
+	}
+	if result.PromptEvalCount > 0 || result.EvalCount > 0 {
+		tcr.Usage = &TokenUsage{
+			InputTokens:  result.PromptEvalCount,
+			OutputTokens: result.EvalCount,
+			TotalTokens:  result.PromptEvalCount + result.EvalCount,
+		}
 	}
 
 	if len(result.Message.ToolCalls) > 0 {

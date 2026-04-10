@@ -31,9 +31,10 @@ type ToolMessage struct {
 
 // ToolChatResponse extends ChatResponse with tool call information.
 type ToolChatResponse struct {
-	Content      string     `json:"content"`
-	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
-	FinishReason string     `json:"finish_reason"` // "stop", "tool_calls", "length"
+	Content      string      `json:"content"`
+	ToolCalls    []ToolCall  `json:"tool_calls,omitempty"`
+	FinishReason string      `json:"finish_reason"` // "stop", "tool_calls", "length"
+	Usage        *TokenUsage `json:"usage,omitempty"`
 }
 
 // ToolChatCompleter extends ChatCompleter with tool/function calling support.

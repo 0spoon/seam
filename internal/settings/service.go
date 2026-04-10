@@ -19,6 +19,10 @@ var allowedKeys = map[string][]string{
 	"sidebar_tags_expanded":     {"true", "false"},
 	"zen_mode_typewriter":       {"true", "false"},
 	"librarian_enabled":         {"true", "false"},
+	"usage_budget_enabled":      {"true", "false"},
+	"usage_budget_period":       {"daily", "monthly"},
+	"usage_budget_max_tokens":   nil, // any numeric string
+	"usage_budget_gate_local":   {"true", "false"},
 }
 
 // defaultValues maps setting keys to their default values. These are
@@ -31,6 +35,10 @@ var defaultValues = map[string]string{
 	"sidebar_tags_expanded":     "true",
 	"zen_mode_typewriter":       "false",
 	"librarian_enabled":         "false",
+	"usage_budget_enabled":      "false",
+	"usage_budget_period":       "monthly",
+	"usage_budget_max_tokens":   "0",
+	"usage_budget_gate_local":   "false",
 }
 
 // ErrInvalidKey is returned when a setting key is not in the allowlist.

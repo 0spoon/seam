@@ -127,6 +127,26 @@ userdb:
 watcher:
   debounce_interval: "200ms"
 
+# MCP server settings.
+mcp:
+  # Optional static API key for MCP access. When set, AI coding agents
+  # (Claude Code, Cursor, etc.) can use "Authorization: Bearer <api_key>"
+  # instead of a short-lived JWT. Generate with: openssl rand -hex 32
+  # WARNING: Prefer SEAM_MCP_API_KEY env var over setting this in a file.
+  api_key: ""                   # env: SEAM_MCP_API_KEY
+
+# Token usage tracking. Records every AI call (chat, embedding, assistant, etc.)
+# with token counts, provider, and model. Powers the /api/usage dashboard.
+usage:
+  tracking_enabled: true         # set to false to disable recording entirely
+  track_local: true              # track Ollama calls too (free, but useful for visibility)
+
+# Budget enforcement is configured via the settings API (PUT /api/settings):
+#   usage_budget_enabled:    "true"/"false"   (default: false)
+#   usage_budget_period:     "daily"/"monthly" (default: monthly)
+#   usage_budget_max_tokens: "<number>"        (default: 0 = unlimited)
+#   usage_budget_gate_local: "true"/"false"   (default: false)
+
 # Scheduler settings (Phase 3): cron-based proactive jobs.
 scheduler:
   enabled: true

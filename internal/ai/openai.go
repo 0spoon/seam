@@ -96,9 +96,17 @@ type openaiChatChoice struct {
 	FinishReason string `json:"finish_reason"`
 }
 
+// openaiUsage holds token usage returned by the OpenAI API.
+type openaiUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // openaiChatResponse is the response from POST /chat/completions.
 type openaiChatResponse struct {
 	Choices []openaiChatChoice `json:"choices"`
+	Usage   *openaiUsage       `json:"usage,omitempty"`
 	Error   *openaiError       `json:"error,omitempty"`
 }
 
@@ -152,7 +160,15 @@ func (c *OpenAIClient) ChatCompletion(ctx context.Context, model string, message
 		return nil, fmt.Errorf("ai.OpenAIClient.ChatCompletion: empty response (no choices)")
 	}
 
-	return &ChatResponse{Content: result.Choices[0].Message.Content}, nil
+	resp2 := &ChatResponse{Content: result.Choices[0].Message.Content}
+	if result.Usage != nil {
+		resp2.Usage = &TokenUsage{
+			InputTokens:  result.Usage.PromptTokens,
+			OutputTokens: result.Usage.CompletionTokens,
+			TotalTokens:  result.Usage.TotalTokens,
+		}
+	}
+	return resp2, nil
 }
 
 // openaiStreamDelta holds the delta content in a streaming chunk.
@@ -332,6 +348,7 @@ func (c *OpenAIClient) ChatCompletionWithTools(ctx context.Context, model string
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
+		Usage *openaiUsage `json:"usage,omitempty"`
 		Error *openaiError `json:"error,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -346,6 +363,13 @@ func (c *OpenAIClient) ChatCompletionWithTools(ctx context.Context, model string
 	tcr := &ToolChatResponse{
 		Content:      choice.Message.Content,
 		FinishReason: choice.FinishReason,
+	}
+	if result.Usage != nil {
+		tcr.Usage = &TokenUsage{
+			InputTokens:  result.Usage.PromptTokens,
+			OutputTokens: result.Usage.CompletionTokens,
+			TotalTokens:  result.Usage.TotalTokens,
+		}
 	}
 	for _, tc := range choice.Message.ToolCalls {
 		tcr.ToolCalls = append(tcr.ToolCalls, ToolCall{

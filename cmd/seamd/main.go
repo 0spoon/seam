@@ -36,6 +36,7 @@ import (
 	"github.com/katata/seam/internal/settings"
 	"github.com/katata/seam/internal/task"
 	"github.com/katata/seam/internal/template"
+	"github.com/katata/seam/internal/usage"
 	"github.com/katata/seam/internal/userdb"
 	"github.com/katata/seam/internal/validate"
 	"github.com/katata/seam/internal/watcher"
@@ -389,6 +390,35 @@ func run() error {
 		logger.Info("Embedding provider: Ollama (local)", "model", cfg.Models.Embeddings)
 	}
 
+	// Set up token usage tracking.
+	usageStore := usage.NewStore()
+	usageTracker := usage.NewTracker(usageStore, userDBMgr, settingsSvc, logger)
+	trackingEnabled := cfg.Usage.TrackingEnabled == nil || *cfg.Usage.TrackingEnabled
+
+	// trackedChat creates a function-labeled ChatCompleter wrapper.
+	// The raw chatCompleter is preserved for type assertions (e.g. ToolChatCompleter).
+	trackedChat := func(fn usage.Function) ai.ChatCompleter {
+		if !trackingEnabled || chatCompleter == nil {
+			return chatCompleter
+		}
+		return usage.NewTrackedChatCompleter(chatCompleter, usageTracker, cfg.LLM.Provider, fn)
+	}
+
+	// trackedToolChat creates a function-labeled ToolChatCompleter wrapper.
+	trackedToolChat := func(inner ai.ToolChatCompleter, fn usage.Function) ai.ToolChatCompleter {
+		if !trackingEnabled {
+			return inner
+		}
+		return usage.NewTrackedToolChatCompleter(inner, usageTracker, cfg.LLM.Provider, fn)
+	}
+
+	// Wrap the embedding client (single label, always "embedding").
+	if trackingEnabled && embeddingClient != nil {
+		embeddingClient = usage.NewTrackedEmbedder(embeddingClient, usageTracker, cfg.Embeddings.Provider)
+	}
+
+	usageHandler := usage.NewHandler(usageStore, userDBMgr, settingsSvc, logger)
+
 	var aiHandler *ai.Handler
 	var aiQueue *ai.Queue
 	var chatSvc *ai.ChatService
@@ -420,9 +450,9 @@ func run() error {
 		probeCancel()
 
 		embedder = ai.NewEmbedder(embeddingClient, chromaClient, userDBMgr, cfg.Models.Embeddings, logger)
-		chatSvc = ai.NewChatService(embeddingClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
-		synthSvc = ai.NewSynthesizer(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
-		linker := ai.NewAutoLinker(embeddingClient, chatCompleter, chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Background, hub, logger)
+		chatSvc = ai.NewChatService(embeddingClient, trackedChat(usage.FuncChat), chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Chat, logger)
+		synthSvc = ai.NewSynthesizer(trackedChat(usage.FuncSynthesis), userDBMgr, cfg.Models.Chat, logger)
+		linker := ai.NewAutoLinker(embeddingClient, trackedChat(usage.FuncAutolink), chromaClient, userDBMgr, cfg.Models.Embeddings, cfg.Models.Background, hub, logger)
 
 		// Register task handlers.
 		aiQueue.RegisterHandler(ai.TaskTypeEmbed, embedder.HandleEmbedTask)
@@ -432,7 +462,7 @@ func run() error {
 		aiQueue.RegisterHandler(ai.TaskTypeAutolink, linker.HandleAutolinkTask)
 
 		// Create AI writer (uses chat model for writing assist).
-		aiWriter := ai.NewWriter(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
+		aiWriter := ai.NewWriter(trackedChat(usage.FuncAssistExpand), userDBMgr, cfg.Models.Chat, logger)
 		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
@@ -461,18 +491,18 @@ func run() error {
 		searchSvc.SetSemanticSearcher(semanticSearcher)
 
 		// Create AI suggester for tag/project suggestions.
-		suggester := ai.NewSuggester(chatCompleter, cfg.Models.Chat, logger)
+		suggester := ai.NewSuggester(trackedChat(usage.FuncSuggestTags), cfg.Models.Chat, logger)
 
 		aiHandler = ai.NewHandler(aiQueue, chatSvc, synthSvc, linker, embedder, aiWriter, suggester, userDBMgr, logger)
 		logger.Info("AI features enabled", "ollama_url", cfg.OllamaBaseURL, "chromadb_url", cfg.ChromaDBURL)
 	} else if chatCompleter != nil {
 		// Without ChromaDB (or an embedding client), writer and suggester
 		// can still work with any chat provider.
-		aiWriter := ai.NewWriter(chatCompleter, userDBMgr, cfg.Models.Chat, logger)
+		aiWriter := ai.NewWriter(trackedChat(usage.FuncAssistExpand), userDBMgr, cfg.Models.Chat, logger)
 		bodyAdapter := &noteBodyAdapter{noteSvc: noteSvc}
 		aiWriter.SetNoteBodyLoader(bodyAdapter)
 		aiWriter.SetNoteBodyUpdater(bodyAdapter)
-		suggester := ai.NewSuggester(chatCompleter, cfg.Models.Chat, logger)
+		suggester := ai.NewSuggester(trackedChat(usage.FuncSuggestTags), cfg.Models.Chat, logger)
 		aiHandler = ai.NewHandler(nil, nil, nil, nil, nil, aiWriter, suggester, userDBMgr, logger)
 		if cfg.ChromaDBURL != "" && embeddingClient == nil {
 			logger.Info("AI features: embedding client not configured (embeddings.provider=ollama with no ollama_base_url); embeddings/RAG disabled, writing assist and suggestions available")
@@ -870,11 +900,8 @@ func run() error {
 				MemoryStore:  memoryStore,
 				ProfileStore: profileStore,
 				Registry:     toolRegistry,
-				LLM:          toolCompleter,
-				// All built-in providers also implement plain
-				// ChatCompleter, so the same client doubles as the
-				// summarizer for conversation digests.
-				Summarizer:    chatCompleter,
+				LLM:          trackedToolChat(toolCompleter, usage.FuncAssistant),
+				Summarizer:   trackedChat(usage.FuncChatSummarize),
 				ChatModel:     assistantModel,
 				UserDBManager: userDBMgr,
 				Hub:           hub,
@@ -938,7 +965,7 @@ func run() error {
 				ProjectService:  projectSvc,
 				ReviewService:   reviewSvc,
 				SettingsService: settingsSvc,
-				Chat:            chatCompleter,
+				Chat:            trackedChat(usage.FuncLibrarian),
 				ChatModel:       cfg.Models.Background,
 				Hub:             hub,
 				Logger:          logger,
@@ -992,6 +1019,7 @@ func run() error {
 		WebhookHandler:   webhookHandler,
 		AssistantHandler: assistantHandler,
 		ScheduleHandler:  scheduleHandler,
+		UsageHandler:     usageHandler,
 		WSMessageHandler: wsHandler,
 		MCPHandler:       mcpHandler,
 	})

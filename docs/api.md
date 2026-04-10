@@ -156,6 +156,20 @@ PUT    /api/settings
 DELETE /api/settings/{key}
 ```
 
+### Token Usage
+
+Dashboard for AI token consumption. Tracks every LLM and embedding call by function, provider, and model. Optional budget enforcement via settings.
+
+```
+GET    /api/usage/summary                # aggregated totals (from/to query params, default last 30 days)
+GET    /api/usage/by-function            # breakdown by function (chat, assistant, embedding, etc.)
+GET    /api/usage/by-provider            # breakdown by provider (ollama, openai, anthropic)
+GET    /api/usage/by-model               # breakdown by model (gpt-4o, gpt-4o-mini, llama3, etc.)
+GET    /api/usage/timeseries             # time series (granularity: hour/day/month)
+GET    /api/usage/budget                 # current budget status
+PUT    /api/usage/budget                 # update budget settings
+```
+
 ### Webhooks
 
 ```

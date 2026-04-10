@@ -28,6 +28,7 @@ import (
 	"github.com/katata/seam/internal/settings"
 	"github.com/katata/seam/internal/task"
 	"github.com/katata/seam/internal/template"
+	"github.com/katata/seam/internal/usage"
 	"github.com/katata/seam/internal/webhook"
 	"github.com/katata/seam/internal/ws"
 )
@@ -63,6 +64,7 @@ type Config struct {
 	WebhookHandler   *webhook.Handler
 	AssistantHandler *assistant.Handler
 	ScheduleHandler  *scheduler.Handler
+	UsageHandler     *usage.Handler
 	WSMessageHandler ws.MessageHandler
 	MCPHandler       http.Handler // MCP endpoint handler (optional, mounts at /api/mcp)
 }
@@ -202,6 +204,12 @@ func New(cfg Config) *Server {
 		if cfg.ScheduleHandler != nil {
 			r.Route("/api/schedules", func(r chi.Router) {
 				r.Mount("/", cfg.ScheduleHandler.Routes())
+			})
+		}
+
+		if cfg.UsageHandler != nil {
+			r.Route("/api/usage", func(r chi.Router) {
+				r.Mount("/", cfg.UsageHandler.Routes())
 			})
 		}
 	})

@@ -97,10 +97,17 @@ type anthropicContentBlock struct {
 	Input json.RawMessage `json:"input,omitempty"` // present for tool_use blocks
 }
 
+// anthropicUsage holds token usage returned by the Anthropic API.
+type anthropicUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
 // anthropicResponse is the response from POST /v1/messages.
 type anthropicResponse struct {
 	Content    []anthropicContentBlock `json:"content"`
 	StopReason string                  `json:"stop_reason"`
+	Usage      *anthropicUsage         `json:"usage,omitempty"`
 	Error      *anthropicErrorDetail   `json:"error,omitempty"`
 }
 
@@ -196,7 +203,15 @@ func (c *AnthropicClient) ChatCompletion(ctx context.Context, model string, mess
 		return nil, fmt.Errorf("ai.AnthropicClient.ChatCompletion: empty response (no text content)")
 	}
 
-	return &ChatResponse{Content: strings.Join(textParts, "")}, nil
+	resp2 := &ChatResponse{Content: strings.Join(textParts, "")}
+	if result.Usage != nil {
+		resp2.Usage = &TokenUsage{
+			InputTokens:  result.Usage.InputTokens,
+			OutputTokens: result.Usage.OutputTokens,
+			TotalTokens:  result.Usage.InputTokens + result.Usage.OutputTokens,
+		}
+	}
+	return resp2, nil
 }
 
 // ChatCompletionWithTools sends messages with tool definitions to the Anthropic
@@ -312,6 +327,13 @@ func (c *AnthropicClient) ChatCompletionWithTools(ctx context.Context, model str
 	}
 	if result.StopReason == "tool_use" {
 		tcr.FinishReason = "tool_calls"
+	}
+	if result.Usage != nil {
+		tcr.Usage = &TokenUsage{
+			InputTokens:  result.Usage.InputTokens,
+			OutputTokens: result.Usage.OutputTokens,
+			TotalTokens:  result.Usage.InputTokens + result.Usage.OutputTokens,
+		}
 	}
 
 	var textParts []string

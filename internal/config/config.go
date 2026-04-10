@@ -33,7 +33,20 @@ type Config struct {
 	UserDB        UserDBConfig     `yaml:"userdb"`
 	Watcher       WatcherConfig    `yaml:"watcher"`
 	Scheduler     SchedulerConfig  `yaml:"scheduler"`
+	MCP           MCPConfig        `yaml:"mcp"`
+	Usage         UsageConfig      `yaml:"usage"`
 	WebDistDir    string           `yaml:"web_dist_dir"` // path to web/dist for SPA serving; empty uses default
+}
+
+// MCPConfig holds MCP server settings.
+type MCPConfig struct {
+	// APIKey is an optional static bearer token for MCP access.
+	// When set, clients can authenticate with "Authorization: Bearer <api_key>"
+	// instead of a short-lived JWT. Useful for AI coding agents (Claude Code,
+	// Cursor, etc.) that need long-lived access. Generate with:
+	//   openssl rand -hex 32
+	// env: SEAM_MCP_API_KEY
+	APIKey string `yaml:"api_key"`
 }
 
 // SchedulerConfig controls the cron-based scheduler that runs proactive
@@ -182,6 +195,14 @@ type AuthConfig struct {
 	BcryptCost      int      `yaml:"bcrypt_cost"`
 }
 
+// UsageConfig specifies token usage tracking parameters.
+type UsageConfig struct {
+	// TrackingEnabled toggles token usage recording. Default: true.
+	TrackingEnabled *bool `yaml:"tracking_enabled"`
+	// TrackLocal toggles tracking of local Ollama calls. Default: true.
+	TrackLocal *bool `yaml:"track_local"`
+}
+
 // AIConfig specifies AI task queue parameters.
 type AIConfig struct {
 	QueueWorkers     int      `yaml:"queue_workers"`
@@ -292,6 +313,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SEAM_EMBEDDINGS_OPENAI_BASE_URL"); v != "" {
 		cfg.Embeddings.OpenAI.BaseURL = v
 	}
+	if v := os.Getenv("SEAM_MCP_API_KEY"); v != "" {
+		cfg.MCP.APIKey = v
+	}
 	if v := os.Getenv("SEAM_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
 	}
@@ -369,6 +393,14 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Scheduler.DailyBriefing.LookbackHours <= 0 {
 		cfg.Scheduler.DailyBriefing.LookbackHours = 24
+	}
+	if cfg.Usage.TrackingEnabled == nil {
+		t := true
+		cfg.Usage.TrackingEnabled = &t
+	}
+	if cfg.Usage.TrackLocal == nil {
+		t := true
+		cfg.Usage.TrackLocal = &t
 	}
 	if cfg.Assistant.MaxIterations <= 0 {
 		cfg.Assistant.MaxIterations = 10

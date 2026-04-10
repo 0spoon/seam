@@ -36,6 +36,7 @@ internal/           Core domain packages (strict layering, no circular imports)
   task/             Checkbox task extraction and tracking
   template/         Note templates
   testutil/         Shared test helpers
+  usage/            Token usage tracking, budget gating, dashboard API
   userdb/           SQLite database manager for the single seam.db
   validate/         Path traversal & input sanitization
   watcher/          fsnotify file watcher + startup reconciliation

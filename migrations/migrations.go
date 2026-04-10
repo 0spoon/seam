@@ -15,6 +15,9 @@ import (
 //go:embed 001_initial.sql
 var InitialSQL string
 
+//go:embed 002_token_usage.sql
+var tokenUsageSQL string
+
 // Migration represents a single numbered migration step.
 type Migration struct {
 	Version int
@@ -29,5 +32,6 @@ type Migration struct {
 func Migrations() []Migration {
 	return []Migration{
 		{Version: 1, SQL: InitialSQL},
+		{Version: 2, SQL: tokenUsageSQL},
 	}
 }

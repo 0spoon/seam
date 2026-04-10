@@ -50,14 +50,47 @@ Persistent knowledge that survives across sessions. Your agent's long-term memor
 
 ### User Notes
 
-Read, search, and create user-facing notes.
+Read, search, create, update, and delete user-facing notes.
 
-| Tool           | What it does                                        |
-| -------------- | --------------------------------------------------- |
-| `notes_search` | Full-text search with recency bias                  |
-| `notes_read`   | Read a note by ID                                   |
-| `notes_list`   | List notes with project/tag filtering               |
-| `notes_create` | Create a user note (auto-tagged `created-by:agent`) |
+| Tool           | What it does                                         |
+| -------------- | ---------------------------------------------------- |
+| `notes_search` | Full-text search with recency bias                   |
+| `notes_read`   | Read a note by ID                                    |
+| `notes_list`   | List notes with project/tag filtering                |
+| `notes_create` | Create a user note (auto-tagged `created-by:agent`)  |
+| `notes_update` | Update a note's title, body, tags, or project        |
+| `notes_delete` | Permanently delete a note by ID                      |
+| `notes_tags`   | List all tags in use with counts                     |
+| `notes_daily`  | Get or create today's daily note                     |
+| `notes_append` | Append timestamped text to a note (log-style)        |
+| `notes_changelog` | List notes changed within a date range            |
+| `notes_versions` | List version history or retrieve a past version    |
+| `notes_from_template` | Create a note from a named template with variables |
+
+### Knowledge Graph
+
+Explore structural relationships between notes.
+
+| Tool               | What it does                                             |
+| ------------------ | -------------------------------------------------------- |
+| `graph_neighbors`  | Backlinks, two-hop connections for a note                |
+
+### Knowledge Gardening
+
+Autonomous knowledge base maintenance.
+
+| Tool           | What it does                                                   |
+| -------------- | -------------------------------------------------------------- |
+| `review_queue` | Pull items needing attention (orphans, untagged, unsorted)     |
+
+### Projects
+
+Manage note organization.
+
+| Tool             | What it does                |
+| ---------------- | --------------------------- |
+| `project_list`   | List all projects           |
+| `project_create` | Create a new project        |
 
 ### Tasks & Webhooks
 
@@ -67,10 +100,28 @@ Track tasks from your notes and register HTTP callbacks for events.
 | ------------------ | ------------------------------------------------- |
 | `tasks_list`       | List checkbox tasks from notes                    |
 | `tasks_summary`    | Aggregate task counts                             |
+| `tasks_toggle`     | Toggle a task's done status                       |
 | `context_gather`   | Budgeted search across notes with ranked snippets |
 | `webhook_register` | Register webhook for note/task events             |
 | `webhook_list`     | List registered webhooks                          |
 | `webhook_delete`   | Delete a webhook                                  |
+
+### Research Lab
+
+Systematic debugging and experimentation tracking. Multiple agents can collaborate on the same investigation via the session hierarchy.
+
+| Tool              | What it does                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------- |
+| `lab_open`        | Open or resume a research lab. Returns briefing, notebook, and past trial summaries   |
+| `trial_record`    | Record a trial (changes + expected). Update later with actual + outcome               |
+| `decision_record` | Record a decision based on accumulated evidence from trials                           |
+| `trial_query`     | Search and list trials in a lab, filtered by outcome or text query                    |
+
+**Workflow:** `lab_open` -> `trial_record` (changes + expected) -> observe -> `trial_record` (actual + outcome) -> `decision_record` when evidence accumulates.
+
+**Multi-agent:** Multiple agents call `lab_open` with the same name. Each agent's completed trial findings appear in other agents' briefings via session hierarchy (`lab/{name}/{trial-slug}`).
+
+**Outcomes:** `success`, `failure`, `partial`, `inconclusive`, `pending` (default until set).
 
 ## Rate Limits
 

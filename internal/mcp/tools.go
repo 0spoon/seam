@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -15,6 +16,7 @@ import (
 	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/reqctx"
 	"github.com/katata/seam/internal/task"
+	"github.com/katata/seam/internal/template"
 	"github.com/katata/seam/internal/webhook"
 )
 
@@ -53,10 +55,27 @@ func (s *Server) registerTools() {
 		mcpserver.ServerTool{Tool: notesReadTool(), Handler: s.handleNotesRead},
 		mcpserver.ServerTool{Tool: notesListTool(), Handler: s.handleNotesList},
 		mcpserver.ServerTool{Tool: notesCreateTool(), Handler: s.handleNotesCreate},
+		mcpserver.ServerTool{Tool: notesUpdateTool(), Handler: s.handleNotesUpdate},
+		mcpserver.ServerTool{Tool: notesDeleteTool(), Handler: s.handleNotesDelete},
+		mcpserver.ServerTool{Tool: notesTagsTool(), Handler: s.handleNotesTags},
+		mcpserver.ServerTool{Tool: notesDailyTool(), Handler: s.handleNotesDaily},
+		mcpserver.ServerTool{Tool: notesAppendTool(), Handler: s.handleNotesAppend},
+		mcpserver.ServerTool{Tool: notesChangelogTool(), Handler: s.handleNotesChangelog},
+		mcpserver.ServerTool{Tool: notesVersionsTool(), Handler: s.handleNotesVersions},
+
+		// Project management tools.
+		mcpserver.ServerTool{Tool: projectListTool(), Handler: s.handleProjectList},
+		mcpserver.ServerTool{Tool: projectCreateTool(), Handler: s.handleProjectCreate},
 
 		// V2: Memory search and session metrics.
 		mcpserver.ServerTool{Tool: memorySearchTool(), Handler: s.handleMemorySearch},
 		mcpserver.ServerTool{Tool: sessionMetricsTool(), Handler: s.handleSessionMetrics},
+
+		// V5: Research lab / experiment tracking.
+		mcpserver.ServerTool{Tool: labOpenTool(), Handler: s.handleLabOpen},
+		mcpserver.ServerTool{Tool: trialRecordTool(), Handler: s.handleTrialRecord},
+		mcpserver.ServerTool{Tool: decisionRecordTool(), Handler: s.handleDecisionRecord},
+		mcpserver.ServerTool{Tool: trialQueryTool(), Handler: s.handleTrialQuery},
 	)
 
 	// Task tracking tools (registered only if TaskService is configured).
@@ -64,6 +83,28 @@ func (s *Server) registerTools() {
 		s.mcp.AddTools(
 			mcpserver.ServerTool{Tool: tasksListTool(), Handler: s.handleTasksList},
 			mcpserver.ServerTool{Tool: tasksSummaryTool(), Handler: s.handleTasksSummary},
+			mcpserver.ServerTool{Tool: tasksToggleTool(), Handler: s.handleTasksToggle},
+		)
+	}
+
+	// Graph tools (registered only if GraphService is configured).
+	if s.cfg.GraphService != nil {
+		s.mcp.AddTools(
+			mcpserver.ServerTool{Tool: graphNeighborsTool(), Handler: s.handleGraphNeighbors},
+		)
+	}
+
+	// Review tools (registered only if ReviewService is configured).
+	if s.cfg.ReviewService != nil {
+		s.mcp.AddTools(
+			mcpserver.ServerTool{Tool: reviewQueueTool(), Handler: s.handleReviewQueue},
+		)
+	}
+
+	// Template tools (registered only if TemplateService is configured).
+	if s.cfg.TemplateService != nil {
+		s.mcp.AddTools(
+			mcpserver.ServerTool{Tool: notesFromTemplateTool(), Handler: s.handleNotesFromTemplate},
 		)
 	}
 
@@ -690,6 +731,600 @@ func (s *Server) handleSessionMetrics(ctx context.Context, req mcp.CallToolReque
 	return mcp.NewToolResultText(string(data)), nil
 }
 
+// --- Notes Update/Delete/Tags/Daily Tool Definitions ---
+
+func notesUpdateTool() mcp.Tool {
+	return mcp.NewTool("notes_update",
+		mcp.WithDescription("Update an existing note. Only provided fields are changed; omitted fields are left as-is."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Note ID")),
+		mcp.WithString("title", mcp.Description("New title (omit to keep current)")),
+		mcp.WithString("body", mcp.Description("New body content in markdown (omit to keep current)")),
+		mcp.WithString("project", mcp.Description("Project slug to move note to (empty string = inbox, omit to keep current)")),
+		mcp.WithString("tags", mcp.Description("Comma-separated tags, replaces all existing tags (omit to keep current)")),
+	)
+}
+
+func notesDeleteTool() mcp.Tool {
+	return mcp.NewTool("notes_delete",
+		mcp.WithDescription("Delete a note by ID. This is permanent."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Note ID")),
+	)
+}
+
+func notesTagsTool() mcp.Tool {
+	return mcp.NewTool("notes_tags",
+		mcp.WithDescription("List all tags in use across notes, with usage counts."),
+	)
+}
+
+func notesDailyTool() mcp.Tool {
+	return mcp.NewTool("notes_daily",
+		mcp.WithDescription("Get or create today's daily note. Returns the full note."),
+		mcp.WithString("date", mcp.Description("Date in YYYY-MM-DD format (default: today)")),
+	)
+}
+
+// --- Project Tool Definitions ---
+
+func projectListTool() mcp.Tool {
+	return mcp.NewTool("project_list",
+		mcp.WithDescription("List all projects."),
+	)
+}
+
+func projectCreateTool() mcp.Tool {
+	return mcp.NewTool("project_create",
+		mcp.WithDescription("Create a new project."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Project name")),
+		mcp.WithString("description", mcp.Description("Project description (optional)")),
+	)
+}
+
+// --- Tasks Toggle Tool Definition ---
+
+func tasksToggleTool() mcp.Tool {
+	return mcp.NewTool("tasks_toggle",
+		mcp.WithDescription("Toggle a task's done status."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Task ID")),
+		mcp.WithString("done", mcp.Required(), mcp.Enum("true", "false"), mcp.Description("Set done status")),
+	)
+}
+
+// --- Notes Update/Delete/Tags/Daily Handlers ---
+
+func (s *Server) handleNotesUpdate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	noteID, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: id"), nil
+	}
+
+	// Build update params: only set fields that were explicitly provided.
+	args := req.GetArguments()
+	var title, body, projectSlug *string
+	var tags *[]string
+
+	if v, ok := args["title"]; ok {
+		if s, ok := v.(string); ok {
+			title = &s
+		}
+	}
+	if v, ok := args["body"]; ok {
+		if s, ok := v.(string); ok {
+			if len(s) > maxContentLen {
+				return mcp.NewToolResultError(fmt.Sprintf("body too long: %d bytes exceeds limit of %d", len(s), maxContentLen)), nil
+			}
+			body = &s
+		}
+	}
+	if v, ok := args["project"]; ok {
+		if s, ok := v.(string); ok {
+			projectSlug = &s
+		}
+	}
+	if v, ok := args["tags"]; ok {
+		if s, ok := v.(string); ok {
+			parsed := parseTags(s)
+			tags = &parsed
+		}
+	}
+
+	// At least one field must be provided.
+	if title == nil && body == nil && projectSlug == nil && tags == nil {
+		return mcp.NewToolResultError("at least one field (title, body, project, tags) must be provided"), nil
+	}
+
+	n, err := s.cfg.AgentService.NotesUpdate(ctx, userID, noteID, title, body, projectSlug, tags)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_update", err)), nil
+	}
+
+	data, _ := json.Marshal(map[string]string{"note_id": n.ID, "title": n.Title})
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleNotesDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	noteID, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: id"), nil
+	}
+
+	if err := s.cfg.AgentService.NotesDelete(ctx, userID, noteID); err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_delete", err)), nil
+	}
+
+	return mcp.NewToolResultText(`{"status":"deleted"}`), nil
+}
+
+func (s *Server) handleNotesTags(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	tags, err := s.cfg.AgentService.NotesTags(ctx, userID)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_tags", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(map[string]interface{}{"tags": tags})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal tags"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleNotesDaily(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	dateStr := req.GetString("date", "")
+	var date time.Time
+	if dateStr != "" {
+		var parseErr error
+		date, parseErr = time.Parse("2006-01-02", dateStr)
+		if parseErr != nil {
+			return mcp.NewToolResultError("invalid date format, expected YYYY-MM-DD"), nil
+		}
+	} else {
+		date = time.Now()
+	}
+
+	n, err := s.cfg.AgentService.NotesDaily(ctx, userID, date)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_daily", err)), nil
+	}
+
+	result := map[string]interface{}{
+		"id":    n.ID,
+		"title": n.Title,
+		"body":  n.Body,
+		"tags":  n.Tags,
+	}
+	data, jsonErr := json.Marshal(result)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal result"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- Project Handlers ---
+
+func (s *Server) handleProjectList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	projects, err := s.cfg.AgentService.ProjectList(ctx, userID)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("project_list", err)), nil
+	}
+
+	type projectSummary struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Slug        string `json:"slug"`
+		Description string `json:"description,omitempty"`
+	}
+	summaries := make([]projectSummary, 0, len(projects))
+	for _, p := range projects {
+		summaries = append(summaries, projectSummary{
+			ID:          p.ID,
+			Name:        p.Name,
+			Slug:        p.Slug,
+			Description: p.Description,
+		})
+	}
+
+	data, jsonErr := json.Marshal(map[string]interface{}{"projects": summaries})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal projects"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleProjectCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	name, err := req.RequireString("name")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: name"), nil
+	}
+	description := req.GetString("description", "")
+
+	p, err := s.cfg.AgentService.ProjectCreate(ctx, userID, name, description)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("project_create", err)), nil
+	}
+
+	data, _ := json.Marshal(map[string]string{"project_id": p.ID, "name": p.Name, "slug": p.Slug})
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- Tasks Toggle Handler ---
+
+func (s *Server) handleTasksToggle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	taskID, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: id"), nil
+	}
+	doneStr, err := req.RequireString("done")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: done"), nil
+	}
+	done := doneStr == "true"
+
+	if err := s.cfg.TaskService.ToggleDone(ctx, userID, taskID, done); err != nil {
+		return mcp.NewToolResultError(sanitizeError("tasks_toggle", err)), nil
+	}
+
+	data, _ := json.Marshal(map[string]interface{}{"task_id": taskID, "done": done})
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- V4 Tool Definitions: Append, Changelog, Versions ---
+
+func notesAppendTool() mcp.Tool {
+	return mcp.NewTool("notes_append",
+		mcp.WithDescription("Append a timestamped line to a note's body. Ideal for building research logs, debug journals, or activity feeds without replacing existing content."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Note ID")),
+		mcp.WithString("text", mcp.Required(), mcp.Description("Text to append")),
+	)
+}
+
+func notesChangelogTool() mcp.Tool {
+	return mcp.NewTool("notes_changelog",
+		mcp.WithDescription("List notes created or modified within a date range. Returns compact summaries sorted by most recent first. Use this to understand what changed recently."),
+		mcp.WithString("since", mcp.Description("Start date in YYYY-MM-DD format (default: 7 days ago)")),
+		mcp.WithString("until", mcp.Description("End date in YYYY-MM-DD format (default: now)")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of results (default: 20)")),
+	)
+}
+
+func notesVersionsTool() mcp.Tool {
+	return mcp.NewTool("notes_versions",
+		mcp.WithDescription("List version history for a note, or retrieve a specific past version. Use without 'version' to list all versions; provide 'version' to retrieve that snapshot."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Note ID")),
+		mcp.WithNumber("version", mcp.Description("Specific version number to retrieve (omit to list all versions)")),
+		mcp.WithNumber("limit", mcp.Description("Maximum versions to list (default: 10, ignored when retrieving specific version)")),
+	)
+}
+
+// --- Graph Tool Definition ---
+
+func graphNeighborsTool() mcp.Tool {
+	return mcp.NewTool("graph_neighbors",
+		mcp.WithDescription("Explore a note's neighborhood in the knowledge graph. Returns backlinks (notes that link to it), two-hop connections (notes linked through intermediaries), and optionally the note's direct outgoing links. Use this for structural discovery beyond text search."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Note ID to explore")),
+		mcp.WithString("include_two_hop", mcp.Enum("true", "false"), mcp.Description("Include two-hop connections (default: true)")),
+	)
+}
+
+// --- Review Queue Tool Definition ---
+
+func reviewQueueTool() mcp.Tool {
+	return mcp.NewTool("review_queue",
+		mcp.WithDescription("Pull items from the knowledge gardening queue. Returns notes that need attention: orphans (no links), untagged notes, and unsorted inbox items. Each comes with actionable suggestions. Use this for autonomous knowledge maintenance."),
+		mcp.WithNumber("limit", mcp.Description("Maximum items to return (default: 10)")),
+	)
+}
+
+// --- Template Tool Definition ---
+
+func notesFromTemplateTool() mcp.Tool {
+	return mcp.NewTool("notes_from_template",
+		mcp.WithDescription("Create a note from a named template with variable substitution. Built-in vars: {{date}}, {{datetime}}, {{year}}, {{month}}, {{day}}, {{time}}. Call with just 'list: true' to see available templates."),
+		mcp.WithString("template", mcp.Description("Template name (e.g. 'meeting-notes', 'research-summary')")),
+		mcp.WithString("title", mcp.Description("Note title")),
+		mcp.WithString("project", mcp.Description("Project slug (optional)")),
+		mcp.WithString("tags", mcp.Description("Comma-separated tags (optional)")),
+		mcp.WithString("vars", mcp.Description("JSON object of template variables (e.g. '{\"topic\":\"auth\",\"attendees\":\"Alice, Bob\"}')")),
+		mcp.WithString("list", mcp.Enum("true", "false"), mcp.Description("Set to 'true' to list available templates instead of creating a note")),
+	)
+}
+
+// --- V4 Handlers: Append, Changelog, Versions ---
+
+func (s *Server) handleNotesAppend(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	noteID, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: id"), nil
+	}
+	text, err := req.RequireString("text")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: text"), nil
+	}
+	if len(text) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("text too long: %d bytes exceeds limit of %d", len(text), maxContentLen)), nil
+	}
+
+	n, err := s.cfg.AgentService.NotesAppend(ctx, userID, noteID, text)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_append", err)), nil
+	}
+
+	data, _ := json.Marshal(map[string]string{"note_id": n.ID, "title": n.Title})
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleNotesChangelog(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	sinceStr := req.GetString("since", "")
+	untilStr := req.GetString("until", "")
+
+	var since, until time.Time
+	if sinceStr != "" {
+		var parseErr error
+		since, parseErr = time.Parse("2006-01-02", sinceStr)
+		if parseErr != nil {
+			return mcp.NewToolResultError("invalid since date, expected YYYY-MM-DD"), nil
+		}
+	} else {
+		since = time.Now().AddDate(0, 0, -7)
+	}
+	if untilStr != "" {
+		var parseErr error
+		until, parseErr = time.Parse("2006-01-02", untilStr)
+		if parseErr != nil {
+			return mcp.NewToolResultError("invalid until date, expected YYYY-MM-DD"), nil
+		}
+		// Set to end of day.
+		until = until.Add(24*time.Hour - time.Second)
+	} else {
+		until = time.Now()
+	}
+
+	limit := req.GetInt("limit", 20)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
+
+	notes, total, err := s.cfg.AgentService.NotesChangelog(ctx, userID, since, until, limit)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_changelog", err)), nil
+	}
+
+	type changelogEntry struct {
+		ID        string   `json:"id"`
+		Title     string   `json:"title"`
+		Tags      []string `json:"tags,omitempty"`
+		CreatedAt string   `json:"created_at"`
+		UpdatedAt string   `json:"updated_at"`
+	}
+	entries := make([]changelogEntry, 0, len(notes))
+	for _, n := range notes {
+		entries = append(entries, changelogEntry{
+			ID:        n.ID,
+			Title:     n.Title,
+			Tags:      n.Tags,
+			CreatedAt: n.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	data, jsonErr := json.Marshal(map[string]interface{}{
+		"changes": entries,
+		"total":   total,
+		"since":   since.Format("2006-01-02"),
+		"until":   until.Format("2006-01-02"),
+	})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleNotesVersions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	noteID, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: id"), nil
+	}
+
+	// If a specific version is requested, return that snapshot.
+	versionNum := req.GetInt("version", 0)
+	if versionNum > 0 {
+		v, err := s.cfg.AgentService.NotesGetVersion(ctx, userID, noteID, versionNum)
+		if err != nil {
+			return mcp.NewToolResultError(sanitizeError("notes_versions", err)), nil
+		}
+		data, jsonErr := json.Marshal(map[string]interface{}{
+			"note_id":   v.NoteID,
+			"version":   v.Version,
+			"title":     v.Title,
+			"body":      v.Body,
+			"created_at": v.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+		if jsonErr != nil {
+			return mcp.NewToolResultError("failed to marshal version"), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	// List versions.
+	limit := req.GetInt("limit", 10)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
+
+	versions, total, err := s.cfg.AgentService.NotesVersions(ctx, userID, noteID, limit)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_versions", err)), nil
+	}
+
+	type versionSummary struct {
+		Version   int    `json:"version"`
+		Title     string `json:"title"`
+		CreatedAt string `json:"created_at"`
+	}
+	summaries := make([]versionSummary, 0, len(versions))
+	for _, v := range versions {
+		summaries = append(summaries, versionSummary{
+			Version:   v.Version,
+			Title:     v.Title,
+			CreatedAt: v.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	data, jsonErr := json.Marshal(map[string]interface{}{
+		"note_id":  noteID,
+		"versions": summaries,
+		"total":    total,
+	})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal versions"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- Graph Handler ---
+
+func (s *Server) handleGraphNeighbors(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	noteID, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: id"), nil
+	}
+
+	includeTwoHop := req.GetString("include_two_hop", "true") != "false"
+
+	// Get backlinks (notes that link to this note).
+	backlinks, err := s.cfg.AgentService.NotesBacklinks(ctx, userID, noteID)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("graph_neighbors", err)), nil
+	}
+
+	type linkEntry struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+
+	backlinkEntries := make([]linkEntry, 0, len(backlinks))
+	for _, n := range backlinks {
+		backlinkEntries = append(backlinkEntries, linkEntry{ID: n.ID, Title: n.Title})
+	}
+
+	result := map[string]interface{}{
+		"note_id":   noteID,
+		"backlinks": backlinkEntries,
+	}
+
+	// Two-hop connections.
+	if includeTwoHop {
+		twoHop, twoErr := s.cfg.GraphService.GetTwoHopBacklinks(ctx, userID, noteID)
+		if twoErr == nil {
+			result["two_hop"] = twoHop
+		}
+	}
+
+	data, jsonErr := json.Marshal(result)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal graph data"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- Review Queue Handler ---
+
+func (s *Server) handleReviewQueue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	limit := req.GetInt("limit", 10)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
+
+	items, err := s.cfg.ReviewService.GetQueue(ctx, userID, limit)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("review_queue", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(map[string]interface{}{
+		"items": items,
+		"count": len(items),
+	})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal review queue"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- Template Handler ---
+
+func (s *Server) handleNotesFromTemplate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	// List mode: return available templates.
+	if req.GetString("list", "") == "true" {
+		templates, err := s.cfg.TemplateService.List(ctx, userID)
+		if err != nil {
+			return mcp.NewToolResultError(sanitizeError("notes_from_template", err)), nil
+		}
+		data, jsonErr := json.Marshal(map[string]interface{}{"templates": templates})
+		if jsonErr != nil {
+			return mcp.NewToolResultError("failed to marshal templates"), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	// Create mode: require template name and title.
+	templateName, err := req.RequireString("template")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: template (or set list='true' to see available templates)"), nil
+	}
+	title, err := req.RequireString("title")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: title"), nil
+	}
+
+	// Parse template variables from JSON string.
+	var vars map[string]string
+	varsStr := req.GetString("vars", "")
+	if varsStr != "" {
+		if jsonErr := json.Unmarshal([]byte(varsStr), &vars); jsonErr != nil {
+			return mcp.NewToolResultError("invalid vars: expected JSON object with string values"), nil
+		}
+	}
+
+	// Apply template.
+	body, err := s.cfg.TemplateService.Apply(ctx, userID, templateName, vars)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_from_template", err)), nil
+	}
+
+	// Create the note using AgentService (which adds created-by:agent tag).
+	projectSlug := req.GetString("project", "")
+	tagsStr := req.GetString("tags", "")
+	var tags []string
+	if tagsStr != "" {
+		tags = parseTags(tagsStr)
+	}
+
+	n, err := s.cfg.AgentService.NotesCreate(ctx, userID, title, body, projectSlug, tags)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("notes_from_template", err)), nil
+	}
+
+	data, _ := json.Marshal(map[string]string{"note_id": n.ID, "title": n.Title, "template": templateName})
+	return mcp.NewToolResultText(string(data)), nil
+}
+
 // --- Error Sanitization ---
 
 // sanitizeError maps domain errors to user-safe messages. Internal error details
@@ -710,6 +1345,16 @@ func sanitizeError(tool string, err error) string {
 		return tool + ": findings are required"
 	case errors.Is(err, agent.ErrInvalidSessionName):
 		return tool + ": invalid session name"
+	case errors.Is(err, note.ErrVersionNotFound):
+		return tool + ": version not found"
+	case errors.Is(err, project.ErrSlugExists):
+		return tool + ": project slug already exists"
+	case errors.Is(err, template.ErrTemplateNotFound):
+		return tool + ": template not found"
+	case errors.Is(err, template.ErrInvalidName):
+		return tool + ": invalid template name"
+	case errors.Is(err, task.ErrNotFound):
+		return tool + ": task not found"
 	case errors.Is(err, webhook.ErrNotFound):
 		return tool + ": not found"
 	case errors.Is(err, webhook.ErrInvalidURL):
@@ -722,6 +1367,10 @@ func sanitizeError(tool string, err error) string {
 		return tool + ": url is required"
 	case errors.Is(err, webhook.ErrEventsRequired):
 		return tool + ": event_types is required"
+	case errors.Is(err, agent.ErrInvalidLabName):
+		return tool + ": invalid lab name (alphanumeric and hyphens only)"
+	case errors.Is(err, agent.ErrInvalidOutcome):
+		return tool + ": invalid outcome (must be success/failure/partial/inconclusive)"
 	default:
 		return tool + ": internal error"
 	}
@@ -755,6 +1404,18 @@ func clampRecencyBias(v float64) float64 {
 		return 1
 	}
 	return v
+}
+
+// parseTags splits a comma-separated tag string into a slice, trimming whitespace.
+func parseTags(s string) []string {
+	var tags []string
+	for _, t := range strings.Split(s, ",") {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags
 }
 
 // hasControlChars returns true if s contains control characters (bytes 0x00-0x1F
@@ -952,6 +1613,203 @@ func (s *Server) handleTasksSummary(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	data, jsonErr := json.Marshal(summary)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// --- V5: Research Lab Tool Definitions ---
+
+func labOpenTool() mcp.Tool {
+	return mcp.NewTool("lab_open",
+		mcp.WithDescription("Open or resume a research lab for systematic debugging. Returns lab notebook, briefing, and past trial summaries. Multiple agents can open the same lab to collaborate."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Lab name (alphanumeric and hyphens, e.g. 'ble-sampling')")),
+		mcp.WithString("problem", mcp.Required(), mcp.Description("Problem statement (what you are investigating)")),
+		mcp.WithString("domain", mcp.Required(), mcp.Description("Domain (e.g. 'firmware', 'bluetooth', 'ml')")),
+		mcp.WithString("tags", mcp.Description("Comma-separated extra tags (optional)")),
+	)
+}
+
+func trialRecordTool() mcp.Tool {
+	return mcp.NewTool("trial_record",
+		mcp.WithDescription("Record a trial in a research lab. Call with changes+expected to start, then update later with actual+outcome. When outcome is set, the trial session ends and findings become visible to collaborating agents."),
+		mcp.WithString("lab", mcp.Required(), mcp.Description("Lab name")),
+		mcp.WithString("title", mcp.Required(), mcp.Description("Trial title (e.g. 'Increase connection interval to 30ms')")),
+		mcp.WithString("changes", mcp.Required(), mcp.Description("What was changed (code, config, firmware)")),
+		mcp.WithString("expected", mcp.Required(), mcp.Description("What you expect to happen")),
+		mcp.WithString("actual", mcp.Description("What actually happened (optional, can be added later)")),
+		mcp.WithString("outcome", mcp.Description("Trial outcome (optional)"), mcp.Enum("success", "failure", "partial", "inconclusive")),
+		mcp.WithString("notes", mcp.Description("Additional observations (optional)")),
+	)
+}
+
+func decisionRecordTool() mcp.Tool {
+	return mcp.NewTool("decision_record",
+		mcp.WithDescription("Record a decision based on accumulated evidence from lab trials."),
+		mcp.WithString("lab", mcp.Required(), mcp.Description("Lab name")),
+		mcp.WithString("title", mcp.Required(), mcp.Description("Decision title (e.g. 'Ship priority-based coex')")),
+		mcp.WithString("rationale", mcp.Required(), mcp.Description("Why this decision was made")),
+		mcp.WithString("based_on", mcp.Description("Comma-separated trial titles this decision is based on (optional)")),
+		mcp.WithString("next_steps", mcp.Description("What to do next (optional)")),
+	)
+}
+
+func trialQueryTool() mcp.Tool {
+	return mcp.NewTool("trial_query",
+		mcp.WithDescription("Search and list trials in a research lab, optionally filtered by outcome. Returns structured trial data with changes, expected, actual, and outcome."),
+		mcp.WithString("lab", mcp.Required(), mcp.Description("Lab name")),
+		mcp.WithString("query", mcp.Description("Text search within trials (optional)")),
+		mcp.WithString("outcome", mcp.Description("Filter by outcome (optional)"), mcp.Enum("success", "failure", "partial", "inconclusive", "pending")),
+		mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
+	)
+}
+
+// --- V5: Research Lab Handlers ---
+
+func (s *Server) handleLabOpen(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	name, err := req.RequireString("name")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: name"), nil
+	}
+
+	problem, err := req.RequireString("problem")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: problem"), nil
+	}
+
+	domain, err := req.RequireString("domain")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: domain"), nil
+	}
+
+	if len(problem) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("problem too long: %d bytes exceeds limit of %d", len(problem), maxContentLen)), nil
+	}
+
+	var tags []string
+	if tagsStr := req.GetString("tags", ""); tagsStr != "" {
+		tags = parseTags(tagsStr)
+	}
+
+	info, err := s.cfg.AgentService.LabOpen(ctx, userID, name, problem, domain, tags)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("lab_open", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(info)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleTrialRecord(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	lab, err := req.RequireString("lab")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: lab"), nil
+	}
+
+	title, err := req.RequireString("title")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: title"), nil
+	}
+
+	changes, err := req.RequireString("changes")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: changes"), nil
+	}
+
+	expected, err := req.RequireString("expected")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: expected"), nil
+	}
+
+	actual := req.GetString("actual", "")
+	outcome := req.GetString("outcome", "")
+	notes := req.GetString("notes", "")
+
+	if len(changes) > maxContentLen || len(expected) > maxContentLen || len(actual) > maxContentLen {
+		return mcp.NewToolResultError("content too long"), nil
+	}
+
+	summary, err := s.cfg.AgentService.TrialRecord(ctx, userID, lab, title, changes, expected, actual, outcome, notes)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("trial_record", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(summary)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleDecisionRecord(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	lab, err := req.RequireString("lab")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: lab"), nil
+	}
+
+	title, err := req.RequireString("title")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: title"), nil
+	}
+
+	rationale, err := req.RequireString("rationale")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: rationale"), nil
+	}
+
+	basedOn := req.GetString("based_on", "")
+	nextSteps := req.GetString("next_steps", "")
+
+	if len(rationale) > maxContentLen {
+		return mcp.NewToolResultError(fmt.Sprintf("rationale too long: %d bytes exceeds limit of %d", len(rationale), maxContentLen)), nil
+	}
+
+	info, err := s.cfg.AgentService.DecisionRecord(ctx, userID, lab, title, rationale, basedOn, nextSteps)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("decision_record", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(info)
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleTrialQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+
+	lab, err := req.RequireString("lab")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: lab"), nil
+	}
+
+	query := req.GetString("query", "")
+	outcome := req.GetString("outcome", "")
+	limit := req.GetInt("limit", 20)
+	if limit > maxSessionList {
+		limit = maxSessionList
+	}
+
+	trials, err := s.cfg.AgentService.TrialQuery(ctx, userID, lab, query, outcome, limit)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("trial_query", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(map[string]any{
+		"trials": trials,
+		"total":  len(trials),
+	})
 	if jsonErr != nil {
 		return mcp.NewToolResultError("failed to marshal results"), nil
 	}

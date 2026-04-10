@@ -29,6 +29,11 @@ type NoteCreator interface {
 	List(ctx context.Context, userID string, filter note.NoteFilter) ([]*note.Note, int, error)
 	Delete(ctx context.Context, userID, noteID string) error
 	AppendToNote(ctx context.Context, userID, noteID, text string) (*note.Note, error)
+	ListTags(ctx context.Context, userID string) ([]note.TagCount, error)
+	GetOrCreateDaily(ctx context.Context, userID string, date time.Time) (*note.Note, error)
+	ListVersions(ctx context.Context, userID, noteID string, limit, offset int) ([]*note.NoteVersion, int, error)
+	GetVersion(ctx context.Context, userID, noteID string, version int) (*note.NoteVersion, error)
+	GetBacklinks(ctx context.Context, userID, noteID string) ([]*note.Note, error)
 }
 
 // ProjectCreator abstracts project.Service for auto-creating the agent-memory project.
@@ -74,6 +79,10 @@ type Service struct {
 	// projectCache caches the agent-memory project ID per user.
 	projectCacheMu sync.RWMutex
 	projectCache   map[string]string // userID -> projectID
+
+	// researchCache caches the research project ID per user.
+	researchCacheMu sync.RWMutex
+	researchCache   map[string]string // userID -> projectID
 }
 
 // NewService creates a new agent Service.
@@ -82,8 +91,9 @@ func NewService(cfg ServiceConfig) *Service {
 		cfg.Logger = slog.Default()
 	}
 	return &Service{
-		cfg:          cfg,
-		projectCache: make(map[string]string),
+		cfg:           cfg,
+		projectCache:  make(map[string]string),
+		researchCache: make(map[string]string),
 	}
 }
 
@@ -128,6 +138,46 @@ func (s *Service) ensureAgentMemoryProject(ctx context.Context, userID string) (
 	s.projectCacheMu.Lock()
 	s.projectCache[userID] = p.ID
 	s.projectCacheMu.Unlock()
+	return p.ID, nil
+}
+
+// ensureResearchProject ensures the "research" project exists for the user.
+// Returns the project ID, caching the result.
+func (s *Service) ensureResearchProject(ctx context.Context, userID string) (string, error) {
+	s.researchCacheMu.RLock()
+	if id, ok := s.researchCache[userID]; ok {
+		s.researchCacheMu.RUnlock()
+		return id, nil
+	}
+	s.researchCacheMu.RUnlock()
+
+	p, err := s.cfg.ProjectService.GetBySlug(ctx, userID, ResearchProject)
+	if err == nil {
+		s.researchCacheMu.Lock()
+		s.researchCache[userID] = p.ID
+		s.researchCacheMu.Unlock()
+		return p.ID, nil
+	}
+
+	if !errors.Is(err, project.ErrNotFound) {
+		return "", fmt.Errorf("agent.Service.ensureResearchProject: %w", err)
+	}
+
+	p, err = s.cfg.ProjectService.Create(ctx, userID, "research", "Research lab notebooks")
+	if err != nil {
+		if errors.Is(err, project.ErrSlugExists) {
+			p, err = s.cfg.ProjectService.GetBySlug(ctx, userID, ResearchProject)
+			if err != nil {
+				return "", fmt.Errorf("agent.Service.ensureResearchProject: get after race: %w", err)
+			}
+		} else {
+			return "", fmt.Errorf("agent.Service.ensureResearchProject: create: %w", err)
+		}
+	}
+
+	s.researchCacheMu.Lock()
+	s.researchCache[userID] = p.ID
+	s.researchCacheMu.Unlock()
 	return p.ID, nil
 }
 
@@ -571,6 +621,165 @@ func (s *Service) NotesCreate(ctx context.Context, userID, title, body, projectS
 	})
 
 	return n, nil
+}
+
+// NotesUpdate updates a user note. Accepts a project slug (resolved to ID internally).
+// Pass nil pointers for fields that should not change.
+func (s *Service) NotesUpdate(ctx context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error) {
+	req := note.UpdateNoteReq{
+		Title: title,
+		Body:  body,
+		Tags:  tags,
+	}
+
+	// Resolve project slug to ID if provided.
+	if projectSlug != nil {
+		if *projectSlug == "" {
+			// Empty string means move to inbox (no project).
+			empty := ""
+			req.ProjectID = &empty
+		} else {
+			p, err := s.cfg.ProjectService.GetBySlug(ctx, userID, *projectSlug)
+			if err != nil {
+				return nil, fmt.Errorf("agent.Service.NotesUpdate: resolve project: %w", err)
+			}
+			req.ProjectID = &p.ID
+		}
+	}
+
+	n, err := s.cfg.NoteService.Update(ctx, userID, noteID, req)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesUpdate: %w", err)
+	}
+
+	s.enqueueEmbedWithScope(ctx, userID, n.ID, "user")
+
+	s.notifyWS(userID, "agent.note_updated", map[string]string{
+		"note_id": n.ID,
+		"title":   n.Title,
+	})
+
+	return n, nil
+}
+
+// NotesDelete deletes a user note by ID.
+func (s *Service) NotesDelete(ctx context.Context, userID, noteID string) error {
+	if err := s.cfg.NoteService.Delete(ctx, userID, noteID); err != nil {
+		return fmt.Errorf("agent.Service.NotesDelete: %w", err)
+	}
+
+	s.enqueueDeleteEmbed(ctx, userID, noteID)
+
+	s.notifyWS(userID, "agent.note_deleted", map[string]string{
+		"note_id": noteID,
+	})
+
+	return nil
+}
+
+// NotesTags lists all tags with usage counts.
+func (s *Service) NotesTags(ctx context.Context, userID string) ([]note.TagCount, error) {
+	tags, err := s.cfg.NoteService.ListTags(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesTags: %w", err)
+	}
+	return tags, nil
+}
+
+// NotesDaily returns today's daily note, creating it if it does not exist.
+func (s *Service) NotesDaily(ctx context.Context, userID string, date time.Time) (*note.Note, error) {
+	n, err := s.cfg.NoteService.GetOrCreateDaily(ctx, userID, date)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesDaily: %w", err)
+	}
+	return n, nil
+}
+
+// ProjectList lists all projects for the user.
+func (s *Service) ProjectList(ctx context.Context, userID string) ([]*project.Project, error) {
+	projects, err := s.cfg.ProjectService.List(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.ProjectList: %w", err)
+	}
+	return projects, nil
+}
+
+// ProjectCreate creates a new project.
+func (s *Service) ProjectCreate(ctx context.Context, userID, name, description string) (*project.Project, error) {
+	p, err := s.cfg.ProjectService.Create(ctx, userID, name, description)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.ProjectCreate: %w", err)
+	}
+
+	s.notifyWS(userID, "agent.project_created", map[string]string{
+		"project_id": p.ID,
+		"name":       p.Name,
+		"slug":       p.Slug,
+	})
+
+	return p, nil
+}
+
+// NotesAppend appends timestamped text to a note's body.
+func (s *Service) NotesAppend(ctx context.Context, userID, noteID, text string) (*note.Note, error) {
+	n, err := s.cfg.NoteService.AppendToNote(ctx, userID, noteID, text)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesAppend: %w", err)
+	}
+
+	s.enqueueEmbedWithScope(ctx, userID, n.ID, "user")
+
+	s.notifyWS(userID, "agent.note_appended", map[string]string{
+		"note_id": n.ID,
+		"title":   n.Title,
+	})
+
+	return n, nil
+}
+
+// NotesChangelog returns notes modified within a date range, sorted by modification time.
+func (s *Service) NotesChangelog(ctx context.Context, userID string, since, until time.Time, limit int) ([]*note.Note, int, error) {
+	filter := note.NoteFilter{
+		Since:       since,
+		Until:       until,
+		Sort:        "modified",
+		SortDir:     "desc",
+		Limit:       limit,
+		ExcludeBody: true,
+	}
+
+	notes, total, err := s.cfg.NoteService.List(ctx, userID, filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("agent.Service.NotesChangelog: %w", err)
+	}
+	return notes, total, nil
+}
+
+// NotesVersions lists version history for a note.
+func (s *Service) NotesVersions(ctx context.Context, userID, noteID string, limit int) ([]*note.NoteVersion, int, error) {
+	versions, total, err := s.cfg.NoteService.ListVersions(ctx, userID, noteID, limit, 0)
+	if err != nil {
+		return nil, 0, fmt.Errorf("agent.Service.NotesVersions: %w", err)
+	}
+	return versions, total, nil
+}
+
+// NotesGetVersion returns a specific past version of a note.
+func (s *Service) NotesGetVersion(ctx context.Context, userID, noteID string, version int) (*note.NoteVersion, error) {
+	v, err := s.cfg.NoteService.GetVersion(ctx, userID, noteID, version)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesGetVersion: %w", err)
+	}
+	return v, nil
+}
+
+// NotesBacklinks returns all notes that link to the given note.
+func (s *Service) NotesBacklinks(ctx context.Context, userID, noteID string) ([]*note.Note, error) {
+	notes, err := s.cfg.NoteService.GetBacklinks(ctx, userID, noteID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.NotesBacklinks: %w", err)
+	}
+	return notes, nil
 }
 
 // --- Tool Call Audit ---
@@ -1104,6 +1313,468 @@ func (s *Service) notifyWS(userID, eventType string, payload interface{}) {
 		return
 	}
 	s.cfg.WSNotifier.SendAgentEvent(userID, eventType, payload)
+}
+
+// --- Research Lab ---
+
+// LabOpen creates a new research lab or resumes an existing one.
+// Returns lab info with session briefing and past trial summaries.
+func (s *Service) LabOpen(ctx context.Context, userID, name, problem, domain string, tags []string) (*LabInfo, error) {
+	if err := ValidateLabName(name); err != nil {
+		return nil, err
+	}
+
+	projectID, err := s.ensureResearchProject(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.LabOpen: %w", err)
+	}
+
+	sessionName := LabSessionName(name)
+
+	// Try to find existing lab notebook.
+	notebookID, findErr := s.findLabNote(ctx, userID, projectID, name, "Lab Notebook:")
+	if findErr != nil && !errors.Is(findErr, ErrNotFound) {
+		return nil, fmt.Errorf("agent.Service.LabOpen: %w", findErr)
+	}
+
+	info := &LabInfo{
+		SessionName: sessionName,
+		Domain:      domain,
+		Problem:     problem,
+	}
+
+	if findErr == nil {
+		// Resume: load existing notebook and trials.
+		info.NotebookNoteID = notebookID
+		info.Status = "resumed"
+
+		trials, trialErr := s.listLabTrials(ctx, userID, projectID, name)
+		if trialErr != nil {
+			return nil, fmt.Errorf("agent.Service.LabOpen: list trials: %w", trialErr)
+		}
+		info.Trials = trials
+	} else {
+		// New lab: create notebook note.
+		now := time.Now().Format("2006-01-02")
+		body := "# Lab: " + name + "\n\n" +
+			"**Problem:** " + problem + "\n" +
+			"**Domain:** " + domain + "\n" +
+			"**Started:** " + now + "\n\n" +
+			"## Timeline\n"
+
+		allTags := LabTags(name, domain)
+		allTags = append(allTags, tags...)
+
+		n, createErr := s.cfg.NoteService.Create(ctx, userID, note.CreateNoteReq{
+			Title:     LabNotebookTitle(name),
+			Body:      body,
+			ProjectID: projectID,
+			Tags:      allTags,
+		})
+		if createErr != nil {
+			return nil, fmt.Errorf("agent.Service.LabOpen: create notebook: %w", createErr)
+		}
+		info.NotebookNoteID = n.ID
+		info.Status = "created"
+		s.enqueueEmbedWithScope(ctx, userID, n.ID, "user")
+	}
+
+	// Start or resume the parent session for briefing context.
+	briefing, sessErr := s.SessionStart(ctx, userID, sessionName, DefaultMaxContextChars)
+	if sessErr != nil {
+		return nil, fmt.Errorf("agent.Service.LabOpen: session: %w", sessErr)
+	}
+	info.Briefing = briefing
+
+	// Set the session plan to the problem statement if new.
+	if info.Status == "created" {
+		if _, planErr := s.SessionPlanSet(ctx, userID, sessionName, "## Problem\n\n"+problem+"\n\n## Domain\n\n"+domain); planErr != nil {
+			s.cfg.Logger.Warn("agent: failed to set lab session plan", "error", planErr)
+		}
+	}
+
+	return info, nil
+}
+
+// TrialRecord creates or updates a trial in a research lab.
+// If a trial with the same title exists in the lab, it updates it.
+// If outcome is provided, the trial session is ended with findings.
+func (s *Service) TrialRecord(ctx context.Context, userID, lab, title, changes, expected, actual, outcome, notes string) (*TrialSummary, error) {
+	if err := ValidateLabName(lab); err != nil {
+		return nil, err
+	}
+	if err := ValidateOutcome(outcome); err != nil {
+		return nil, err
+	}
+
+	projectID, err := s.ensureResearchProject(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.TrialRecord: %w", err)
+	}
+
+	slug := SlugifyTrialTitle(title)
+	trialSession := TrialSessionName(lab, slug)
+
+	// Determine domain from lab notebook tags.
+	domain := s.labDomain(ctx, userID, projectID, lab)
+
+	// Try to find existing trial note.
+	existingID, findErr := s.findLabNote(ctx, userID, projectID, lab, "Trial: "+title)
+	if findErr != nil && !errors.Is(findErr, ErrNotFound) {
+		return nil, fmt.Errorf("agent.Service.TrialRecord: %w", findErr)
+	}
+
+	summary := &TrialSummary{
+		Title:   title,
+		Outcome: OutcomePending,
+		Changes: changes,
+	}
+
+	if findErr == nil {
+		// Update existing trial.
+		existing, readErr := s.cfg.NoteService.Get(ctx, userID, existingID)
+		if readErr != nil {
+			return nil, fmt.Errorf("agent.Service.TrialRecord: read existing: %w", readErr)
+		}
+
+		body := s.updateTrialBody(existing.Body, actual, notes, outcome)
+		newTags := existing.Tags
+
+		if outcome != "" {
+			// Replace pending outcome or add outcome tag.
+			filtered := make([]string, 0, len(newTags)+1)
+			for _, t := range newTags {
+				if !strings.HasPrefix(t, "outcome:") {
+					filtered = append(filtered, t)
+				}
+			}
+			filtered = append(filtered, "outcome:"+outcome)
+			newTags = filtered
+			summary.Outcome = outcome
+		}
+
+		if _, updateErr := s.cfg.NoteService.Update(ctx, userID, existingID, note.UpdateNoteReq{
+			Body: &body,
+			Tags: &newTags,
+		}); updateErr != nil {
+			return nil, fmt.Errorf("agent.Service.TrialRecord: update: %w", updateErr)
+		}
+
+		summary.NoteID = existingID
+		summary.Expected = expected
+		summary.Actual = actual
+		summary.Notes = notes
+		summary.UpdatedAt = time.Now()
+
+		s.enqueueEmbedWithScope(ctx, userID, existingID, "user")
+
+		// End the child session if outcome is provided.
+		if outcome != "" {
+			findings := "[" + outcome + "] " + title
+			if actual != "" {
+				findings += ": " + actual
+			}
+			if len(findings) > MaxFindingsChars {
+				findings = findings[:MaxFindingsChars]
+			}
+			if endErr := s.SessionEnd(ctx, userID, trialSession, findings); endErr != nil {
+				s.cfg.Logger.Warn("agent: failed to end trial session", "session", trialSession, "error", endErr)
+			}
+		}
+	} else {
+		// Create new trial.
+		// Start child session under the lab.
+		if _, sessErr := s.SessionStart(ctx, userID, trialSession, DefaultMaxContextChars); sessErr != nil {
+			s.cfg.Logger.Warn("agent: failed to start trial session", "session", trialSession, "error", sessErr)
+		}
+
+		now := time.Now().Format("2006-01-02")
+		outcomeDisplay := OutcomePending
+		if outcome != "" {
+			outcomeDisplay = outcome
+		}
+
+		body := "# Trial: " + title + "\n\n" +
+			"**Lab:** " + lab + "\n" +
+			"**Date:** " + now + "\n" +
+			"**Outcome:** " + outcomeDisplay + "\n\n" +
+			"## Changes\n\n" + changes + "\n\n" +
+			"## Expected\n\n" + expected + "\n\n" +
+			"## Actual\n\n" + actual + "\n\n" +
+			"## Notes\n\n" + notes + "\n"
+
+		trialTags := TrialTags(lab, domain)
+		if outcome != "" {
+			trialTags = append(trialTags, "outcome:"+outcome)
+			summary.Outcome = outcome
+		}
+
+		n, createErr := s.cfg.NoteService.Create(ctx, userID, note.CreateNoteReq{
+			Title:     TrialNoteTitle(title),
+			Body:      body,
+			ProjectID: projectID,
+			Tags:      trialTags,
+		})
+		if createErr != nil {
+			return nil, fmt.Errorf("agent.Service.TrialRecord: create: %w", createErr)
+		}
+
+		summary.NoteID = n.ID
+		summary.Expected = expected
+		summary.Actual = actual
+		summary.Notes = notes
+		summary.UpdatedAt = n.UpdatedAt
+
+		s.enqueueEmbedWithScope(ctx, userID, n.ID, "user")
+
+		// End child session immediately if outcome provided on creation.
+		if outcome != "" {
+			findings := "[" + outcome + "] " + title
+			if actual != "" {
+				findings += ": " + actual
+			}
+			if len(findings) > MaxFindingsChars {
+				findings = findings[:MaxFindingsChars]
+			}
+			if endErr := s.SessionEnd(ctx, userID, trialSession, findings); endErr != nil {
+				s.cfg.Logger.Warn("agent: failed to end trial session", "session", trialSession, "error", endErr)
+			}
+		}
+	}
+
+	// Append summary line to lab notebook.
+	notebookID, nbErr := s.findLabNote(ctx, userID, projectID, lab, "Lab Notebook:")
+	if nbErr == nil {
+		outcomeLabel := "running"
+		if outcome != "" {
+			outcomeLabel = outcome
+		}
+		changesPreview := changes
+		if len(changesPreview) > 80 {
+			changesPreview = changesPreview[:80] + "..."
+		}
+		line := "- [" + outcomeLabel + "] **" + title + "**: " + changesPreview
+		if _, appendErr := s.cfg.NoteService.AppendToNote(ctx, userID, notebookID, line); appendErr != nil {
+			s.cfg.Logger.Warn("agent: failed to append to lab notebook", "error", appendErr)
+		}
+	}
+
+	return summary, nil
+}
+
+// DecisionRecord creates a decision note in a research lab.
+func (s *Service) DecisionRecord(ctx context.Context, userID, lab, title, rationale, basedOn, nextSteps string) (*DecisionInfo, error) {
+	if err := ValidateLabName(lab); err != nil {
+		return nil, err
+	}
+
+	projectID, err := s.ensureResearchProject(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.DecisionRecord: %w", err)
+	}
+
+	domain := s.labDomain(ctx, userID, projectID, lab)
+	now := time.Now().Format("2006-01-02")
+
+	body := "# Decision: " + title + "\n\n" +
+		"**Lab:** " + lab + "\n" +
+		"**Date:** " + now + "\n\n" +
+		"## Rationale\n\n" + rationale + "\n\n" +
+		"## Based On\n\n" + basedOn + "\n\n" +
+		"## Next Steps\n\n" + nextSteps + "\n"
+
+	n, createErr := s.cfg.NoteService.Create(ctx, userID, note.CreateNoteReq{
+		Title:     DecisionNoteTitle(title),
+		Body:      body,
+		ProjectID: projectID,
+		Tags:      DecisionTags(lab, domain),
+	})
+	if createErr != nil {
+		return nil, fmt.Errorf("agent.Service.DecisionRecord: create: %w", createErr)
+	}
+
+	s.enqueueEmbedWithScope(ctx, userID, n.ID, "user")
+
+	// Append to lab notebook.
+	notebookID, nbErr := s.findLabNote(ctx, userID, projectID, lab, "Lab Notebook:")
+	if nbErr == nil {
+		preview := rationale
+		if len(preview) > 80 {
+			preview = preview[:80] + "..."
+		}
+		line := "- **Decision: " + title + "** -- " + preview
+		if _, appendErr := s.cfg.NoteService.AppendToNote(ctx, userID, notebookID, line); appendErr != nil {
+			s.cfg.Logger.Warn("agent: failed to append decision to lab notebook", "error", appendErr)
+		}
+	}
+
+	return &DecisionInfo{Title: title, NoteID: n.ID}, nil
+}
+
+// TrialQuery lists trials in a lab, optionally filtered by outcome.
+func (s *Service) TrialQuery(ctx context.Context, userID, lab, query, outcome string, limit int) ([]TrialSummary, error) {
+	if err := ValidateLabName(lab); err != nil {
+		return nil, err
+	}
+	if err := ValidateOutcome(outcome); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	projectID, err := s.ensureResearchProject(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.TrialQuery: %w", err)
+	}
+
+	trials, trialErr := s.listLabTrials(ctx, userID, projectID, lab)
+	if trialErr != nil {
+		return nil, fmt.Errorf("agent.Service.TrialQuery: %w", trialErr)
+	}
+
+	// Filter by outcome.
+	if outcome != "" {
+		filtered := make([]TrialSummary, 0, len(trials))
+		for _, t := range trials {
+			if t.Outcome == outcome {
+				filtered = append(filtered, t)
+			}
+		}
+		trials = filtered
+	}
+
+	// Filter by query (simple substring match on title, changes, expected, actual, notes).
+	if query != "" {
+		q := strings.ToLower(query)
+		filtered := make([]TrialSummary, 0, len(trials))
+		for _, t := range trials {
+			if strings.Contains(strings.ToLower(t.Title), q) ||
+				strings.Contains(strings.ToLower(t.Changes), q) ||
+				strings.Contains(strings.ToLower(t.Expected), q) ||
+				strings.Contains(strings.ToLower(t.Actual), q) ||
+				strings.Contains(strings.ToLower(t.Notes), q) {
+				filtered = append(filtered, t)
+			}
+		}
+		trials = filtered
+	}
+
+	if len(trials) > limit {
+		trials = trials[:limit]
+	}
+
+	return trials, nil
+}
+
+// findLabNote finds a note in the research project by lab tag and title prefix.
+func (s *Service) findLabNote(ctx context.Context, userID, projectID, labName, titlePrefix string) (string, error) {
+	notes, _, err := s.cfg.NoteService.List(ctx, userID, note.NoteFilter{
+		ProjectID: projectID,
+		Tag:       "lab:" + labName,
+		Limit:     50,
+	})
+	if err != nil {
+		return "", fmt.Errorf("agent.Service.findLabNote: %w", err)
+	}
+
+	for _, n := range notes {
+		if strings.HasPrefix(n.Title, titlePrefix) {
+			return n.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("agent.Service.findLabNote: %w", ErrNotFound)
+}
+
+// listLabTrials returns all trial notes for a lab with parsed sections.
+func (s *Service) listLabTrials(ctx context.Context, userID, projectID, labName string) ([]TrialSummary, error) {
+	notes, _, err := s.cfg.NoteService.List(ctx, userID, note.NoteFilter{
+		ProjectID: projectID,
+		Tag:       "lab:" + labName,
+		Limit:     100,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent.Service.listLabTrials: %w", err)
+	}
+
+	var trials []TrialSummary
+	for _, n := range notes {
+		if !HasTag(n.Tags, "type:trial") {
+			continue
+		}
+		changes, expected, actual, trialNotes := ParseTrialSections(n.Body)
+		title := strings.TrimPrefix(n.Title, "Trial: ")
+		trials = append(trials, TrialSummary{
+			Title:     title,
+			NoteID:    n.ID,
+			Outcome:   ExtractOutcomeFromTags(n.Tags),
+			Changes:   changes,
+			Expected:  expected,
+			Actual:    actual,
+			Notes:     trialNotes,
+			UpdatedAt: n.UpdatedAt,
+		})
+	}
+
+	return trials, nil
+}
+
+// labDomain extracts the domain from a lab notebook's tags.
+// Returns empty string if the notebook is not found.
+func (s *Service) labDomain(ctx context.Context, userID, projectID, labName string) string {
+	notebookID, err := s.findLabNote(ctx, userID, projectID, labName, "Lab Notebook:")
+	if err != nil {
+		return ""
+	}
+	n, err := s.cfg.NoteService.Get(ctx, userID, notebookID)
+	if err != nil {
+		return ""
+	}
+	return ExtractDomainFromTags(n.Tags)
+}
+
+// updateTrialBody updates the Actual and Notes sections in a trial body.
+// Also updates the Outcome line in the header if outcome is provided.
+func (s *Service) updateTrialBody(body, actual, notes, outcome string) string {
+	sections := splitMarkdownSections(body)
+
+	// Find the header portion (everything before the first ## section).
+	header, _, _ := strings.Cut(body, "\n## ")
+
+	// Update outcome in header if provided.
+	if outcome != "" {
+		header = strings.Replace(header, "**Outcome:** pending", "**Outcome:** "+outcome, 1)
+		header = strings.Replace(header, "**Outcome:** "+OutcomePending, "**Outcome:** "+outcome, 1)
+	}
+
+	// Rebuild body with updated sections.
+	if actual != "" {
+		sections["Actual"] = "\n" + actual + "\n"
+	}
+	if notes != "" {
+		existing := strings.TrimSpace(sections["Notes"])
+		if existing != "" {
+			sections["Notes"] = "\n" + existing + "\n\n" + notes + "\n"
+		} else {
+			sections["Notes"] = "\n" + notes + "\n"
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(header)
+	for _, sectionName := range []string{"Changes", "Expected", "Actual", "Notes"} {
+		b.WriteString("\n\n## ")
+		b.WriteString(sectionName)
+		content := sections[sectionName]
+		if content == "" {
+			b.WriteString("\n\n")
+		} else {
+			b.WriteString(content)
+		}
+	}
+
+	return b.String()
 }
 
 // parseKnowledgeTitle extracts category and name from a knowledge note title.

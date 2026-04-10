@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -223,4 +224,232 @@ func KnowledgeTags(category string) []string {
 		"domain:" + category,
 		TagCreatedByAgent,
 	}
+}
+
+// --- Research Lab ---
+
+// ResearchProject is the slug of the project that holds lab notebooks and trials.
+const ResearchProject = "research"
+
+// LabSessionPrefix is the session name prefix for lab sessions.
+const LabSessionPrefix = "lab/"
+
+// Trial outcome constants.
+const (
+	OutcomeSuccess      = "success"
+	OutcomeFailure      = "failure"
+	OutcomePartial      = "partial"
+	OutcomeInconclusive = "inconclusive"
+	OutcomePending      = "pending"
+)
+
+// Domain errors for research lab.
+var (
+	ErrInvalidLabName = errors.New("invalid lab name")
+	ErrInvalidOutcome = errors.New("invalid outcome")
+)
+
+// LabInfo is the response from lab_open.
+type LabInfo struct {
+	SessionName    string         `json:"session_name"`
+	NotebookNoteID string         `json:"notebook_note_id"`
+	Problem        string         `json:"problem"`
+	Domain         string         `json:"domain"`
+	Status         string         `json:"status"`
+	Trials         []TrialSummary `json:"trials"`
+	Briefing       *Briefing      `json:"briefing,omitempty"`
+}
+
+// TrialSummary is the structured representation of a trial note.
+type TrialSummary struct {
+	Title     string    `json:"title"`
+	NoteID    string    `json:"note_id"`
+	Outcome   string    `json:"outcome"`
+	Changes   string    `json:"changes,omitempty"`
+	Expected  string    `json:"expected,omitempty"`
+	Actual    string    `json:"actual,omitempty"`
+	Notes     string    `json:"notes,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// DecisionInfo is the response from decision_record.
+type DecisionInfo struct {
+	Title  string `json:"title"`
+	NoteID string `json:"note_id"`
+}
+
+// LabSessionName returns the session name for a lab.
+func LabSessionName(name string) string {
+	return LabSessionPrefix + name
+}
+
+// TrialSessionName returns the child session name for a trial.
+func TrialSessionName(lab, slug string) string {
+	return LabSessionPrefix + lab + "/" + slug
+}
+
+// LabNotebookTitle returns the note title for a lab notebook.
+func LabNotebookTitle(name string) string {
+	return "Lab Notebook: " + name
+}
+
+// TrialNoteTitle returns the note title for a trial.
+func TrialNoteTitle(title string) string {
+	return "Trial: " + title
+}
+
+// DecisionNoteTitle returns the note title for a decision.
+func DecisionNoteTitle(title string) string {
+	return "Decision: " + title
+}
+
+// LabTags returns the standard set of tags for a lab notebook note.
+func LabTags(name, domain string) []string {
+	return []string{
+		"type:lab-notebook",
+		"lab:" + name,
+		"domain:" + domain,
+		TagCreatedByAgent,
+	}
+}
+
+// TrialTags returns the standard set of tags for a trial note.
+func TrialTags(name, domain string) []string {
+	return []string{
+		"type:trial",
+		"lab:" + name,
+		"domain:" + domain,
+		TagCreatedByAgent,
+	}
+}
+
+// TrialTagsWithOutcome returns trial tags including the outcome.
+func TrialTagsWithOutcome(name, domain, outcome string) []string {
+	tags := TrialTags(name, domain)
+	return append(tags, "outcome:"+outcome)
+}
+
+// DecisionTags returns the standard set of tags for a decision note.
+func DecisionTags(name, domain string) []string {
+	return []string{
+		"type:decision",
+		"lab:" + name,
+		"domain:" + domain,
+		TagCreatedByAgent,
+	}
+}
+
+// labNameRe allows alphanumeric characters and hyphens.
+var labNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
+
+// ValidateLabName checks that a lab name is valid.
+func ValidateLabName(name string) error {
+	if name == "" {
+		return fmt.Errorf("agent.ValidateLabName: empty name: %w", ErrInvalidLabName)
+	}
+	if len(name) > 100 {
+		return fmt.Errorf("agent.ValidateLabName: name too long (%d chars, max 100): %w", len(name), ErrInvalidLabName)
+	}
+	if !labNameRe.MatchString(name) {
+		return fmt.Errorf("agent.ValidateLabName: invalid characters in %q (alphanumeric and hyphens only): %w", name, ErrInvalidLabName)
+	}
+	return nil
+}
+
+// ValidateOutcome checks that an outcome value is valid.
+// Empty string is allowed (means outcome not yet recorded).
+func ValidateOutcome(outcome string) error {
+	if outcome == "" {
+		return nil
+	}
+	switch outcome {
+	case OutcomeSuccess, OutcomeFailure, OutcomePartial, OutcomeInconclusive:
+		return nil
+	default:
+		return fmt.Errorf("agent.ValidateOutcome: %q is not a valid outcome (success/failure/partial/inconclusive): %w", outcome, ErrInvalidOutcome)
+	}
+}
+
+// SlugifyTrialTitle converts a trial title to a URL-safe slug for session names.
+func SlugifyTrialTitle(title string) string {
+	s := strings.ToLower(title)
+	var b strings.Builder
+	prevDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash && b.Len() > 0 {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	result := b.String()
+	result = strings.TrimRight(result, "-")
+	if len(result) > 80 {
+		result = result[:80]
+		result = strings.TrimRight(result, "-")
+	}
+	return result
+}
+
+// ParseTrialSections extracts structured fields from a trial note body.
+// It parses the markdown sections delimited by "## " headers.
+func ParseTrialSections(body string) (changes, expected, actual, notes string) {
+	sections := splitMarkdownSections(body)
+	changes = strings.TrimSpace(sections["Changes"])
+	expected = strings.TrimSpace(sections["Expected"])
+	actual = strings.TrimSpace(sections["Actual"])
+	notes = strings.TrimSpace(sections["Notes"])
+	return
+}
+
+// splitMarkdownSections splits a markdown body into a map of section name -> content.
+func splitMarkdownSections(body string) map[string]string {
+	result := make(map[string]string)
+	lines := strings.Split(body, "\n")
+	var currentSection string
+	var sectionLines []string
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## ") {
+			if currentSection != "" {
+				result[currentSection] = strings.Join(sectionLines, "\n")
+			}
+			currentSection = strings.TrimPrefix(line, "## ")
+			sectionLines = nil
+		} else if currentSection != "" {
+			sectionLines = append(sectionLines, line)
+		}
+	}
+	if currentSection != "" {
+		result[currentSection] = strings.Join(sectionLines, "\n")
+	}
+	return result
+}
+
+// ExtractOutcomeFromTags finds the outcome tag value from a tag slice.
+// Returns OutcomePending if no outcome tag is found.
+func ExtractOutcomeFromTags(tags []string) string {
+	for _, t := range tags {
+		if v, ok := strings.CutPrefix(t, "outcome:"); ok {
+			return v
+		}
+	}
+	return OutcomePending
+}
+
+// ExtractDomainFromTags finds the domain tag value from a tag slice.
+func ExtractDomainFromTags(tags []string) string {
+	for _, t := range tags {
+		if v, ok := strings.CutPrefix(t, "domain:"); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// HasTag checks whether a tag slice contains a specific tag.
+func HasTag(tags []string, tag string) bool {
+	return slices.Contains(tags, tag)
 }

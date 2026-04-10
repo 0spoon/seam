@@ -14,12 +14,19 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"golang.org/x/time/rate"
 
+	"crypto/subtle"
+
 	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/auth"
+	"github.com/katata/seam/internal/graph"
 	"github.com/katata/seam/internal/note"
+	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/review"
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/task"
+	"github.com/katata/seam/internal/template"
+	"github.com/katata/seam/internal/userdb"
 	"github.com/katata/seam/internal/webhook"
 )
 
@@ -50,6 +57,27 @@ type AgentService interface {
 	// V2: Memory search and session metrics.
 	MemorySearch(ctx context.Context, userID, query string, limit int) ([]agent.KnowledgeHit, error)
 	SessionMetrics(ctx context.Context, userID, sessionName string) (*agent.SessionMetrics, error)
+
+	// V3: Note update/delete, tags, daily, project management.
+	NotesUpdate(ctx context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error)
+	NotesDelete(ctx context.Context, userID, noteID string) error
+	NotesTags(ctx context.Context, userID string) ([]note.TagCount, error)
+	NotesDaily(ctx context.Context, userID string, date time.Time) (*note.Note, error)
+	ProjectList(ctx context.Context, userID string) ([]*project.Project, error)
+	ProjectCreate(ctx context.Context, userID, name, description string) (*project.Project, error)
+
+	// V4: Append, changelog, versions, backlinks.
+	NotesAppend(ctx context.Context, userID, noteID, text string) (*note.Note, error)
+	NotesChangelog(ctx context.Context, userID string, since, until time.Time, limit int) ([]*note.Note, int, error)
+	NotesVersions(ctx context.Context, userID, noteID string, limit int) ([]*note.NoteVersion, int, error)
+	NotesGetVersion(ctx context.Context, userID, noteID string, version int) (*note.NoteVersion, error)
+	NotesBacklinks(ctx context.Context, userID, noteID string) ([]*note.Note, error)
+
+	// V5: Research lab / experiment tracking.
+	LabOpen(ctx context.Context, userID, name, problem, domain string, tags []string) (*agent.LabInfo, error)
+	TrialRecord(ctx context.Context, userID, lab, title, changes, expected, actual, outcome, notes string) (*agent.TrialSummary, error)
+	DecisionRecord(ctx context.Context, userID, lab, title, rationale, basedOn, nextSteps string) (*agent.DecisionInfo, error)
+	TrialQuery(ctx context.Context, userID, lab, query, outcome string, limit int) ([]agent.TrialSummary, error)
 }
 
 // Default rate limit: 60 requests per minute per user with burst of 20.
@@ -62,6 +90,7 @@ const (
 type TaskService interface {
 	List(ctx context.Context, userID string, filter task.TaskFilter) ([]*task.Task, int, error)
 	Summary(ctx context.Context, userID string, filter task.TaskFilter) (*task.TaskSummary, error)
+	ToggleDone(ctx context.Context, userID, taskID string, done bool) error
 }
 
 // WebhookService defines the interface for the webhook service used by MCP tools.
@@ -71,13 +100,34 @@ type WebhookService interface {
 	Delete(ctx context.Context, userID, id string) error
 }
 
+// GraphService defines the interface for knowledge graph tools.
+type GraphService interface {
+	GetGraph(ctx context.Context, userID string, filter graph.GraphFilter) (*graph.Graph, error)
+	GetTwoHopBacklinks(ctx context.Context, userID, noteID string) ([]graph.TwoHopNode, error)
+	GetOrphanNotes(ctx context.Context, userID string) ([]graph.Node, error)
+}
+
+// ReviewService defines the interface for knowledge gardening tools.
+type ReviewService interface {
+	GetQueue(ctx context.Context, userID string, limit int) ([]review.ReviewItem, error)
+}
+
+// TemplateService defines the interface for note template tools.
+type TemplateService interface {
+	List(ctx context.Context, userID string) ([]template.TemplateMeta, error)
+	Apply(ctx context.Context, userID, name string, vars map[string]string) (string, error)
+}
+
 // Config holds dependencies for the MCP server.
 type Config struct {
-	AgentService   AgentService
-	TaskService    TaskService    // optional: task tracking tools
-	WebhookService WebhookService // optional: webhook management tools
-	ToolCallLogger ToolCallLogger // optional: persists tool call audits to DB
-	Logger         *slog.Logger
+	AgentService    AgentService
+	TaskService     TaskService     // optional: task tracking tools
+	WebhookService  WebhookService  // optional: webhook management tools
+	GraphService    GraphService    // optional: knowledge graph tools
+	ReviewService   ReviewService   // optional: knowledge gardening tools
+	TemplateService TemplateService // optional: note template tools
+	ToolCallLogger  ToolCallLogger  // optional: persists tool call audits to DB
+	Logger          *slog.Logger
 }
 
 // Server wraps an MCP server with agent tools.
@@ -136,7 +186,11 @@ func New(cfg Config) *Server {
 // Handler returns an http.Handler for mounting at /api/mcp on the chi router.
 // Auth is handled via WithHTTPContextFunc which extracts the JWT from the
 // Authorization header and injects user ID into the context.
-func (s *Server) Handler(jwtMgr *auth.JWTManager) http.Handler {
+//
+// When apiKey is non-empty, the handler also accepts a static bearer token
+// as an alternative to JWT. This is useful for AI coding agents that need
+// long-lived access without token refresh.
+func (s *Server) Handler(jwtMgr *auth.JWTManager, apiKey string) http.Handler {
 	return mcpserver.NewStreamableHTTPServer(s.mcp,
 		mcpserver.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			authHeader := r.Header.Get("Authorization")
@@ -144,7 +198,16 @@ func (s *Server) Handler(jwtMgr *auth.JWTManager) http.Handler {
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
 				return ctx
 			}
-			claims, err := jwtMgr.VerifyAccessToken(parts[1])
+			token := parts[1]
+
+			// Check static API key first (constant-time comparison).
+			if apiKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) == 1 {
+				ctx = reqctx.WithUserID(ctx, userdb.DefaultUserID)
+				ctx = reqctx.WithUsername(ctx, "mcp-api-key")
+				return ctx
+			}
+
+			claims, err := jwtMgr.VerifyAccessToken(token)
 			if err != nil {
 				return ctx
 			}

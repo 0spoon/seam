@@ -18,6 +18,7 @@ import (
 	"github.com/katata/seam/internal/auth"
 	seamcp "github.com/katata/seam/internal/mcp"
 	"github.com/katata/seam/internal/note"
+	"github.com/katata/seam/internal/project"
 	"github.com/katata/seam/internal/reqctx"
 	"github.com/katata/seam/internal/search"
 )
@@ -44,6 +45,21 @@ type mockAgentService struct {
 	notesCreateFn           func(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error)
 	memorySearchFn          func(ctx context.Context, userID, query string, limit int) ([]agent.KnowledgeHit, error)
 	sessionMetricsFn        func(ctx context.Context, userID, sessionName string) (*agent.SessionMetrics, error)
+	notesUpdateFn           func(ctx context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error)
+	notesDeleteFn           func(ctx context.Context, userID, noteID string) error
+	notesTagsFn             func(ctx context.Context, userID string) ([]note.TagCount, error)
+	notesDailyFn            func(ctx context.Context, userID string, date time.Time) (*note.Note, error)
+	projectListFn           func(ctx context.Context, userID string) ([]*project.Project, error)
+	projectCreateFn         func(ctx context.Context, userID, name, description string) (*project.Project, error)
+	notesAppendFn           func(ctx context.Context, userID, noteID, text string) (*note.Note, error)
+	notesChangelogFn        func(ctx context.Context, userID string, since, until time.Time, limit int) ([]*note.Note, int, error)
+	notesVersionsFn         func(ctx context.Context, userID, noteID string, limit int) ([]*note.NoteVersion, int, error)
+	notesGetVersionFn       func(ctx context.Context, userID, noteID string, version int) (*note.NoteVersion, error)
+	notesBacklinksFn        func(ctx context.Context, userID, noteID string) ([]*note.Note, error)
+	labOpenFn               func(ctx context.Context, userID, name, problem, domain string, tags []string) (*agent.LabInfo, error)
+	trialRecordFn           func(ctx context.Context, userID, lab, title, changes, expected, actual, outcome, notes string) (*agent.TrialSummary, error)
+	decisionRecordFn        func(ctx context.Context, userID, lab, title, rationale, basedOn, nextSteps string) (*agent.DecisionInfo, error)
+	trialQueryFn            func(ctx context.Context, userID, lab, query, outcome string, limit int) ([]agent.TrialSummary, error)
 }
 
 func (m *mockAgentService) SessionStart(ctx context.Context, userID, name string, maxContextChars int) (*agent.Briefing, error) {
@@ -172,6 +188,111 @@ func (m *mockAgentService) SessionMetrics(ctx context.Context, userID, sessionNa
 	return m.sessionMetricsFn(ctx, userID, sessionName)
 }
 
+func (m *mockAgentService) NotesUpdate(ctx context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error) {
+	if m.notesUpdateFn == nil {
+		panic("mockAgentService.NotesUpdate not implemented")
+	}
+	return m.notesUpdateFn(ctx, userID, noteID, title, body, projectSlug, tags)
+}
+
+func (m *mockAgentService) NotesDelete(ctx context.Context, userID, noteID string) error {
+	if m.notesDeleteFn == nil {
+		panic("mockAgentService.NotesDelete not implemented")
+	}
+	return m.notesDeleteFn(ctx, userID, noteID)
+}
+
+func (m *mockAgentService) NotesTags(ctx context.Context, userID string) ([]note.TagCount, error) {
+	if m.notesTagsFn == nil {
+		return []note.TagCount{}, nil
+	}
+	return m.notesTagsFn(ctx, userID)
+}
+
+func (m *mockAgentService) NotesDaily(ctx context.Context, userID string, date time.Time) (*note.Note, error) {
+	if m.notesDailyFn == nil {
+		panic("mockAgentService.NotesDaily not implemented")
+	}
+	return m.notesDailyFn(ctx, userID, date)
+}
+
+func (m *mockAgentService) ProjectList(ctx context.Context, userID string) ([]*project.Project, error) {
+	if m.projectListFn == nil {
+		return []*project.Project{}, nil
+	}
+	return m.projectListFn(ctx, userID)
+}
+
+func (m *mockAgentService) ProjectCreate(ctx context.Context, userID, name, description string) (*project.Project, error) {
+	if m.projectCreateFn == nil {
+		panic("mockAgentService.ProjectCreate not implemented")
+	}
+	return m.projectCreateFn(ctx, userID, name, description)
+}
+
+func (m *mockAgentService) NotesAppend(ctx context.Context, userID, noteID, text string) (*note.Note, error) {
+	if m.notesAppendFn == nil {
+		panic("mockAgentService.NotesAppend not implemented")
+	}
+	return m.notesAppendFn(ctx, userID, noteID, text)
+}
+
+func (m *mockAgentService) NotesChangelog(ctx context.Context, userID string, since, until time.Time, limit int) ([]*note.Note, int, error) {
+	if m.notesChangelogFn == nil {
+		return []*note.Note{}, 0, nil
+	}
+	return m.notesChangelogFn(ctx, userID, since, until, limit)
+}
+
+func (m *mockAgentService) NotesVersions(ctx context.Context, userID, noteID string, limit int) ([]*note.NoteVersion, int, error) {
+	if m.notesVersionsFn == nil {
+		return []*note.NoteVersion{}, 0, nil
+	}
+	return m.notesVersionsFn(ctx, userID, noteID, limit)
+}
+
+func (m *mockAgentService) NotesGetVersion(ctx context.Context, userID, noteID string, version int) (*note.NoteVersion, error) {
+	if m.notesGetVersionFn == nil {
+		panic("mockAgentService.NotesGetVersion not implemented")
+	}
+	return m.notesGetVersionFn(ctx, userID, noteID, version)
+}
+
+func (m *mockAgentService) NotesBacklinks(ctx context.Context, userID, noteID string) ([]*note.Note, error) {
+	if m.notesBacklinksFn == nil {
+		return []*note.Note{}, nil
+	}
+	return m.notesBacklinksFn(ctx, userID, noteID)
+}
+
+func (m *mockAgentService) LabOpen(ctx context.Context, userID, name, problem, domain string, tags []string) (*agent.LabInfo, error) {
+	if m.labOpenFn == nil {
+		panic("mockAgentService.LabOpen not implemented")
+	}
+	return m.labOpenFn(ctx, userID, name, problem, domain, tags)
+}
+
+func (m *mockAgentService) TrialRecord(ctx context.Context, userID, lab, title, changes, expected, actual, outcome, notes string) (*agent.TrialSummary, error) {
+	if m.trialRecordFn == nil {
+		panic("mockAgentService.TrialRecord not implemented")
+	}
+	return m.trialRecordFn(ctx, userID, lab, title, changes, expected, actual, outcome, notes)
+}
+
+func (m *mockAgentService) DecisionRecord(ctx context.Context, userID, lab, title, rationale, basedOn, nextSteps string) (*agent.DecisionInfo, error) {
+	if m.decisionRecordFn == nil {
+		panic("mockAgentService.DecisionRecord not implemented")
+	}
+	return m.decisionRecordFn(ctx, userID, lab, title, rationale, basedOn, nextSteps)
+}
+
+func (m *mockAgentService) TrialQuery(ctx context.Context, userID, lab, query, outcome string, limit int) ([]agent.TrialSummary, error) {
+	if m.trialQueryFn == nil {
+		panic("mockAgentService.TrialQuery not implemented")
+	}
+	return m.trialQueryFn(ctx, userID, lab, query, outcome, limit)
+}
+
 // newJWTManager creates a JWTManager for testing.
 func newJWTManager() *auth.JWTManager {
 	return auth.NewJWTManager("test-secret-key-for-mcp-tests", 1*time.Hour)
@@ -298,8 +419,21 @@ func TestNew_RegistersAllTools(t *testing.T) {
 		"notes_read",
 		"notes_list",
 		"notes_create",
+		"notes_update",
+		"notes_delete",
+		"notes_tags",
+		"notes_daily",
+		"notes_append",
+		"notes_changelog",
+		"notes_versions",
+		"project_list",
+		"project_create",
 		"memory_search",
 		"session_metrics",
+		"lab_open",
+		"trial_record",
+		"decision_record",
+		"trial_query",
 	}
 
 	require.Len(t, tools, len(expectedTools), "expected %d tools registered", len(expectedTools))
@@ -357,7 +491,7 @@ func TestHandler_ReturnsHTTPHandler(t *testing.T) {
 	srv := newServer(&mockAgentService{})
 	jwtMgr := newJWTManager()
 
-	handler := srv.Handler(jwtMgr)
+	handler := srv.Handler(jwtMgr, "")
 	require.NotNil(t, handler)
 
 	// Send a POST with invalid JSON to verify the handler processes it
@@ -384,7 +518,7 @@ func TestHandler_AuthExtraction_ValidJWT(t *testing.T) {
 	}
 	srv := newServer(mock)
 	jwtMgr := newJWTManager()
-	handler := srv.Handler(jwtMgr)
+	handler := srv.Handler(jwtMgr, "")
 
 	token, err := jwtMgr.GenerateAccessToken("user-abc", "testuser")
 	require.NoError(t, err)
@@ -411,7 +545,7 @@ func TestHandler_AuthExtraction_NoHeader_Unauthorized(t *testing.T) {
 	}
 	srv := newServer(mock)
 	jwtMgr := newJWTManager()
-	handler := srv.Handler(jwtMgr)
+	handler := srv.Handler(jwtMgr, "")
 
 	// Initialize session without auth (auth extraction sets no user ID).
 	sessionID := initMCPSession(t, handler, "")
@@ -432,7 +566,7 @@ func TestHandler_AuthExtraction_InvalidToken_Unauthorized(t *testing.T) {
 	}
 	srv := newServer(mock)
 	jwtMgr := newJWTManager()
-	handler := srv.Handler(jwtMgr)
+	handler := srv.Handler(jwtMgr, "")
 
 	authHeader := "Bearer invalid-token-garbage"
 
@@ -455,7 +589,7 @@ func TestHandler_AuthExtraction_WrongScheme_Unauthorized(t *testing.T) {
 	}
 	srv := newServer(mock)
 	jwtMgr := newJWTManager()
-	handler := srv.Handler(jwtMgr)
+	handler := srv.Handler(jwtMgr, "")
 
 	authHeader := "Basic dXNlcjpwYXNz"
 
@@ -467,6 +601,50 @@ func TestHandler_AuthExtraction_WrongScheme_Unauthorized(t *testing.T) {
 
 	require.Contains(t, respBody, "unauthorized",
 		"Basic auth scheme should produce unauthorized error, got: %s", respBody)
+}
+
+func TestHandler_AuthExtraction_StaticAPIKey(t *testing.T) {
+	mock := &mockAgentService{
+		sessionListFn: func(_ context.Context, userID, _ string, _ int) ([]*agent.Session, error) {
+			return []*agent.Session{
+				{ID: "s1", Name: "test-session", Status: "active"},
+			}, nil
+		},
+	}
+	srv := newServer(mock)
+	jwtMgr := newJWTManager()
+	apiKey := "test-static-api-key-1234567890abcdef"
+	handler := srv.Handler(jwtMgr, apiKey)
+
+	authHeader := "Bearer " + apiKey
+
+	sessionID := initMCPSession(t, handler, authHeader)
+
+	respBody := httpToolCall(t, handler, sessionID, authHeader, "session_list", map[string]any{})
+
+	require.NotContains(t, respBody, "unauthorized",
+		"valid API key should not produce unauthorized error, got: %s", respBody)
+}
+
+func TestHandler_AuthExtraction_WrongAPIKey_FallsThrough(t *testing.T) {
+	mock := &mockAgentService{
+		sessionListFn: func(context.Context, string, string, int) ([]*agent.Session, error) {
+			t.Fatal("service should not be called with wrong API key and no valid JWT")
+			return nil, nil
+		},
+	}
+	srv := newServer(mock)
+	jwtMgr := newJWTManager()
+	handler := srv.Handler(jwtMgr, "correct-key")
+
+	authHeader := "Bearer wrong-key"
+
+	sessionID := initMCPSession(t, handler, authHeader)
+
+	respBody := httpToolCall(t, handler, sessionID, authHeader, "session_list", map[string]any{})
+
+	require.Contains(t, respBody, "unauthorized",
+		"wrong API key (and no valid JWT) should produce unauthorized error, got: %s", respBody)
 }
 
 // --- Auth middleware tests via HandleMessage ---
@@ -552,6 +730,15 @@ func TestAuthCheckMiddleware_AllTools_Unauthorized(t *testing.T) {
 		{"notes_read", "notes_read", map[string]any{"id": "x"}},
 		{"notes_list", "notes_list", map[string]any{}},
 		{"notes_create", "notes_create", map[string]any{"title": "x", "body": "x"}},
+		{"notes_update", "notes_update", map[string]any{"id": "x", "title": "new"}},
+		{"notes_delete", "notes_delete", map[string]any{"id": "x"}},
+		{"notes_tags", "notes_tags", map[string]any{}},
+		{"notes_daily", "notes_daily", map[string]any{}},
+		{"notes_append", "notes_append", map[string]any{"id": "x", "text": "x"}},
+		{"notes_changelog", "notes_changelog", map[string]any{}},
+		{"notes_versions", "notes_versions", map[string]any{"id": "x"}},
+		{"project_list", "project_list", map[string]any{}},
+		{"project_create", "project_create", map[string]any{"name": "x"}},
 		{"memory_search", "memory_search", map[string]any{"query": "x"}},
 		{"session_metrics", "session_metrics", map[string]any{"session_name": "x"}},
 	}

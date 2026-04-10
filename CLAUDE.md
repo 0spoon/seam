@@ -186,6 +186,7 @@ Seam exposes an MCP server at `/api/mcp` that gives you persistent memory and ac
 - **Searching the user's notes** -- call `notes_search` or `context_gather` when the user references a topic, project, or idea that likely exists in their knowledge base. This is faster and more accurate than asking them to find it.
 - **Creating notes** -- use `notes_create` to capture work output (meeting summaries, research findings, decision records) as notes in the user's system. These are auto-tagged `created-by:agent`.
 - **Checking tasks** -- call `tasks_list` or `tasks_summary` to see what the user has on their plate before suggesting priorities or next steps.
+- **Research and debugging** -- use the research lab tools (`lab_open`, `trial_record`, `decision_record`, `trial_query`) for systematic engineering investigations. Open a lab, record trials with expected vs actual outcomes, and track decisions. Multiple agents can collaborate on the same lab via the session hierarchy. Activate with `/seam-research <lab-name> <problem>`.
 
 **When NOT to use it:**
 
@@ -193,7 +194,7 @@ Seam exposes an MCP server at `/api/mcp` that gives you persistent memory and ac
 - For ephemeral scratch work -- just think in-context.
 - For things the user just told you -- don't parrot it back into memory.
 
-**Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), webhooks (`webhook_*`), context search (`context_gather`). Full reference: `docs/mcp.md`.
+**Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), webhooks (`webhook_*`), research lab (`lab_open`, `trial_*`, `decision_*`), context search (`context_gather`). Full reference: `docs/mcp.md`.
 
 ## Key Files to Know
 

@@ -11,8 +11,16 @@ import (
 )
 
 func main() {
+	closer := initLogger()
+	defer closer()
+	// recoverAndLog runs before closer (LIFO), so a panic is logged
+	// into the file before it's closed. It also calls os.Exit, so
+	// when it fires the closer below does not run -- closer is only
+	// reached on the clean-exit path.
+	defer recoverAndLog()
+
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "seam: %v\n", err)
+		logError("fatal", err)
 		os.Exit(1)
 	}
 }
@@ -30,10 +38,10 @@ func run() error {
 	// bug and we keep running with whatever the package init set.
 	tuiCfg := ResolveTUIConfig(*themeFlag, *assistantThemeFlag)
 	if err := ApplyTheme(tuiCfg.Theme); err != nil {
-		fmt.Fprintf(os.Stderr, "seam: apply theme: %v\n", err)
+		logError("apply theme", err)
 	}
 	if err := ApplyAssistantTheme(tuiCfg.AssistantTheme); err != nil {
-		fmt.Fprintf(os.Stderr, "seam: apply assistant theme: %v\n", err)
+		logError("apply assistant theme", err)
 	}
 	activeKeymap = LoadKeymap(tuiCfg)
 

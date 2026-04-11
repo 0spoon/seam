@@ -212,12 +212,18 @@ run_darwin() {
             local banner="seamd"
             if [ "$has_chroma" = "yes" ]; then
                 files+=("$MAC_LOG_DIR/chroma.log" "$MAC_LOG_DIR/chroma.err.log")
-                banner="seamd + chroma"
+                banner="$banner + chroma"
             fi
+            # The TUI writes its structured log to the same dir on
+            # macOS (see cmd/seam/logger.go), so folding it into the
+            # tail stream is free -- tail -F tolerates missing files
+            # and picks them up when the TUI next runs.
+            files+=("$MAC_LOG_DIR/seam-tui.log")
+            banner="$banner + TUI"
             info "Tailing $banner logs in $MAC_LOG_DIR (Ctrl-C to exit)"
-            # tail -F tolerates files that don't exist yet and prints a
-            # header when output switches between files, so each line's
-            # origin stays obvious.
+            # tail -F prints a '==> file <==' header when output
+            # switches between files, so each line's origin stays
+            # obvious.
             exec tail -F "${files[@]}"
             ;;
         *)
@@ -267,8 +273,19 @@ run_linux() {
                 units+=(-u "$CHROMA_UNIT")
                 banner="$SEAMD_UNIT + $CHROMA_UNIT"
             fi
-            info "Tailing journal for $banner (Ctrl-C to exit)"
-            exec journalctl --user "${units[@]}" -f
+            # The TUI logs to a file under XDG_STATE_HOME because
+            # it isn't under systemd, so journalctl doesn't see it.
+            # We multiplex journalctl + tail -F in the background
+            # and clean both up on Ctrl-C.
+            local tui_log="${XDG_STATE_HOME:-$HOME/.local/state}/seam/seam-tui.log"
+            info "Tailing journal for $banner + TUI log at $tui_log (Ctrl-C to exit)"
+            # Ensure the parent dir exists so tail -F has somewhere to
+            # watch even if the TUI hasn't been run yet.
+            mkdir -p "$(dirname "$tui_log")"
+            trap 'kill $(jobs -p) 2>/dev/null || true' EXIT INT TERM
+            journalctl --user "${units[@]}" -f &
+            tail -F "$tui_log" 2>/dev/null &
+            wait
             ;;
         *)
             usage

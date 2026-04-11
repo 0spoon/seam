@@ -20,15 +20,23 @@ A block inside `CLAUDE.md` that tells a future agent:
 
 ### 1. Pre-flight: confirm Seam MCP is registered (and register it if not)
 
-First, check whether Seam is already registered with Claude Code:
+First, check whether Seam is already registered with Claude Code and, if so, at which scope. You want it at **user** scope so it is available in every project, not just the current directory. `claude mcp add` defaults to `local` and will silently drop the registration into `.mcp.json` of whichever directory you happen to be in — always pass `--scope user` explicitly (see 1d).
 
 ```bash
-claude mcp list 2>/dev/null | grep -i '^seam' && echo "SEAM_MCP_REGISTERED"
+claude mcp get seam 2>/dev/null | awk -F': ' '/^  Scope:/{print $2; exit}'
 ```
 
-If the output contains `SEAM_MCP_REGISTERED`, continue to step 2.
+Interpret the output:
 
-Otherwise, help the user register it. The MCP endpoint requires a static bearer token (API key). **Do not paste a placeholder** — try to auto-discover the real key from the user's machine in this order. You already have tool access, so use it directly instead of shelling everything.
+- **`User config`** — already registered at user scope. Continue to step 2.
+- **`Project config (shared via .mcp.json)`** or **`Local config ...`** (any non-user scope) — wrong scope. Tell the user you found Seam registered at the wrong scope and will migrate it to user scope. Remove the existing entry first, then fall through to step 1a to re-register it correctly:
+  ```bash
+  claude mcp remove seam
+  ```
+  (No `-s` flag — `claude mcp remove` removes from whichever scope the entry lives in.)
+- **Empty output** — not registered. Fall through to step 1a.
+
+To (re-)register it, you need a static bearer token (API key). **Do not paste a placeholder** — try to auto-discover the real key from the user's machine in this order. You already have tool access, so use it directly instead of shelling everything.
 
 #### 1a. Check the environment
 
@@ -77,10 +85,10 @@ Compute the MCP URL from `listen`:
 - If `listen` is empty or starts with `:` (bind-all), use `http://localhost${listen}/api/mcp`, defaulting to `http://localhost:8080/api/mcp` when `listen` is empty.
 - Otherwise use `http://${listen}/api/mcp`.
 
-Then register Seam with Claude Code, substituting the real values (do **not** leave placeholders):
+Then register Seam with Claude Code at **user scope** so it is available in every project (not just the directory you happen to be in right now). The `--scope user` flag is required — `claude mcp add` otherwise defaults to `local`, which ties the registration to the current project only. Substitute the real values (do **not** leave placeholders):
 
 ```bash
-claude mcp add --transport http seam "<mcp_url>" --header "Authorization: Bearer <api_key>"
+claude mcp add --scope user --transport http seam "<mcp_url>" --header "Authorization: Bearer <api_key>"
 ```
 
 Report the URL you registered (but not the raw key — just say "using the discovered API key" or "using the key you provided") and confirm the command succeeded before moving on. If the `claude mcp add` command fails, surface the error to the user and stop.

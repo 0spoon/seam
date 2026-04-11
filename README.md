@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>Where ideas connect.</strong><br/>
-  <em>The knowledge system your AI agents work inside.</em>
+  <em>Where your notes become your agents' context.</em>
 </p>
 
 <p align="center">

@@ -35,6 +35,7 @@ func run() error {
 	if err := ApplyAssistantTheme(tuiCfg.AssistantTheme); err != nil {
 		fmt.Fprintf(os.Stderr, "seam: apply assistant theme: %v\n", err)
 	}
+	activeKeymap = LoadKeymap(tuiCfg)
 
 	client := NewAPIClient(*serverURL)
 

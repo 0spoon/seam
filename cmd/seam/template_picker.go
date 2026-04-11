@@ -125,8 +125,8 @@ func (m templatePickerModel) Update(msg tea.Msg) (templatePickerModel, tea.Cmd) 
 
 	case tea.KeyPressMsg:
 		m.err = ""
-		switch msg.String() {
-		case "esc":
+		km := currentKeymap()
+		if km.Matches(msg, ActionTplPickerCancel) {
 			if m.phase == tplPhaseTitle {
 				// Go back to template list if we have templates.
 				if len(m.templates) > 0 {
@@ -159,20 +159,21 @@ func (m templatePickerModel) Update(msg tea.Msg) (templatePickerModel, tea.Cmd) 
 }
 
 func (m templatePickerModel) updateList(msg tea.KeyPressMsg) (templatePickerModel, tea.Cmd) {
-	switch msg.String() {
-	case "j", "down":
+	km := currentKeymap()
+	switch {
+	case km.Matches(msg, ActionTplPickerNavDown):
 		if m.cursor < len(m.templates)-1 {
 			m.cursor++
 		}
 		return m, nil
 
-	case "k", "up":
+	case km.Matches(msg, ActionTplPickerNavUp):
 		if m.cursor > 0 {
 			m.cursor--
 		}
 		return m, nil
 
-	case "enter":
+	case km.Matches(msg, ActionTplPickerSelect):
 		// Select this template and move to title input.
 		m.phase = tplPhaseTitle
 		return m, m.titleInput.Focus()
@@ -181,8 +182,8 @@ func (m templatePickerModel) updateList(msg tea.KeyPressMsg) (templatePickerMode
 }
 
 func (m templatePickerModel) updateTitle(msg tea.KeyPressMsg) (templatePickerModel, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
+	km := currentKeymap()
+	if km.Matches(msg, ActionTplPickerSelect) {
 		if m.applying {
 			return m, nil
 		}
@@ -261,7 +262,12 @@ func (m templatePickerModel) View() string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		help := styles.Muted.Render("j/k: navigate | Enter: select | Esc: cancel")
+		km := currentKeymap()
+		help := styles.Muted.Render(fmt.Sprintf("%s/%s: navigate | %s: select | %s: cancel",
+			km.Display(ActionTplPickerNavDown),
+			km.Display(ActionTplPickerNavUp),
+			km.Display(ActionTplPickerSelect),
+			km.Display(ActionTplPickerCancel)))
 		b.WriteString(help)
 
 	case tplPhaseTitle:
@@ -287,7 +293,10 @@ func (m templatePickerModel) View() string {
 		}
 
 		b.WriteString("\n")
-		help := styles.Muted.Render("Enter: create | Esc: back")
+		km := currentKeymap()
+		help := styles.Muted.Render(fmt.Sprintf("%s: create | %s: back",
+			km.Display(ActionTplPickerSelect),
+			km.Display(ActionTplPickerCancel)))
 		b.WriteString(help)
 	}
 

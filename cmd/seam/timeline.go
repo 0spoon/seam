@@ -125,28 +125,27 @@ func (m timelineModel) Update(msg tea.Msg) (timelineModel, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = ""
-		switch msg.String() {
-		case "q", "esc":
+		km := currentKeymap()
+		switch {
+		case km.Matches(msg, ActionTimelineBack):
 			m.done = true
 			return m, nil
 
-		case "]", "l":
-			// Next date group.
+		case km.Matches(msg, ActionTimelineGroupNext):
 			if m.groupIdx < len(m.groups)-1 {
 				m.groupIdx++
 				m.noteIdx = 0
 			}
 			return m, nil
 
-		case "[", "h":
-			// Previous date group.
+		case km.Matches(msg, ActionTimelineGroupPrev):
 			if m.groupIdx > 0 {
 				m.groupIdx--
 				m.noteIdx = 0
 			}
 			return m, nil
 
-		case "j", "down":
+		case km.Matches(msg, ActionTimelineNavDown):
 			if len(m.groups) > 0 {
 				g := m.groups[m.groupIdx]
 				if m.noteIdx < len(g.notes)-1 {
@@ -155,13 +154,13 @@ func (m timelineModel) Update(msg tea.Msg) (timelineModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "k", "up":
+		case km.Matches(msg, ActionTimelineNavUp):
 			if m.noteIdx > 0 {
 				m.noteIdx--
 			}
 			return m, nil
 
-		case "enter":
+		case km.Matches(msg, ActionTimelineOpenNote):
 			if len(m.groups) > 0 && m.groupIdx < len(m.groups) {
 				g := m.groups[m.groupIdx]
 				if m.noteIdx < len(g.notes) {
@@ -173,8 +172,7 @@ func (m timelineModel) Update(msg tea.Msg) (timelineModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "s":
-			// Toggle sort mode.
+		case km.Matches(msg, ActionTimelineToggleSort):
 			if m.sortMode == "modified" {
 				m.sortMode = "created"
 			} else {
@@ -218,7 +216,15 @@ func (m timelineModel) View() string {
 	title := fmt.Sprintf("Timeline (%s)", m.sortMode)
 	b.WriteString(headerStyle.Render(title))
 	b.WriteString("  ")
-	b.WriteString(dimStyle.Render("[/] dates  j/k notes  s toggle  enter open  q back"))
+	km := currentKeymap()
+	b.WriteString(dimStyle.Render(fmt.Sprintf("%s/%s dates  %s/%s notes  %s toggle  %s open  %s back",
+		km.Display(ActionTimelineGroupPrev),
+		km.Display(ActionTimelineGroupNext),
+		km.Display(ActionTimelineNavUp),
+		km.Display(ActionTimelineNavDown),
+		km.Display(ActionTimelineToggleSort),
+		km.Display(ActionTimelineOpenNote),
+		km.Display(ActionTimelineBack))))
 	b.WriteString("\n\n")
 
 	if len(m.groups) == 0 {

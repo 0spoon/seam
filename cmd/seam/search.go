@@ -145,24 +145,25 @@ func (m searchModel) Update(msg tea.Msg) (searchModel, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = ""
-		switch msg.String() {
-		case "esc":
+		km := currentKeymap()
+		switch {
+		case km.Matches(msg, ActionSearchBack):
 			m.done = true
 			return m, nil
 
-		case "down", "ctrl+n":
+		case km.Matches(msg, ActionSearchNextResult):
 			if m.resultIdx < len(m.results)-1 {
 				m.resultIdx++
 			}
 			return m, nil
 
-		case "up", "ctrl+p":
+		case km.Matches(msg, ActionSearchPrevResult):
 			if m.resultIdx > 0 {
 				m.resultIdx--
 			}
 			return m, nil
 
-		case "enter":
+		case km.Matches(msg, ActionSearchOpenResult):
 			if len(m.results) > 0 {
 				noteID := m.results[m.resultIdx].NoteID
 				return m, func() tea.Msg {
@@ -297,7 +298,12 @@ func (m searchModel) View() string {
 	}
 
 	// Status bar.
-	statusBar := styles.StatusBar.Width(m.width).Render("Enter: open | Up/Down: navigate | ?query: semantic | Esc: back")
+	km := currentKeymap()
+	statusBar := styles.StatusBar.Width(m.width).Render(fmt.Sprintf("%s: open | %s/%s: navigate | ?query: semantic | %s: back",
+		km.Display(ActionSearchOpenResult),
+		km.Display(ActionSearchNextResult),
+		km.Display(ActionSearchPrevResult),
+		km.Display(ActionSearchBack)))
 
 	content := b.String()
 	return lipgloss.JoinVertical(lipgloss.Left, header, content, statusBar)

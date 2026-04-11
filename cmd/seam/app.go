@@ -70,11 +70,12 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle global quit and logout.
 	if km, ok := msg.(tea.KeyPressMsg); ok {
+		// Ctrl+C is the emergency quit escape hatch and is never
+		// rebindable, so it bypasses the keymap entirely.
 		if km.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
-		// Ctrl+L to log out: clear tokens and return to login.
-		if km.String() == "ctrl+l" && m.screen != screenLogin {
+		if m.screen != screenLogin && currentKeymap().Matches(km, ActionGlobalLogout) {
 			_ = SaveAuth(&AuthData{})
 			m.client.AccessToken = ""
 			m.client.RefreshToken = ""

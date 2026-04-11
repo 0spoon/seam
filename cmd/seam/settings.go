@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -90,28 +91,29 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "esc":
+		km := currentKeymap()
+		switch {
+		case km.Matches(msg, ActionSettingsCancel):
 			// Revert preview to whatever was active on entry.
 			_ = ApplyTheme(m.originTheme)
 			_ = ApplyAssistantTheme(m.originAsst)
 			m.saved = true
 			return m, nil
 
-		case "enter":
-			// Persist current selections to disk.
-			cfg := TUIConfig{
-				Theme:          m.themes[m.themeIdx],
-				AssistantTheme: m.assistantOptions[m.assistIdx],
-			}
-			if err := SaveTUIConfig(cfg); err != nil {
+		case km.Matches(msg, ActionSettingsSave):
+			// Load the existing config first so we do not clobber user
+			// keybindings when saving the theme/assistant choice.
+			existing, _ := LoadTUIConfig()
+			existing.Theme = m.themes[m.themeIdx]
+			existing.AssistantTheme = m.assistantOptions[m.assistIdx]
+			if err := SaveTUIConfig(existing); err != nil {
 				m.status = "Save failed: " + err.Error()
 				return m, nil
 			}
 			m.saved = true
 			return m, nil
 
-		case "tab":
+		case km.Matches(msg, ActionSettingsSwitchCategory):
 			if m.category == catTheme {
 				m.category = catAssistant
 			} else {
@@ -119,10 +121,10 @@ func (m settingsModel) Update(msg tea.Msg) (settingsModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "j", "down":
+		case km.Matches(msg, ActionSettingsNavDown):
 			return m.cursorMove(+1), nil
 
-		case "k", "up":
+		case km.Matches(msg, ActionSettingsNavUp):
 			return m.cursorMove(-1), nil
 		}
 	}
@@ -218,7 +220,13 @@ func (m settingsModel) View() string {
 		b.WriteString(styles.Muted.Render(m.status))
 		b.WriteString("\n\n")
 	}
-	help := styles.Muted.Render("j/k: navigate | Tab: switch list | Enter: save | Esc: cancel")
+	km := currentKeymap()
+	help := styles.Muted.Render(fmt.Sprintf("%s/%s: navigate | %s: switch list | %s: save | %s: cancel",
+		km.Display(ActionSettingsNavDown),
+		km.Display(ActionSettingsNavUp),
+		km.Display(ActionSettingsSwitchCategory),
+		km.Display(ActionSettingsSave),
+		km.Display(ActionSettingsCancel)))
 	b.WriteString(help)
 
 	content := b.String()

@@ -21,6 +21,12 @@ type TUIConfig struct {
 	// "mario" (the historical default) or AssistantInheritName
 	// ("follow_global") to use the active global theme.
 	AssistantTheme string `yaml:"assistant_theme"`
+	// Keybindings maps action IDs (e.g. "editor.save") to a list of key
+	// strings that should trigger the action. Any action omitted keeps
+	// its built-in default. An empty list unbinds the action entirely.
+	// Validation happens in LoadKeymap: unknown actions and invalid
+	// keys are warned to stderr but never block TUI startup.
+	Keybindings map[string][]string `yaml:"keybindings,omitempty"`
 }
 
 // DefaultTUIConfig returns the built-in default config. Used when no
@@ -79,6 +85,10 @@ func LoadTUIConfig() (TUIConfig, error) {
 			fmt.Fprintf(os.Stderr, "seam: unknown assistant_theme %q in tui.yaml, using default\n", loaded.AssistantTheme)
 		}
 	}
+	// Keybindings passes through unchanged; LoadKeymap does per-entry
+	// validation and emits warnings there so messages reference action
+	// IDs instead of top-level TUIConfig fields.
+	cfg.Keybindings = loaded.Keybindings
 	return cfg, nil
 }
 

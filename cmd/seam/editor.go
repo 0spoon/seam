@@ -136,11 +136,10 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m.err = ""
 		m.status = ""
+		km := currentKeymap()
 
-		// Match save shortcut. Alt+S (Option+S on Mac) is used instead of
-		// Ctrl+S because Ctrl+S is intercepted by tmux and terminal flow
-		// control. F2 is kept as a fallback.
-		if msg.String() == "alt+s" || msg.String() == "f2" {
+		switch {
+		case km.Matches(msg, ActionEditorSave):
 			if m.saving {
 				return m, nil
 			}
@@ -161,10 +160,8 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 				}
 				return noteSavedMsg{}
 			}
-		}
 
-		switch msg.String() {
-		case "esc":
+		case km.Matches(msg, ActionEditorBack):
 			if m.editingTitle {
 				// Exit title editing, return focus to body.
 				m.editingTitle = false
@@ -181,8 +178,7 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 			m.done = true
 			return m, nil
 
-		case "ctrl+t":
-			// Toggle title editing.
+		case km.Matches(msg, ActionEditorToggleTitle):
 			m.editingTitle = !m.editingTitle
 			if m.editingTitle {
 				m.body.Blur()
@@ -193,17 +189,19 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 			m.body.Focus()
 			return m, nil
 
-		case "ctrl+a":
-			// Open AI assist command palette.
-			// Get the current selection from the textarea (if any).
+		case km.Matches(msg, ActionEditorAIAssist):
 			selection := m.getSelection()
 			m.showAIAssist = true
 			m.aiAssistModel = newAIAssistModel(m.client, m.noteID, selection, m.width, m.height)
 			return m, m.aiAssistModel.Init()
 		}
 
-		// Any key other than Esc resets the discard confirmation.
-		m.confirmDiscard = false
+		// Any key not matching ActionEditorBack resets the discard
+		// confirmation so two unrelated keypresses cannot accidentally
+		// trigger "discard on second esc".
+		if !km.Matches(msg, ActionEditorBack) {
+			m.confirmDiscard = false
+		}
 	}
 
 	// Update the active input (title or body).
@@ -295,7 +293,12 @@ func (m editorModel) View() string {
 	if m.status != "" {
 		statusParts = append(statusParts, styles.Success.Render(m.status))
 	}
-	statusParts = append(statusParts, styles.Muted.Render("Alt+S/F2: save | Ctrl+T: title | Ctrl+A: AI | Esc: back"))
+	km := currentKeymap()
+	statusParts = append(statusParts, styles.Muted.Render(fmt.Sprintf("%s: save | %s: title | %s: AI | %s: back",
+		km.Display(ActionEditorSave),
+		km.Display(ActionEditorToggleTitle),
+		km.Display(ActionEditorAIAssist),
+		km.Display(ActionEditorBack))))
 	statusBar := styles.StatusBar.Width(m.width).Render(strings.Join(statusParts, "  |  "))
 
 	parts := []string{titleView, bodyView}

@@ -125,6 +125,52 @@ func TestResolveTUIConfig_Precedence(t *testing.T) {
 	})
 }
 
+func TestLoadTUIConfig_KeybindingsRoundTrip(t *testing.T) {
+	tmp := withTempHome(t)
+	dir := filepath.Join(tmp, ".config", "seam")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	yamlBytes := []byte(`theme: catppuccin-mocha
+keybindings:
+  editor.save:
+    - ctrl+w
+    - ctrl+s
+  main.delete_note: []
+`)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "tui.yaml"), yamlBytes, 0o600))
+
+	cfg, err := LoadTUIConfig()
+	require.NoError(t, err)
+	require.Equal(t, []string{"ctrl+w", "ctrl+s"}, cfg.Keybindings["editor.save"])
+	require.NotNil(t, cfg.Keybindings["main.delete_note"])
+	require.Empty(t, cfg.Keybindings["main.delete_note"])
+}
+
+func TestLoadTUIConfig_KeybindingsNullIsEmpty(t *testing.T) {
+	tmp := withTempHome(t)
+	dir := filepath.Join(tmp, ".config", "seam")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	yamlBytes := []byte("theme: catppuccin-mocha\nkeybindings: ~\n")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "tui.yaml"), yamlBytes, 0o600))
+
+	cfg, err := LoadTUIConfig()
+	require.NoError(t, err, "null keybindings should not fail")
+	require.Nil(t, cfg.Keybindings)
+}
+
+func TestLoadTUIConfig_KeybindingsInvalidTypeDoesNotFail(t *testing.T) {
+	tmp := withTempHome(t)
+	dir := filepath.Join(tmp, ".config", "seam")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	// keybindings should be a map but user wrote a string.
+	yamlBytes := []byte("theme: catppuccin-mocha\nkeybindings: \"nonsense\"\n")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "tui.yaml"), yamlBytes, 0o600))
+
+	cfg, err := LoadTUIConfig()
+	require.NoError(t, err, "invalid keybindings shape should fall back to defaults, not fail startup")
+	// The theme should still load since we keep going on partial parse errors.
+	_ = cfg
+}
+
 func TestSaveTUIConfig_AtomicReplacesExisting(t *testing.T) {
 	withTempHome(t)
 	require.NoError(t, SaveTUIConfig(TUIConfig{Theme: "seam", AssistantTheme: "mario"}))

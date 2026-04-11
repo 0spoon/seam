@@ -222,10 +222,13 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 // handleKey dispatches key presses.
 func (m askModel) handleKey(msg tea.KeyPressMsg) (askModel, tea.Cmd) {
 	m.err = ""
-	key := msg.String()
+	km := currentKeymap()
 
-	switch key {
-	case "esc":
+	// Actions that always run, regardless of modal state. These are
+	// intentionally checked before the pendingConfirm gate so the user
+	// can always back out of a confirmation, cancel a stream, or scroll.
+	switch {
+	case km.Matches(msg, ActionAskBack):
 		// Dismiss a pending confirmation first.
 		if m.pendingConfirm != nil {
 			m.pendingConfirm = nil
@@ -241,36 +244,39 @@ func (m askModel) handleKey(msg tea.KeyPressMsg) (askModel, tea.Cmd) {
 		m.done = true
 		return m, nil
 
-	case "ctrl+up":
+	case km.Matches(msg, ActionAskScrollUp):
 		if m.scrollY > 0 {
 			m.scrollY--
 		}
 		return m, nil
 
-	case "ctrl+down":
+	case km.Matches(msg, ActionAskScrollDown):
 		max := m.maxScroll()
 		if m.scrollY < max {
 			m.scrollY++
 		}
 		return m, nil
 
-	case "tab":
+	case km.Matches(msg, ActionAskFocusNextTool):
 		m.focusToolIdx = m.nextToolIdx(m.focusToolIdx, +1)
 		return m, nil
 
-	case "shift+tab":
+	case km.Matches(msg, ActionAskFocusPrevTool):
 		m.focusToolIdx = m.nextToolIdx(m.focusToolIdx, -1)
 		return m, nil
 	}
 
-	// Pending confirmation shortcuts.
+	// While a confirmation is pending, only the approve/reject shortcuts
+	// are allowed. Everything else is swallowed so a stray keystroke
+	// does not leak into the textarea and let the user keep typing as
+	// if nothing were pending.
 	if m.pendingConfirm != nil {
-		switch key {
-		case "a":
+		switch {
+		case km.Matches(msg, ActionAskApprove):
 			actionID := m.pendingConfirm.actionID
 			m.pendingConfirm = nil
 			return m.startResumeStream(actionID)
-		case "r":
+		case km.Matches(msg, ActionAskReject):
 			actionID := m.pendingConfirm.actionID
 			m.pendingConfirm = nil
 			return m, m.rejectAction(actionID)
@@ -278,8 +284,17 @@ func (m askModel) handleKey(msg tea.KeyPressMsg) (askModel, tea.Cmd) {
 		return m, nil
 	}
 
-	// Enter -- submit or expand.
-	if key == "enter" {
+	// Shift+Enter inserts a newline. Checked before ask.submit so
+	// terminals that disambiguate the two don't accidentally submit.
+	// Requires Kitty keyboard protocol; on terminals without it the
+	// event is indistinguishable from plain Enter and will submit.
+	if km.Matches(msg, ActionAskNewline) {
+		m.input.InsertRune('\n')
+		return m, nil
+	}
+
+	// Submit or expand a tool card.
+	if km.Matches(msg, ActionAskSubmit) {
 		// If a tool card is focused, toggle expansion instead of submitting.
 		if m.focusToolIdx >= 0 && m.focusToolIdx < len(m.turns) {
 			t := m.turns[m.focusToolIdx]
@@ -301,14 +316,6 @@ func (m askModel) handleKey(msg tea.KeyPressMsg) (askModel, tea.Cmd) {
 			return m, m.createConversationThenSend(query)
 		}
 		return m.startStream(query)
-	}
-
-	if key == "shift+enter" {
-		// Shift+Enter inserts a newline. Requires Kitty keyboard protocol
-		// for disambiguation from plain Enter; on terminals without it
-		// this falls through to submit.
-		m.input.InsertRune('\n')
-		return m, nil
 	}
 
 	// Pass through to textarea.
@@ -634,9 +641,18 @@ func (m askModel) View() string {
 		bottom = "\n " + m.input.View() + "\n"
 	}
 
+	km := currentKeymap()
 	statusBar := assistantStyles.StatusBar.
 		Width(m.width).
-		Render("Enter: send | Shift+Enter: newline | Tab/Shift+Tab: focus tool | Enter (on tool): expand | Ctrl+Up/Down: scroll | Esc: stop/back")
+		Render(fmt.Sprintf("%s: send | %s: newline | %s/%s: focus tool | %s (on tool): expand | %s/%s: scroll | %s: stop/back",
+			km.Display(ActionAskSubmit),
+			km.Display(ActionAskNewline),
+			km.Display(ActionAskFocusNextTool),
+			km.Display(ActionAskFocusPrevTool),
+			km.Display(ActionAskSubmit),
+			km.Display(ActionAskScrollUp),
+			km.Display(ActionAskScrollDown),
+			km.Display(ActionAskBack)))
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,

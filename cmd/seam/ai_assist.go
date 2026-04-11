@@ -75,24 +75,27 @@ func (m aiAssistModel) Update(msg tea.Msg) (aiAssistModel, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = ""
+		km := currentKeymap()
 
-		// If we have a result, handle insert/dismiss/scrolling.
+		// If we have a result, handle insert / dismiss / scrolling.
+		// ai_assist.primary and ai_assist.insert_alt both insert the
+		// result; ai_assist.cancel and ai_assist.dismiss_alt both close it.
 		if m.result != "" {
-			switch msg.String() {
-			case "enter", "y":
+			switch {
+			case km.Matches(msg, ActionAIAssistPrimary, ActionAIAssistInsertAlt):
 				m.applied = true
 				m.done = true
 				return m, nil
-			case "esc", "n":
+			case km.Matches(msg, ActionAIAssistCancel, ActionAIAssistDismissAlt):
 				m.done = true
 				return m, nil
-			case "j", "down":
+			case km.Matches(msg, ActionAIAssistNavDown):
 				maxScroll := m.resultMaxScroll()
 				if m.resultScroll < maxScroll {
 					m.resultScroll++
 				}
 				return m, nil
-			case "k", "up":
+			case km.Matches(msg, ActionAIAssistNavUp):
 				if m.resultScroll > 0 {
 					m.resultScroll--
 				}
@@ -101,24 +104,24 @@ func (m aiAssistModel) Update(msg tea.Msg) (aiAssistModel, tea.Cmd) {
 			return m, nil
 		}
 
-		switch msg.String() {
-		case "esc":
+		switch {
+		case km.Matches(msg, ActionAIAssistCancel):
 			m.done = true
 			return m, nil
 
-		case "j", "down":
+		case km.Matches(msg, ActionAIAssistNavDown):
 			if m.cursor < len(aiAssistActions)-1 {
 				m.cursor++
 			}
 			return m, nil
 
-		case "k", "up":
+		case km.Matches(msg, ActionAIAssistNavUp):
 			if m.cursor > 0 {
 				m.cursor--
 			}
 			return m, nil
 
-		case "enter":
+		case km.Matches(msg, ActionAIAssistPrimary):
 			if m.loading {
 				return m, nil
 			}
@@ -188,12 +191,22 @@ func (m aiAssistModel) View() string {
 		}
 		visible := lines[start:end]
 		b.WriteString(styles.Normal.Render(strings.Join(visible, "\n")))
+		km := currentKeymap()
 		if end < len(lines) {
-			b.WriteString("\n" + styles.Muted.Render(fmt.Sprintf("... (+%d more lines, j/k to scroll)", len(lines)-end)))
+			b.WriteString("\n" + styles.Muted.Render(fmt.Sprintf("... (+%d more lines, %s/%s to scroll)",
+				len(lines)-end,
+				km.Display(ActionAIAssistNavDown),
+				km.Display(ActionAIAssistNavUp))))
 		}
 		b.WriteString("\n\n")
 
-		help := styles.Muted.Render("Enter/y: insert | Esc/n: dismiss | j/k: scroll")
+		help := styles.Muted.Render(fmt.Sprintf("%s/%s: insert | %s/%s: dismiss | %s/%s: scroll",
+			km.Display(ActionAIAssistPrimary),
+			km.Display(ActionAIAssistInsertAlt),
+			km.Display(ActionAIAssistCancel),
+			km.Display(ActionAIAssistDismissAlt),
+			km.Display(ActionAIAssistNavDown),
+			km.Display(ActionAIAssistNavUp)))
 		b.WriteString(help)
 	} else if m.loading {
 		action := aiAssistActions[m.cursor].label
@@ -226,7 +239,12 @@ func (m aiAssistModel) View() string {
 		}
 
 		b.WriteString("\n")
-		help := styles.Muted.Render("j/k: navigate | Enter: run | Esc: cancel")
+		km := currentKeymap()
+		help := styles.Muted.Render(fmt.Sprintf("%s/%s: navigate | %s: run | %s: cancel",
+			km.Display(ActionAIAssistNavDown),
+			km.Display(ActionAIAssistNavUp),
+			km.Display(ActionAIAssistPrimary),
+			km.Display(ActionAIAssistCancel)))
 		b.WriteString(help)
 	}
 

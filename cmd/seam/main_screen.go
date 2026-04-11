@@ -162,15 +162,19 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = ""
-		// Any key other than "d" resets the delete confirmation.
-		if msg.String() != "d" {
+		km := currentKeymap()
+		// Any key that is not the delete action resets the confirmation.
+		// Using the keymap here (instead of a hardcoded "d" compare)
+		// means users who rebind main.delete_note don't silently lose
+		// the two-press confirm flow.
+		if !km.Matches(msg, ActionMainDeleteNote) {
 			m.confirmDelete = false
 		}
-		switch msg.String() {
-		case "q", "ctrl+c":
+		switch {
+		case km.Matches(msg, ActionMainQuit):
 			return m, tea.Quit
 
-		case "tab":
+		case km.Matches(msg, ActionMainSwitchPane):
 			if m.activePane == paneProjects {
 				m.activePane = paneNotes
 			} else {
@@ -178,7 +182,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "j", "down":
+		case km.Matches(msg, ActionMainNavDown):
 			if m.activePane == paneProjects {
 				if m.projectIdx < len(m.projects)-1 {
 					m.projectIdx++
@@ -193,7 +197,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "k", "up":
+		case km.Matches(msg, ActionMainNavUp):
 			if m.activePane == paneProjects {
 				if m.projectIdx > 0 {
 					m.projectIdx--
@@ -208,7 +212,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "enter":
+		case km.Matches(msg, ActionMainOpenNote):
 			if m.activePane == paneNotes && len(m.notes) > 0 {
 				note := m.notes[m.noteIdx]
 				return m, func() tea.Msg {
@@ -217,8 +221,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "c":
-			// Quick capture: open capture modal.
+		case km.Matches(msg, ActionMainCapture):
 			projectID := ""
 			if m.projectIdx < len(m.projects) {
 				projectID = m.projects[m.projectIdx].id
@@ -227,8 +230,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			m.captureModel = newCaptureModel(m.client, projectID, m.width, m.height)
 			return m, m.captureModel.Init()
 
-		case "n":
-			// Create note from template: open template picker.
+		case km.Matches(msg, ActionMainNewFromTpl):
 			projectID := ""
 			if m.projectIdx < len(m.projects) {
 				projectID = m.projects[m.projectIdx].id
@@ -237,43 +239,41 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			m.templatePickerModel = newTemplatePickerModel(m.client, projectID, m.width, m.height)
 			return m, m.templatePickerModel.Init()
 
-		case "u":
-			// URL capture: open URL input modal.
+		case km.Matches(msg, ActionMainURLCapture):
 			m.showURLCapture = true
 			m.urlCaptureModel = newURLCaptureModel(m.client, m.width, m.height)
 			return m, m.urlCaptureModel.Init()
 
-		case "v":
-			// Voice capture: open voice recording modal.
+		case km.Matches(msg, ActionMainVoiceCapture):
 			m.showVoiceCapture = true
 			m.voiceCaptureModel = newVoiceCaptureModel(m.client, m.width, m.height)
 			return m, m.voiceCaptureModel.Init()
 
-		case "/":
+		case km.Matches(msg, ActionMainSearch):
 			return m, func() tea.Msg {
 				return openSearchMsg{}
 			}
 
-		case "a":
+		case km.Matches(msg, ActionMainAsk):
 			return m, func() tea.Msg {
 				return openAskMsg{}
 			}
 
-		case "t":
+		case km.Matches(msg, ActionMainTimeline):
 			return m, func() tea.Msg {
 				return openTimelineMsg{}
 			}
 
-		case ",":
+		case km.Matches(msg, ActionMainSettings):
 			return m, func() tea.Msg {
 				return openSettingsMsg{}
 			}
 
-		case "d":
+		case km.Matches(msg, ActionMainDeleteNote):
 			if m.activePane == paneNotes && len(m.notes) > 0 {
 				if !m.confirmDelete {
 					m.confirmDelete = true
-					m.err = "Press d again to confirm delete"
+					m.err = fmt.Sprintf("Press %s again to confirm delete", km.Display(ActionMainDeleteNote))
 					return m, nil
 				}
 				m.confirmDelete = false
@@ -288,8 +288,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "ctrl+f":
-			// Next page.
+		case km.Matches(msg, ActionMainPageForward):
 			totalPages := m.totalPages()
 			if m.page < totalPages-1 {
 				m.page++
@@ -299,8 +298,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "ctrl+b":
-			// Previous page.
+		case km.Matches(msg, ActionMainPageBack):
 			if m.page > 0 {
 				m.page--
 				m.noteIdx = 0
@@ -309,7 +307,7 @@ func (m mainScreenModel) Update(msg tea.Msg) (mainScreenModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "r":
+		case km.Matches(msg, ActionMainReload):
 			m.loading = true
 			return m, m.loadProjects()
 		}
@@ -413,12 +411,28 @@ func (m mainScreenModel) View() string {
 	)
 
 	// Status bar.
+	km := currentKeymap()
 	pageInfo := ""
 	totalPages := m.totalPages()
 	if totalPages > 1 {
-		pageInfo = fmt.Sprintf(" | Page %d/%d (Ctrl+F/B)", m.page+1, totalPages)
+		pageInfo = fmt.Sprintf(" | Page %d/%d (%s/%s)", m.page+1, totalPages,
+			km.Display(ActionMainPageForward), km.Display(ActionMainPageBack))
 	}
-	statusText := "j/k: nav | Tab: pane | Enter: open | c: capture | n: template | u: URL | v: voice | /: search | a: ask | ,: settings | d: del | q: quit" + pageInfo
+	statusText := fmt.Sprintf("%s/%s: nav | %s: pane | %s: open | %s: capture | %s: template | %s: URL | %s: voice | %s: search | %s: ask | %s: settings | %s: del | %s: quit%s",
+		km.Display(ActionMainNavDown),
+		km.Display(ActionMainNavUp),
+		km.Display(ActionMainSwitchPane),
+		km.Display(ActionMainOpenNote),
+		km.Display(ActionMainCapture),
+		km.Display(ActionMainNewFromTpl),
+		km.Display(ActionMainURLCapture),
+		km.Display(ActionMainVoiceCapture),
+		km.Display(ActionMainSearch),
+		km.Display(ActionMainAsk),
+		km.Display(ActionMainSettings),
+		km.Display(ActionMainDeleteNote),
+		km.Display(ActionMainQuit),
+		pageInfo)
 	if m.err != "" {
 		statusText = styles.Error.Render(m.err)
 	}

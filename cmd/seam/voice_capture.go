@@ -117,8 +117,9 @@ func (m voiceCaptureModel) Update(msg tea.Msg) (voiceCaptureModel, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = ""
-		switch msg.String() {
-		case "esc":
+		km := currentKeymap()
+		switch {
+		case km.Matches(msg, ActionVoiceCancel):
 			if m.recording {
 				// Stop recording and cancel.
 				if m.cmd != nil && m.cmd.Process != nil {
@@ -133,7 +134,7 @@ func (m voiceCaptureModel) Update(msg tea.Msg) (voiceCaptureModel, tea.Cmd) {
 			m.done = true
 			return m, nil
 
-		case "enter", "space":
+		case km.Matches(msg, ActionVoiceToggleRecord):
 			if m.loading {
 				return m, nil
 			}
@@ -312,7 +313,10 @@ func (m voiceCaptureModel) View() string {
 		b.WriteString("\n\n")
 	}
 
-	help := styles.Muted.Render("Enter/Space: start/stop | Esc: cancel")
+	km := currentKeymap()
+	help := styles.Muted.Render(fmt.Sprintf("%s: start/stop | %s: cancel",
+		km.DisplayAll(ActionVoiceToggleRecord),
+		km.Display(ActionVoiceCancel)))
 	b.WriteString(help)
 
 	content := b.String()

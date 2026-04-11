@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -64,12 +65,13 @@ func (m urlCaptureModel) Update(msg tea.Msg) (urlCaptureModel, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = ""
-		switch msg.String() {
-		case "esc":
+		km := currentKeymap()
+		switch {
+		case km.Matches(msg, ActionURLCaptureCancel):
 			m.done = true
 			return m, nil
 
-		case "enter":
+		case km.Matches(msg, ActionURLCaptureSubmit):
 			if m.loading {
 				return m, nil
 			}
@@ -128,7 +130,10 @@ func (m urlCaptureModel) View() string {
 	}
 
 	b.WriteString("\n")
-	help := styles.Muted.Render("Enter: capture | Esc: cancel")
+	km := currentKeymap()
+	help := styles.Muted.Render(fmt.Sprintf("%s: capture | %s: cancel",
+		km.Display(ActionURLCaptureSubmit),
+		km.Display(ActionURLCaptureCancel)))
 	b.WriteString(help)
 
 	content := b.String()

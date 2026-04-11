@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -124,10 +125,10 @@ func (m loginModel) Update(msg tea.Msg) (loginModel, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = ""
-		switch msg.String() {
-		case "tab", "shift+tab", "down", "up":
+		km := currentKeymap()
+		switch {
+		case km.Matches(msg, ActionLoginNextField, ActionLoginPrevField):
 			fields := m.visibleFields()
-			// Find current index in the visible fields list.
 			curIdx := 0
 			for i, f := range fields {
 				if f == m.focused {
@@ -135,7 +136,7 @@ func (m loginModel) Update(msg tea.Msg) (loginModel, tea.Cmd) {
 					break
 				}
 			}
-			if msg.String() == "tab" || msg.String() == "down" {
+			if km.Matches(msg, ActionLoginNextField) {
 				curIdx = (curIdx + 1) % len(fields)
 			} else {
 				curIdx = (curIdx - 1 + len(fields)) % len(fields)
@@ -143,7 +144,7 @@ func (m loginModel) Update(msg tea.Msg) (loginModel, tea.Cmd) {
 			cmd := m.focusField(fields[curIdx])
 			return m, cmd
 
-		case "enter":
+		case km.Matches(msg, ActionLoginSubmit):
 			if m.loading {
 				return m, nil
 			}
@@ -184,7 +185,7 @@ func (m loginModel) Update(msg tea.Msg) (loginModel, tea.Cmd) {
 				return loginSuccessMsg{auth: resp}
 			}
 
-		case "ctrl+r":
+		case km.Matches(msg, ActionLoginToggleRegister):
 			m.register = !m.register
 			// If the focused field is email and we switched to login mode,
 			// move focus to password.
@@ -261,7 +262,11 @@ func (m loginModel) View() string {
 	}
 
 	b.WriteString("\n")
-	help := styles.Muted.Render("Enter: submit | Tab: next field | Ctrl+R: toggle login/register | Ctrl+C: quit")
+	km := currentKeymap()
+	help := styles.Muted.Render(fmt.Sprintf("%s: submit | %s: next field | %s: toggle login/register | Ctrl+C: quit",
+		km.Display(ActionLoginSubmit),
+		km.Display(ActionLoginNextField),
+		km.Display(ActionLoginToggleRegister)))
 	b.WriteString(help)
 
 	// Center the form in the terminal.

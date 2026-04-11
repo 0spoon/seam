@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -84,12 +85,13 @@ func (m captureModel) Update(msg tea.Msg) (captureModel, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.err = ""
-		switch msg.String() {
-		case "esc":
+		km := currentKeymap()
+		switch {
+		case km.Matches(msg, ActionCaptureCancel):
 			m.done = true
 			return m, nil
 
-		case "tab":
+		case km.Matches(msg, ActionCaptureSwitchField):
 			if m.focused == capFieldTitle {
 				m.focused = capFieldBody
 				m.titleInput.Blur()
@@ -101,7 +103,7 @@ func (m captureModel) Update(msg tea.Msg) (captureModel, tea.Cmd) {
 			}
 			return m, nil
 
-		case "alt+s":
+		case km.Matches(msg, ActionCaptureSave):
 			if m.loading {
 				return m, nil
 			}
@@ -169,7 +171,11 @@ func (m captureModel) View() string {
 	}
 
 	b.WriteString("\n")
-	help := styles.Muted.Render("Alt+S: save | Tab: switch field | Esc: cancel")
+	km := currentKeymap()
+	help := styles.Muted.Render(fmt.Sprintf("%s: save | %s: switch field | %s: cancel",
+		km.Display(ActionCaptureSave),
+		km.Display(ActionCaptureSwitchField),
+		km.Display(ActionCaptureCancel)))
 	b.WriteString(help)
 
 	content := b.String()

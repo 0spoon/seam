@@ -16,7 +16,7 @@ If you are new to the project, skim [`README.md`](README.md) first for the pitch
 Prerequisites, installation, and configuration walkthrough live in [`docs/getting-started.md`](docs/getting-started.md). The short version:
 
 ```bash
-git clone https://github.com/0x3k/seam.git
+git clone https://github.com/0spoon/seam.git
 cd seam
 make build   # builds bin/seamd, bin/seam, bin/seam-reindex
 make init    # interactive config (JWT secret, data dir, LLM provider, Chroma)

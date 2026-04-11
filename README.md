@@ -71,7 +71,7 @@ The [Librarian](docs/ai.md#librarian) is an autonomous background service that r
 ## Quick Start
 
 ```bash
-git clone https://github.com/0x3k/seam.git
+git clone https://github.com/0spoon/seam.git
 cd seam
 make build          # builds bin/seamd (server), bin/seam (TUI), bin/seam-reindex (re-embed tool)
 make init           # interactive setup: JWT secret, data dir, LLM provider, ChromaDB

@@ -25,7 +25,7 @@ You have two private reporting channels. Either one is fine; pick whichever is e
 
 **GitHub private vulnerability reporting:**
 
-1. Go to the repository's **Security** tab: <https://github.com/0x3k/seam/security>
+1. Go to the repository's **Security** tab: <https://github.com/0spoon/seam/security>
 2. Click **Report a vulnerability**.
 3. Fill out the advisory with a description, reproduction steps, affected version/commit, and impact.
 

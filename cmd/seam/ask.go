@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/rivo/uniseg"
 )
 
 // openAskMsg triggers switching to the Ask Seam screen.
@@ -110,13 +111,15 @@ func newAskModel(client *APIClient, width, height int) askModel {
 	ta := textarea.New()
 	ta.Placeholder = "Ask Seam anything..."
 	ta.CharLimit = 4000
-	ta.MaxHeight = 4
+	ta.MaxHeight = askInputHeight
 	ta.ShowLineNumbers = false
-	ta.SetHeight(4)
+	ta.Prompt = ""
+	ta.SetHeight(askInputHeight)
+	styleAskTextarea(&ta)
 	ta.Focus()
 
-	if width > 10 {
-		ta.SetWidth(width - 6)
+	if width > askInputChromeWidth {
+		ta.SetWidth(width - askInputChromeWidth)
 	}
 
 	return askModel{
@@ -127,6 +130,47 @@ func newAskModel(client *APIClient, width, height int) askModel {
 		focusToolIdx: -1,
 		expanded:     make(map[int]bool),
 	}
+}
+
+// askInputHeight is the fixed row count of the Ask Seam textarea. Four
+// lines is enough for most prompts and still leaves room for the status
+// bar and conversation viewport.
+const askInputHeight = 4
+
+// askInputChromeWidth is the total horizontal chrome around the textarea
+// (border + padding) that is subtracted from the terminal width when
+// sizing the textarea body.
+const askInputChromeWidth = 4
+
+// styleAskTextarea applies theme-aware colors to the Ask Seam input so
+// it blends with the assistant pane. The default bubbles v2 textarea
+// uses a thick border prompt and a hard-coded cursor-line background
+// that clash with the Mario / Catppuccin palettes, so we rebuild the
+// style state from scratch using the active assistant colors.
+func styleAskTextarea(ta *textarea.Model) {
+	s := ta.Styles()
+	fg := assistantStyles.MessageAssist.GetForeground()
+	placeholder := assistantStyles.Muted.GetForeground()
+	base := lipgloss.NewStyle()
+	text := lipgloss.NewStyle().Foreground(fg)
+
+	s.Focused.Base = base
+	s.Focused.Text = text
+	s.Focused.CursorLine = text
+	s.Focused.CursorLineNumber = base
+	s.Focused.Placeholder = lipgloss.NewStyle().Foreground(placeholder)
+	s.Focused.Prompt = base
+	s.Focused.EndOfBuffer = base
+
+	s.Blurred.Base = base
+	s.Blurred.Text = text
+	s.Blurred.CursorLine = text
+	s.Blurred.CursorLineNumber = base
+	s.Blurred.Placeholder = lipgloss.NewStyle().Foreground(placeholder)
+	s.Blurred.Prompt = base
+	s.Blurred.EndOfBuffer = base
+
+	ta.SetStyles(s)
 }
 
 func (m askModel) Init() tea.Cmd {
@@ -140,7 +184,9 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.SetWidth(msg.Width - 6)
+		if msg.Width > askInputChromeWidth {
+			m.input.SetWidth(msg.Width - askInputChromeWidth)
+		}
 		return m, nil
 
 	case assistantConvCreatedMsg:
@@ -600,59 +646,97 @@ func persistedToTurns(msgs []AssistantPersistedMessage) []chatTurn {
 
 // -- View --------------------------------------------------------------------
 
+// askLayout captures the vertical budget of the Ask Seam screen. It is
+// shared by View (which renders into each region) and maxScroll (which
+// uses the same viewport height to clamp the scroll offset).
+type askLayout struct {
+	viewportHeight int
+	inputRows      int
+}
+
+// computeLayout returns the per-region row counts used by View. The
+// header and status bar are one row each. When a confirmation prompt
+// is pending the bordered approval box takes askConfirmRows rows; the
+// rest of the time the textarea footer takes askInputHeight rows plus
+// a blank row above and below. Everything remaining goes to the
+// conversation viewport, with a floor of three rows for very short
+// terminals.
+func (m askModel) computeLayout() askLayout {
+	inputRows := askInputHeight + 2 // blank separator above, blank below
+	if m.pendingConfirm != nil {
+		inputRows = askConfirmRows
+	}
+	headerRows := 1
+	statusRows := 1
+	viewport := m.height - headerRows - statusRows - inputRows
+	if viewport < 3 {
+		viewport = 3
+	}
+	return askLayout{viewportHeight: viewport, inputRows: inputRows}
+}
+
+// askConfirmRows is the fixed height of the approval prompt footer.
+// The ConfirmPane border adds two rows, plus four rows of body and
+// one leading/trailing blank gives eight.
+const askConfirmRows = 8
+
 func (m askModel) View() string {
-	if m.width == 0 {
+	if m.width == 0 || m.height == 0 {
 		return ""
 	}
+
+	layout := m.computeLayout()
 
 	header := assistantStyles.Header.Width(m.width).Render(" " + marioBlock + "  ASK SEAM")
 
 	lines := m.buildConversationLines()
 
-	viewportHeight := m.height - 10
-	if viewportHeight < 3 {
-		viewportHeight = 3
-	}
-
 	start := m.scrollY
 	if start > len(lines) {
 		start = len(lines)
 	}
-	end := start + viewportHeight
+	end := start + layout.viewportHeight
 	if end > len(lines) {
 		end = len(lines)
 	}
-
 	visible := lines[start:end]
-	for len(visible) < viewportHeight {
-		visible = append(visible, "")
-	}
-	conversation := strings.Join(visible, "\n")
 
-	if m.err != "" {
-		conversation += "\n" + assistantStyles.Error.Render("  "+m.err)
+	if m.err != "" && len(visible) < layout.viewportHeight {
+		visible = append(visible, assistantStyles.Error.Render("  "+m.err))
 	}
 
-	// Confirmation prompt replaces the input when pending.
+	// Pad the conversation viewport to the full terminal width and the
+	// full vertical budget. Without this, blank rows are empty strings
+	// that do not overwrite the previous frame's cells, which lets the
+	// main screen bleed through when we switch into Ask mode.
+	conversation := lipgloss.NewStyle().
+		Width(m.width).
+		Height(layout.viewportHeight).
+		Render(strings.Join(visible, "\n"))
+
+	// Confirmation prompt replaces the input area when pending. Both
+	// branches force a fixed-size box so the surrounding regions stay
+	// pinned and previous-frame content cannot bleed through the
+	// padding.
 	var bottom string
 	if m.pendingConfirm != nil {
-		bottom = m.renderConfirmPrompt()
+		bottom = lipgloss.NewStyle().
+			Width(m.width).
+			Height(layout.inputRows).
+			Padding(0, 2).
+			Render(m.renderConfirmPrompt())
 	} else {
-		bottom = "\n " + m.input.View() + "\n"
+		// Trim the textarea's trailing newline so the lipgloss height
+		// constraint sees exactly askInputHeight rows of content.
+		inputView := strings.TrimRight(m.input.View(), "\n")
+		bottom = lipgloss.NewStyle().
+			Width(m.width).
+			Height(layout.inputRows).
+			Padding(1, 2).
+			Render(inputView)
 	}
 
-	km := currentKeymap()
-	statusBar := assistantStyles.StatusBar.
-		Width(m.width).
-		Render(fmt.Sprintf("%s: send | %s: newline | %s/%s: focus tool | %s (on tool): expand | %s/%s: scroll | %s: stop/back",
-			km.Display(ActionAskSubmit),
-			km.Display(ActionAskNewline),
-			km.Display(ActionAskFocusNextTool),
-			km.Display(ActionAskFocusPrevTool),
-			km.Display(ActionAskSubmit),
-			km.Display(ActionAskScrollUp),
-			km.Display(ActionAskScrollDown),
-			km.Display(ActionAskBack)))
+	statusBar := m.renderStatusBar()
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
@@ -749,13 +833,58 @@ func (m askModel) renderToolCard(idx int, t chatTurn, focused bool, wrapWidth in
 	return lines
 }
 
-// renderConfirmPrompt builds the gold-framed approval block.
+// renderStatusBar picks the longest hint string that still fits on
+// one line at the current width. Without this, the v1 hint exceeds
+// 100 columns and lipgloss wraps the status bar to two rows, which
+// throws off the fixed layout maths in computeLayout.
+func (m askModel) renderStatusBar() string {
+	km := currentKeymap()
+	full := fmt.Sprintf("%s: send | %s: newline | %s/%s: focus tool | %s (on tool): expand | %s/%s: scroll | %s: stop/back",
+		km.Display(ActionAskSubmit),
+		km.Display(ActionAskNewline),
+		km.Display(ActionAskFocusNextTool),
+		km.Display(ActionAskFocusPrevTool),
+		km.Display(ActionAskSubmit),
+		km.Display(ActionAskScrollUp),
+		km.Display(ActionAskScrollDown),
+		km.Display(ActionAskBack))
+	medium := fmt.Sprintf("%s send · %s newline · %s/%s tool · %s/%s scroll · %s back",
+		km.Display(ActionAskSubmit),
+		km.Display(ActionAskNewline),
+		km.Display(ActionAskFocusNextTool),
+		km.Display(ActionAskFocusPrevTool),
+		km.Display(ActionAskScrollUp),
+		km.Display(ActionAskScrollDown),
+		km.Display(ActionAskBack))
+	short := fmt.Sprintf("%s send · %s back", km.Display(ActionAskSubmit), km.Display(ActionAskBack))
+
+	// Pick the widest variant that still fits inside the bar (the
+	// StatusBar style adds two columns of horizontal padding).
+	budget := m.width - 2
+	text := short
+	for _, candidate := range []string{full, medium} {
+		if uniseg.StringWidth(candidate) <= budget {
+			text = candidate
+			break
+		}
+	}
+	return assistantStyles.StatusBar.
+		Width(m.width).
+		Inline(true).
+		Render(text)
+}
+
+// renderConfirmPrompt builds the gold-framed approval block. The
+// leading/trailing spacing is handled by the parent footer region, so
+// this returns just the bordered box aligned to a sane inner width.
 func (m askModel) renderConfirmPrompt() string {
 	innerWidth := m.width - 6
 	if innerWidth < 40 {
 		innerWidth = 40
 	}
 	body := []string{
+		assistantStyles.ToolBlock.Render(" " + marioBlock + "  Action required "),
+		"",
 		assistantStyles.MessageAssist.Render("The assistant wants to use ") + assistantStyles.ToolBlock.Render(m.pendingConfirm.toolName) + assistantStyles.MessageAssist.Render("."),
 		assistantStyles.Muted.Render("Action ID: " + m.pendingConfirm.actionID),
 		"",
@@ -763,19 +892,14 @@ func (m askModel) renderConfirmPrompt() string {
 			assistantStyles.ToolStatusErr.Render("[r] Reject") + "     " +
 			assistantStyles.Muted.Render("[Esc] Cancel"),
 	}
-	title := assistantStyles.ToolBlock.Render(" " + marioBlock + "  Action required ")
-	joined := lipgloss.JoinVertical(lipgloss.Left, title, "") + "\n" + strings.Join(body, "\n")
-	return "\n" + assistantStyles.ConfirmPane.Width(innerWidth).Render(joined) + "\n"
+	return assistantStyles.ConfirmPane.Width(innerWidth).Render(strings.Join(body, "\n"))
 }
 
 // -- Scroll helpers ----------------------------------------------------------
 
 func (m askModel) maxScroll() int {
 	contentLines := len(m.buildConversationLines())
-	viewportHeight := m.height - 10
-	if viewportHeight < 3 {
-		viewportHeight = 3
-	}
+	viewportHeight := m.computeLayout().viewportHeight
 	max := contentLines - viewportHeight
 	if max < 0 {
 		max = 0

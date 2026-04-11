@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Seam -- Shared Memory for Your AI Agents</title>
-<meta name="description" content="Seam gives your AI agents shared, persistent memory through an MCP server. Plain markdown files on disk, 100% local by default. Works with Claude Code, Cursor, and any MCP-compatible tool.">
+<title>Seam -- The Knowledge System Your AI Agents Work Inside</title>
+<meta name="description" content="Seam is a local-first knowledge system that your AI agents work inside -- not just a memory layer. Notes, projects, tasks, knowledge graph, and 40+ MCP tools. Plain markdown, 100% local. Works with Claude Code, Cursor, and any MCP client.">
 <meta name="theme-color" content="#08090d">
 <link rel="canonical" href="https://0x3k.github.io/seam/">
 
 <meta property="og:type" content="website">
-<meta property="og:title" content="Seam -- Shared Memory for Your AI Agents">
-<meta property="og:description" content="Your agents forget everything between conversations. Seam gives them persistent context through plain markdown files on your machine.">
+<meta property="og:title" content="Seam -- The Knowledge System Your AI Agents Work Inside">
+<meta property="og:description" content="Not a memory layer -- a full knowledge system your agents operate inside. Notes, projects, tasks, knowledge graph, 40+ MCP tools. Local-first, plain markdown.">
 <meta property="og:image" content="https://0x3k.github.io/seam/og-image.png">
 <meta property="og:url" content="https://0x3k.github.io/seam/">
 <meta property="og:site_name" content="Seam">
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Seam -- Shared Memory for Your AI Agents">
-<meta name="twitter:description" content="Your agents forget everything between conversations. Seam gives them persistent context through plain markdown files on your machine.">
+<meta name="twitter:title" content="Seam -- The Knowledge System Your AI Agents Work Inside">
+<meta name="twitter:description" content="Not a memory layer -- a full knowledge system your agents operate inside. Notes, projects, tasks, knowledge graph, 40+ MCP tools. Local-first, plain markdown.">
 <meta name="twitter:image" content="https://0x3k.github.io/seam/og-image.png">
 
 <link rel="icon" href="seam.svg" type="image/svg+xml">
@@ -33,7 +33,7 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "Seam",
-  "description": "A local-first knowledge system that serves as shared memory for AI agents through an MCP server. Plain markdown files on disk.",
+  "description": "A local-first knowledge system -- notes, projects, tasks, knowledge graph -- that AI agents work inside through 40+ MCP tools. Plain markdown files on disk.",
   "url": "https://0x3k.github.io/seam/",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux",
@@ -587,8 +587,8 @@ a:focus-visible, button:focus-visible {
       <circle cx="30" cy="45" r="4" fill="#c4915c"/>
       <circle cx="70" cy="60" r="4" fill="#c4915c"/>
     </svg>
-    <h1 id="hero-heading">Shared memory for your AI agents</h1>
-    <p class="hero-sub">Your agents forget everything between conversations. Seam gives them persistent context through plain markdown files on your machine.</p>
+    <h1 id="hero-heading">The knowledge system your AI agents work inside</h1>
+    <p class="hero-sub">Not a memory layer. A full workspace -- notes, projects, tasks, knowledge graph -- that every agent operates inside through MCP. Plain markdown on your machine.</p>
     <div class="hero-ctas">
       <a href="#quickstart" class="btn-primary">Get Started</a>
       <a href="https://github.com/0x3k/seam" class="btn-ghost">View on GitHub</a>
@@ -600,16 +600,16 @@ a:focus-visible, button:focus-visible {
 <!-- PROBLEM -->
 <section class="problem" aria-labelledby="problem-heading">
   <div class="container">
-    <h2 id="problem-heading" class="section-title fade-in">The problem with AI agents today</h2>
-    <p class="section-sub fade-in">You talk to a lot of agents. Claude Code for one task, Cursor for another. Each one starts from zero.</p>
+    <h2 id="problem-heading" class="section-title fade-in">Memory layers aren't enough</h2>
+    <p class="section-sub fade-in">Your agents need more than a key-value store. They need a workspace.</p>
     <div class="pain-grid">
       <div class="pain-card fade-in">
         <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <circle cx="16" cy="16" r="14" stroke="#c4915c" stroke-width="1.5" fill="none"/>
           <path d="M12 12l8 8M20 12l-8 8" stroke="#c4915c" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
-        <h3>Agents forget everything</h3>
-        <p>Every conversation is a blank slate. Context from your last session doesn't carry over to this one.</p>
+        <h3>Memory stores forget structure</h3>
+        <p>Key-value pairs and vector embeddings don't capture how ideas relate, which project they belong to, or what tasks remain.</p>
       </div>
       <div class="pain-card fade-in">
         <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -617,16 +617,16 @@ a:focus-visible, button:focus-visible {
           <circle cx="22" cy="16" r="4" stroke="#c4915c" stroke-width="1.5" fill="none"/>
           <path d="M14 16h4" stroke="#c4915c" stroke-width="1.5" stroke-dasharray="2 2"/>
         </svg>
-        <h3>Knowledge gets lost</h3>
-        <p>What one agent discovers, the other will never know. Reasoning, dead ends, and decisions vanish.</p>
+        <h3>Agents can't collaborate</h3>
+        <p>Your morning session in Claude Code and your afternoon session in Cursor are isolated worlds. No shared context, no handoff.</p>
       </div>
       <div class="pain-card fade-in">
         <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <path d="M8 10h16M8 16h12M8 22h14" stroke="#c4915c" stroke-width="1.5" stroke-linecap="round"/>
           <path d="M26 20l-3 3-3-3" stroke="#c4915c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
         </svg>
-        <h3>You re-explain context</h3>
-        <p>Re-sharing decisions, re-explaining architecture, watching agents rediscover things you already know.</p>
+        <h3>You are the integration layer</h3>
+        <p>You end up copying context between conversations, re-explaining decisions, and doing the work your tools should do for each other.</p>
       </div>
     </div>
     <figure class="fade-in">
@@ -638,8 +638,8 @@ a:focus-visible, button:focus-visible {
 <!-- HOW IT WORKS -->
 <section class="how-it-works" aria-labelledby="how-heading">
   <div class="container">
-    <h2 id="how-heading" class="section-title fade-in">How Seam connects your agents</h2>
-    <p class="section-sub fade-in">Every MCP-compatible agent -- Claude Code, Cursor, Windsurf -- reads from and writes to the same knowledge base.</p>
+    <h2 id="how-heading" class="section-title fade-in">Agents work inside, not on top</h2>
+    <p class="section-sub fade-in">Every MCP-compatible agent -- Claude Code, Cursor, Windsurf -- operates inside the same knowledge system.</p>
     <div class="steps-grid">
       <div class="step fade-in">
         <h3>Start a session</h3>
@@ -660,8 +660,8 @@ a:focus-visible, button:focus-visible {
 <!-- FEATURES -->
 <section class="features" aria-labelledby="features-heading">
   <div class="container">
-    <h2 id="features-heading" class="section-title fade-in">Everything you need</h2>
-    <p class="section-sub fade-in">A complete knowledge system, not just a memory layer.</p>
+    <h2 id="features-heading" class="section-title fade-in">A workspace, not a key-value store</h2>
+    <p class="section-sub fade-in">Notes, projects, tasks, search, a knowledge graph, and an AI that organizes it all.</p>
     <div class="features-grid">
       <div class="feature-card fade-in">
         <span class="feature-badge badge-amber">MCP</span>
@@ -715,7 +715,7 @@ a:focus-visible, button:focus-visible {
   <span class="punc">}</span>
 <span class="punc">}</span></pre>
     </div>
-    <p class="mcp-caption fade-in">That's it. Your agent now has persistent memory and access to your knowledge base.</p>
+    <p class="mcp-caption fade-in">That's it. Your agent now works inside your knowledge system -- not just reads from a memory store.</p>
   </div>
 </section>
 

@@ -2,15 +2,16 @@
 
 You work with many agents. A Claude Code session for backend work, a Cursor session for frontend, a research conversation for architecture decisions. Each one is a separate context window. Each one forgets everything when the conversation ends. The insight from your morning session doesn't exist in your afternoon session. What one agent discovered, the other will never know. The knowledge that didn't make it into code -- the reasoning, the dead ends, the decisions -- is lost.
 
-Seam is the shared memory layer for all of them. It exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp` that gives any compatible agent persistent long-term memory, structured session tracking, and direct access to your knowledge base.
+Most "agent memory" solutions offer a key-value store with vector search. Seam is different: it exposes a full knowledge system -- notes, projects, tasks, a knowledge graph, daily briefings -- as an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp`. Your agents don't just store and retrieve memories. They operate inside the same workspace you do.
 
-**What changes:**
+**What agents can do inside Seam:**
 
-- An agent **starts a session** and gets a briefing: what happened in past sessions, what other agents found, open tasks, relevant notes.
-- During work, it **stores findings** -- architectural decisions, debugging insights, research notes -- as persistent memory that survives after the conversation ends.
-- When it finishes, it **records what it learned** so the next session picks up where this one left off.
-- Multiple agents **collaborate** on the same problem through session hierarchies and shared [research labs](#research-lab). Agent B sees what Agent A tried and decided.
-- Every agent can **search, read, and create notes** in the same knowledge base -- your notes become shared context between you and all of your tools.
+- **Start a session** and get a briefing: what happened in past sessions, what other agents found, open tasks, relevant notes.
+- **Search, read, create, and organize notes** -- the same `.md` files you work with. Not a parallel memory store, but the actual knowledge base.
+- **Manage projects and tasks** -- create projects, track checkbox tasks from notes, check what's on the plate.
+- **Traverse the knowledge graph** -- follow wikilinks, backlinks, and two-hop connections to find related context.
+- **Collaborate** on the same problem through session hierarchies and shared [research labs](#research-lab). Agent B sees what Agent A tried and decided.
+- **Record findings** that persist after the conversation ends, so the next session picks up where this one left off.
 
 ## Connecting
 

@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>Where ideas connect.</strong><br/>
-  <em>Shared memory for you and your AI agents. Local-first, built on plain markdown.</em>
+  <em>The knowledge system your AI agents work inside.</em>
 </p>
 
 <p align="center">
@@ -26,17 +26,17 @@
   <img src="./resources/feature-image.webp" alt="Seam -- where things connect" width="100%">
 </p>
 
-You talk to a lot of agents. Claude Code for one task, Cursor for another, a research session here, a debugging session there. Each one starts from zero. What you figured out in one conversation doesn't carry over to the next. What one agent discovered, the other will never know. The knowledge that didn't make it into code or your own memory is gone.
+You talk to a lot of agents. Claude Code for backend, Cursor for frontend, a research conversation, a debugging session. Each one is a separate context window that forgets everything when it closes. The reasoning, the dead ends, the decisions that didn't make it into a commit -- gone.
 
-Seam is the fix. It's a local knowledge base -- plain `.md` files on disk -- with an [MCP server](docs/mcp.md) that gives every agent you work with shared, persistent memory. Start a coding session and your agent gets a briefing: what happened in past sessions, what other agents found, what's on your plate. End the session and findings are preserved for next time. Your agents stop being isolated conversations and start being a team that builds on each other's work.
+Memory layers try to fix this by giving agents a key-value store. Seam goes further: it's a full knowledge system -- notes, projects, tasks, wikilinks, a knowledge graph, daily briefings, autonomous organization -- that your agents work *inside*, not just read from. They search your notes, create new ones, manage projects, collaborate through shared research labs, and build on each other's findings. Your knowledge base and their context are the same plain `.md` files on disk.
 
-Everything runs on your machine by default. Your notes, your AI, your vectors -- nothing leaves unless you want it to.
+Everything runs on your machine by default. Local AI, local storage, nothing leaves unless you want it to.
 
 > **Seam** -- _the join between two pieces._ Knowledge gains meaning at the intersections.
 
 ## Why Seam
 
-**Your agents forget everything.** Every conversation is a blank slate. You re-explain context, re-share decisions, watch agents rediscover things you already know. Seam gives every MCP-compatible agent -- Claude Code, Cursor, Windsurf, anything -- access to persistent memory, session history, and your full knowledge base. What one agent learns, the next one knows.
+**Not a memory layer -- a knowledge system.** Memory layers store key-value pairs. Seam gives your agents a full workspace: notes with wikilinks and tags, projects, tasks, a knowledge graph, semantic search, daily briefings, and an autonomous librarian that organizes it all. Every MCP-compatible agent -- Claude Code, Cursor, Windsurf -- works inside the same system. What one agent learns, the next one knows.
 
 **Your notes are files.** Not rows in someone else's database. Plain markdown with YAML frontmatter, organized in folders. Edit them with Seam, vim, VS Code, or anything else. Back them up with git, sync them with Syncthing, grep them from the terminal. No export step because there's nothing to export from.
 
@@ -44,9 +44,9 @@ Everything runs on your machine by default. Your notes, your AI, your vectors --
 
 ## What You Can Do
 
-### Connect all your agents
+### Give your agents a workspace, not a scratchpad
 
-Seam's [MCP server](docs/mcp.md) turns isolated agent conversations into a connected workflow. Every agent reads from and writes to the same knowledge base -- session plans, findings, research notes, decisions. Multiple agents can [collaborate](docs/mcp.md#research-lab) on the same investigation through session hierarchies and shared research labs. Your afternoon debugging session in Cursor knows what your morning architecture session in Claude Code decided.
+Seam's [MCP server](docs/mcp.md) exposes 40+ tools that let agents operate inside your knowledge base -- not just store memories, but search notes, create new ones, manage projects, track tasks, traverse the knowledge graph, and collaborate through shared [research labs](docs/mcp.md#research-lab). Your afternoon debugging session in Cursor knows what your morning architecture session in Claude Code decided, because they worked in the same system.
 
 ### Ask your notes anything
 

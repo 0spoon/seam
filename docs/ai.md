@@ -1,6 +1,6 @@
 # AI & Assistant
 
-Seam's AI layer works both sides: it helps *you* think, search, and write inside your knowledge base, and it gives your *agents* the context they need to be useful across sessions. Everything runs locally by default through Ollama -- no API keys, no usage meters, no one reading your notes. Switch providers with one config line when you need more power.
+Seam's AI layer works both sides: it helps *you* think, search, and write inside your knowledge base, and it gives your *agents* a structured workspace to operate in across sessions -- not just a memory store, but the same notes, projects, and tasks you work with. Everything runs locally by default through Ollama. No API keys, no usage meters, no one reading your notes. Switch providers with one config line when you need more power.
 
 ## Providers
 

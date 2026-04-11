@@ -101,7 +101,7 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 	if req.Title == "" {
 		return nil, fmt.Errorf("note.Service.Create: title is required")
 	}
-	if err := validate.Name(req.Title); err != nil {
+	if err := validate.Title(req.Title); err != nil {
 		return nil, fmt.Errorf("note.Service.Create: %w", err)
 	}
 
@@ -338,7 +338,7 @@ func (s *Service) ListTags(ctx context.Context, userID string) ([]TagCount, erro
 //  6. If commit fails, restore old file content (best effort).
 func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateNoteReq) (*Note, error) {
 	if req.Title != nil {
-		if err := validate.Name(*req.Title); err != nil {
+		if err := validate.Title(*req.Title); err != nil {
 			return nil, fmt.Errorf("note.Service.Update: %w", err)
 		}
 	}
@@ -1007,14 +1007,14 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 	}
 
 	// Validate the title from frontmatter to prevent unsafe characters.
-	if err := validate.Name(title); err != nil {
+	if err := validate.Title(title); err != nil {
 		s.logger.Warn("note.Service.Reindex: unsafe title in frontmatter, using sanitized filename",
 			"file", filePath, "title", title, "error", err)
 		// Fall back to a safe filename-derived title.
 		base := filepath.Base(filePath)
 		title = strings.TrimSuffix(base, ".md")
 		// If even the filename is unsafe, use a generic title.
-		if validateErr := validate.Name(title); validateErr != nil {
+		if validateErr := validate.Title(title); validateErr != nil {
 			title = "Untitled"
 		}
 	}

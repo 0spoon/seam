@@ -64,6 +64,38 @@ func TestPathWithinDir(t *testing.T) {
 	require.True(t, errors.Is(err, ErrPathTraversal))
 }
 
+func TestTitle_Valid(t *testing.T) {
+	tests := []string{
+		"My Note Title",
+		"TCP/IP Overview",
+		"A/B Testing Results",
+		"GAIA/SPP Debug Log",
+		"Notes & Ideas",
+		"Hello World 123",
+	}
+	for _, title := range tests {
+		require.NoError(t, Title(title), "title %q should be valid", title)
+	}
+}
+
+func TestTitle_Invalid(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+	}{
+		{"path\\to\\danger", "backslash"},
+		{"sneaky..title", "dot-dot sequence"},
+		{"null\x00byte", "null byte"},
+		{"", "empty"},
+		{strings.Repeat("a", 256), "too long"},
+	}
+	for _, tt := range tests {
+		err := Title(tt.name)
+		require.Error(t, err, "title %q should be rejected (%s)", tt.name, tt.desc)
+		require.True(t, errors.Is(err, ErrUnsafeName) || tt.name == "", "should be ErrUnsafeName for %q", tt.name)
+	}
+}
+
 func TestName_Valid(t *testing.T) {
 	tests := []string{
 		"My Note Title",

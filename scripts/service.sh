@@ -14,6 +14,7 @@ set -euo pipefail
 
 ACTION="${1:-}"
 OS="$(uname -s)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 SEAMD_LABEL="com.seam.seamd"
 CHROMA_LABEL="com.seam.chroma"
@@ -28,6 +29,45 @@ info() { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
 ok()   { printf "\033[1;32m==>\033[0m %s\n" "$1"; }
 warn() { printf "\033[1;33m==>\033[0m %s\n" "$1"; }
 err()  { printf "\033[1;31m==>\033[0m %s\n" "$1" >&2; }
+
+# Extract the listen port from seam-server.yaml (default 8080).
+seamd_port() {
+    local config="$REPO_ROOT/seam-server.yaml"
+    if [ -f "$config" ]; then
+        local port
+        port=$(grep -E '^listen:' "$config" | grep -oE '[0-9]+' | tail -1)
+        echo "${port:-8080}"
+    else
+        echo "8080"
+    fi
+}
+
+# Kill any LISTENING seamd process on the configured port. Prevents
+# "address already in use" crash loops when a stale seamd from
+# `make run` or a prior crash is still holding the port.
+#
+# IMPORTANT: filter to processes in LISTEN state AND whose command is
+# `seamd`. `lsof -i:PORT` also returns client-side connections (any
+# process with an open socket to that port), so an unfiltered kill
+# would nuke unrelated tools that happen to be talking to seamd.
+kill_stale_on_port() {
+    local port
+    port="$(seamd_port)"
+    # -sTCP:LISTEN filters to listeners only. -c seamd matches the
+    # command name. -t emits just PIDs.
+    local pids
+    pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -c seamd -t 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+        warn "killing stale seamd listener(s) on port $port: $pids"
+        echo "$pids" | xargs kill 2>/dev/null || true
+        sleep 0.5
+        pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -c seamd -t 2>/dev/null || true)"
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9 2>/dev/null || true
+            sleep 0.3
+        fi
+    fi
+}
 
 usage() {
     cat <<EOF
@@ -145,6 +185,7 @@ run_darwin() {
         start)
             # Start Chroma first so seamd can reach it on its first probe.
             [ "$has_chroma" = "yes" ] && ld_start "$CHROMA_LABEL"
+            kill_stale_on_port
             ld_start "$SEAMD_LABEL"
             ;;
         stop)
@@ -156,6 +197,7 @@ run_darwin() {
         restart)
             ld_stop "$SEAMD_LABEL"
             [ "$has_chroma" = "yes" ] && ld_stop "$CHROMA_LABEL"
+            kill_stale_on_port
             [ "$has_chroma" = "yes" ] && ld_start "$CHROMA_LABEL"
             ld_start "$SEAMD_LABEL"
             ;;
@@ -194,6 +236,7 @@ run_linux() {
             ;;
         start)
             [ "$has_chroma" = "yes" ] && sd_start "$CHROMA_UNIT"
+            kill_stale_on_port
             sd_start "$SEAMD_UNIT"
             ;;
         stop)
@@ -201,8 +244,11 @@ run_linux() {
             [ "$has_chroma" = "yes" ] && sd_stop "$CHROMA_UNIT"
             ;;
         restart)
-            sd_restart "$SEAMD_UNIT"
+            sd_stop "$SEAMD_UNIT"
+            [ "$has_chroma" = "yes" ] && sd_stop "$CHROMA_UNIT"
+            kill_stale_on_port
             [ "$has_chroma" = "yes" ] && sd_restart "$CHROMA_UNIT"
+            sd_start "$SEAMD_UNIT"
             ;;
         logs)
             info "Tailing journal for $SEAMD_UNIT (Ctrl-C to exit)"

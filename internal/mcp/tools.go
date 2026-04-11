@@ -17,6 +17,7 @@ import (
 	"github.com/katata/seam/internal/reqctx"
 	"github.com/katata/seam/internal/task"
 	"github.com/katata/seam/internal/template"
+	"github.com/katata/seam/internal/validate"
 	"github.com/katata/seam/internal/webhook"
 )
 
@@ -679,6 +680,7 @@ func (s *Server) handleNotesCreate(ctx context.Context, req mcp.CallToolRequest)
 
 	n, err := s.cfg.AgentService.NotesCreate(ctx, userID, title, body, projectSlug, tags)
 	if err != nil {
+		s.logger.Warn("notes_create failed", "error", err, "title", title, "project", projectSlug)
 		return mcp.NewToolResultError(sanitizeError("notes_create", err)), nil
 	}
 
@@ -1353,6 +1355,8 @@ func sanitizeError(tool string, err error) string {
 		return tool + ": template not found"
 	case errors.Is(err, template.ErrInvalidName):
 		return tool + ": invalid template name"
+	case errors.Is(err, validate.ErrUnsafeName):
+		return tool + ": name contains unsafe characters (backslash, .., or null bytes)"
 	case errors.Is(err, task.ErrNotFound):
 		return tool + ": task not found"
 	case errors.Is(err, webhook.ErrNotFound):

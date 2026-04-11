@@ -67,6 +67,29 @@ func PathWithinDir(relPath, baseDir string) error {
 	return nil
 }
 
+// Title validates note titles. More permissive than Name: allows forward
+// slashes (common in titles like "TCP/IP", "A/B Testing") since titles are
+// never used directly as filenames — they are slugified first.
+// Rejects null bytes, backslashes, ".." sequences, and length > 255.
+func Title(title string) error {
+	if title == "" {
+		return fmt.Errorf("validate.Title: name is empty")
+	}
+	if len(title) > 255 {
+		return fmt.Errorf("validate.Title: %w: exceeds 255 characters", ErrUnsafeName)
+	}
+	if strings.ContainsRune(title, 0) {
+		return fmt.Errorf("validate.Title: %w: null byte", ErrUnsafeName)
+	}
+	if strings.Contains(title, "\\") {
+		return fmt.Errorf("validate.Title: %w: backslash", ErrUnsafeName)
+	}
+	if strings.Contains(title, "..") {
+		return fmt.Errorf("validate.Title: %w: dot-dot sequence", ErrUnsafeName)
+	}
+	return nil
+}
+
 // Name rejects names (titles, project names) that contain filesystem-unsafe
 // characters: null bytes, forward/back slashes, or ".." sequences.
 // Also enforces a maximum length of 255 characters.

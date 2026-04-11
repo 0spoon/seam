@@ -235,8 +235,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A-5: Validate title for filesystem safety (no /, \, .., null bytes).
-	if err := validate.Name(req.Title); err != nil {
+	// A-5: Validate title for filesystem safety (no \, .., null bytes).
+	if err := validate.Title(req.Title); err != nil {
 		writeError(w, http.StatusBadRequest, "title contains unsafe characters")
 		return
 	}
@@ -402,7 +402,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 	// A-5: Validate title for filesystem safety when updating.
 	if req.Title != nil {
-		if err := validate.Name(*req.Title); err != nil {
+		if err := validate.Title(*req.Title); err != nil {
 			writeError(w, http.StatusBadRequest, "title contains unsafe characters")
 			return
 		}

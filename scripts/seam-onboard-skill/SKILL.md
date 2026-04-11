@@ -18,25 +18,72 @@ A block inside `CLAUDE.md` that tells a future agent:
 
 ## Workflow
 
-### 1. Pre-flight: confirm Seam MCP is registered
+### 1. Pre-flight: confirm Seam MCP is registered (and register it if not)
 
-Run:
+First, check whether Seam is already registered with Claude Code:
 
 ```bash
-claude mcp list 2>/dev/null | grep -i seam || echo "SEAM_MCP_NOT_REGISTERED"
+claude mcp list 2>/dev/null | grep -i '^seam' && echo "SEAM_MCP_REGISTERED"
 ```
 
-If the output contains `SEAM_MCP_NOT_REGISTERED`, tell the user:
+If the output contains `SEAM_MCP_REGISTERED`, continue to step 2.
 
-> Seam MCP is not registered with Claude Code yet. Register it first, e.g.:
->
-> ```
-> claude mcp add seam --transport http http://localhost:8080/api/mcp
-> ```
->
-> (Adjust the host/port to match your `seam-server.yaml`.) Then re-run `/seam-onboard`.
+Otherwise, help the user register it. The MCP endpoint requires a static bearer token (API key). **Do not paste a placeholder** — try to auto-discover the real key from the user's machine in this order. You already have tool access, so use it directly instead of shelling everything.
 
-Stop. Do not continue.
+#### 1a. Check the environment
+
+```bash
+printf '%s' "${SEAM_MCP_API_KEY:-}"
+```
+
+If the output is non-empty, record it as `api_key` and jump to 1d.
+
+#### 1b. Find the Seam checkout via the installed service
+
+`make install-service` bootstraps seamd with its working directory set to the Seam repo root. Pull that path out of the service definition:
+
+- **macOS (launchd):**
+  ```bash
+  plutil -extract WorkingDirectory raw -o - "$HOME/Library/LaunchAgents/com.seam.seamd.plist" 2>/dev/null
+  ```
+- **Linux (systemd --user):**
+  ```bash
+  awk -F= '/^WorkingDirectory=/{print $2; exit}' "$HOME/.config/systemd/user/seamd.service" 2>/dev/null
+  ```
+
+If neither returns a path, the service is not installed — skip to 1c.
+
+Otherwise treat that path as `REPO_ROOT` and read `$REPO_ROOT/seam-server.yaml` with your `Read` tool. From it, extract two values:
+
+- `mcp.api_key` — the static bearer token. It is under the top-level `mcp:` key in the yaml. If present and non-empty, record it as `api_key`.
+- `listen` — the server's bind address (e.g. `":8080"` or `"127.0.0.1:8080"`). Record it as `listen`.
+
+#### 1c. Ask the user only if auto-discovery failed
+
+If you still have no `api_key` after 1a and 1b, ask the user exactly once:
+
+> I could not auto-discover your Seam MCP API key. Either paste the key here, or tell me the absolute path to your Seam checkout (the directory that contains `seam-server.yaml`) and I'll read it from there.
+
+If they give a path, read `seam-server.yaml` from that path and extract `mcp.api_key` and `listen` as in 1b.
+
+If after all of that you still cannot find a key, stop and tell them:
+
+> Seam MCP is not registered, and I could not find a `mcp.api_key`. Generate one with `openssl rand -hex 32`, put it under `mcp.api_key` in `seam-server.yaml` (or export it as `SEAM_MCP_API_KEY`), restart seamd, and re-run `/seam-onboard`.
+
+#### 1d. Register the server
+
+Compute the MCP URL from `listen`:
+
+- If `listen` is empty or starts with `:` (bind-all), use `http://localhost${listen}/api/mcp`, defaulting to `http://localhost:8080/api/mcp` when `listen` is empty.
+- Otherwise use `http://${listen}/api/mcp`.
+
+Then register Seam with Claude Code, substituting the real values (do **not** leave placeholders):
+
+```bash
+claude mcp add --transport http seam "<mcp_url>" --header "Authorization: Bearer <api_key>"
+```
+
+Report the URL you registered (but not the raw key — just say "using the discovered API key" or "using the key you provided") and confirm the command succeeded before moving on. If the `claude mcp add` command fails, surface the error to the user and stop.
 
 ### 2. Interview (one question only)
 

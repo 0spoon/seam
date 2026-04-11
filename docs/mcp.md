@@ -15,7 +15,35 @@ Most "agent memory" solutions offer a key-value store with vector search. Seam i
 
 ## Connecting
 
-Any MCP-compatible client connects via Streamable HTTP:
+Seam's MCP endpoint accepts a static API key as a long-lived bearer token. This is the recommended auth for AI coding agents (Claude Code, Cursor, Windsurf), which cannot conveniently refresh short-lived JWTs.
+
+### 1. Generate and install an API key
+
+`make init` generates one automatically and writes it into `seam-server.yaml` under `mcp.api_key`. If you are upgrading an existing install, generate one yourself and add it manually:
+
+```bash
+openssl rand -hex 32
+```
+
+Then put it in `seam-server.yaml`:
+
+```yaml
+mcp:
+  api_key: "paste-your-hex-here"   # or set SEAM_MCP_API_KEY instead
+```
+
+`SEAM_MCP_API_KEY` takes precedence over the yaml value, so you can keep the file empty in checked-in configs and feed the secret via the environment.
+
+### 2. Register the server
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http seam http://localhost:8080/api/mcp \
+  --header "Authorization: Bearer $SEAM_MCP_API_KEY"
+```
+
+**Other MCP-compatible clients** (Cursor, Windsurf, Claude Desktop) take a JSON config:
 
 ```json
 {
@@ -23,16 +51,18 @@ Any MCP-compatible client connects via Streamable HTTP:
     "seam": {
       "url": "http://localhost:8080/api/mcp",
       "headers": {
-        "Authorization": "Bearer <jwt_access_token>"
+        "Authorization": "Bearer <api_key>"
       }
     }
   }
 }
 ```
 
-### Teaching Claude Code about Seam
+The server also still accepts a short-lived JWT access token as the bearer, for clients that already have a logged-in Seam session.
 
-Registering the MCP server makes the tools available, but a fresh Claude Code session still has no idea what Seam is or when to reach for it. Running `make install-service` drops a one-shot `/seam-onboard` skill into `~/.claude/skills/`. In any Claude Code session you can then run `/seam-onboard`, choose whether to install into the **global** `~/.claude/CLAUDE.md` (every project) or **this project's** `./CLAUDE.md`, and it will write a marker-wrapped block that teaches future sessions to call `session_start` for non-trivial work, use `memory_*` for cross-conversation knowledge, and search notes before asking the user to find things. The skill removes itself on success; re-install it standalone with `make install-onboard-skill`.
+### 3. Teach Claude Code when to reach for Seam
+
+Registering the MCP server makes the tools available, but a fresh Claude Code session still has no idea what Seam is or when it should use it. Running `make install-service` drops a one-shot `/seam-onboard` skill into `~/.claude/skills/`. In any Claude Code session you can then run `/seam-onboard`, choose whether to install into the **global** `~/.claude/CLAUDE.md` (every project) or **this project's** `./CLAUDE.md`, and it will write a marker-wrapped block that teaches future sessions to call `session_start` for non-trivial work, use `memory_*` for cross-conversation knowledge, and search notes before asking the user to find things. The skill removes itself on success; re-install it standalone with `make install-onboard-skill`.
 
 ## Available Tools
 

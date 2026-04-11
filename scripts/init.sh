@@ -43,6 +43,16 @@ JWT_SECRET=$(openssl rand -hex 32)
 ok "JWT secret generated (64 hex chars)"
 echo
 
+# MCP API key: a long-lived static bearer for AI coding agents (Claude
+# Code, Cursor, etc). Writing an MCP client that can refresh short-lived
+# JWTs is friction we do not need to force on the user, so we generate
+# a dedicated static key here. Users who do not want MCP open to static
+# keys can delete the value from mcp.api_key later.
+info "Generating MCP API key..."
+MCP_API_KEY=$(openssl rand -hex 32)
+ok "MCP API key generated (64 hex chars)"
+echo
+
 # -- data directory -----------------------------------------------------------
 
 DEFAULT_DATA_DIR="./data"
@@ -302,6 +312,12 @@ auth:
   refresh_token_ttl: "168h"
   bcrypt_cost: 12
 
+mcp:
+  # Static bearer token for MCP access. AI coding agents that cannot
+  # refresh a short-lived JWT use this instead.
+  # WARNING: Prefer SEAM_MCP_API_KEY env var over setting this in a file.
+  api_key: "${MCP_API_KEY}"
+
 ai:
   queue_workers: 1
   embedding_timeout: "60s"
@@ -432,6 +448,26 @@ if [ -n "$CHROMA_URL" ]; then
     echo "  make reindex            # re-embed every note into the new collection"
     echo
 fi
+
+# Claude Code MCP registration hint. We bake the generated MCP API key
+# straight into the one-liner so the user can copy-paste it into any
+# terminal without opening the yaml. The URL uses localhost when the
+# listen address is bind-all (":8080"), otherwise the listen value.
+if [[ "$LISTEN" == :* ]]; then
+    MCP_URL="http://localhost${LISTEN}/api/mcp"
+else
+    MCP_URL="http://${LISTEN}/api/mcp"
+fi
+
+info "Connect Claude Code (or any MCP client) to Seam:"
+echo "  claude mcp add --transport http seam ${MCP_URL} \\"
+echo "    --header \"Authorization: Bearer ${MCP_API_KEY}\""
+echo
+echo "  Then, inside a Claude Code session, run:"
+echo "    /seam-onboard"
+echo "  to install a CLAUDE.md block that teaches future sessions when and how to use Seam."
+echo "  (The /seam-onboard skill is installed automatically by 'make install-service'.)"
+echo
 
 if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$EMBED_OPENAI_KEY" ]; then
     warn "API key written to $CONFIG. Make sure this file is in .gitignore."

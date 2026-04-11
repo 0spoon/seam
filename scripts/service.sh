@@ -4,7 +4,7 @@
 # install-service.sh. Wraps launchctl (macOS) and systemctl --user (Linux)
 # so the Makefile targets stay portable.
 #
-# Usage: scripts/service.sh <status|start|stop|restart|logs>
+# Usage: scripts/service.sh <status|start|stop|restart|logs|kill-stale>
 #
 # When the optional Chroma supervisor service is also installed, every
 # action applies to it as well, so a single 'make service-restart' brings
@@ -74,11 +74,12 @@ usage() {
 Usage: scripts/service.sh <action>
 
 Actions:
-  status     Show status for seamd (and Chroma supervisor if installed)
-  start      Start the services
-  stop       Stop the services
-  restart    Stop then start
-  logs       Follow seamd stdout + stderr logs
+  status       Show status for seamd (and Chroma supervisor if installed)
+  start        Start the services
+  stop         Stop the services
+  restart      Stop then start
+  logs         Follow seamd (+ Chroma supervisor when installed) logs
+  kill-stale   Kill any stale seamd listener on the configured port
 
 Install with: make install-service
 Remove with:  make uninstall-service
@@ -207,8 +208,17 @@ run_darwin() {
                 err "Has the service ever run? Try 'make install-service'."
                 exit 1
             fi
-            info "Tailing $MAC_LOG_DIR/seamd.log + seamd.err.log (Ctrl-C to exit)"
-            exec tail -F "$MAC_LOG_DIR/seamd.log" "$MAC_LOG_DIR/seamd.err.log"
+            local files=("$MAC_LOG_DIR/seamd.log" "$MAC_LOG_DIR/seamd.err.log")
+            local banner="seamd"
+            if [ "$has_chroma" = "yes" ]; then
+                files+=("$MAC_LOG_DIR/chroma.log" "$MAC_LOG_DIR/chroma.err.log")
+                banner="seamd + chroma"
+            fi
+            info "Tailing $banner logs in $MAC_LOG_DIR (Ctrl-C to exit)"
+            # tail -F tolerates files that don't exist yet and prints a
+            # header when output switches between files, so each line's
+            # origin stays obvious.
+            exec tail -F "${files[@]}"
             ;;
         *)
             usage
@@ -251,8 +261,14 @@ run_linux() {
             sd_start "$SEAMD_UNIT"
             ;;
         logs)
-            info "Tailing journal for $SEAMD_UNIT (Ctrl-C to exit)"
-            exec journalctl --user -u "$SEAMD_UNIT" -f
+            local units=(-u "$SEAMD_UNIT")
+            local banner="$SEAMD_UNIT"
+            if [ "$has_chroma" = "yes" ]; then
+                units+=(-u "$CHROMA_UNIT")
+                banner="$SEAMD_UNIT + $CHROMA_UNIT"
+            fi
+            info "Tailing journal for $banner (Ctrl-C to exit)"
+            exec journalctl --user "${units[@]}" -f
             ;;
         *)
             usage
@@ -260,6 +276,44 @@ run_linux() {
             ;;
     esac
 }
+
+# kill-stale works identically on both platforms (lsof is present on
+# macOS and available via apt/yum on Linux), so handle it before the
+# OS-specific dispatch.
+#
+# Refuse to touch a seamd that's under launchd/systemd supervision --
+# killing it would just trigger an immediate restart and the "stale"
+# label doesn't apply to a healthy managed process. The user should
+# reach for `service-stop` in that case.
+supervised_seamd_running() {
+    case "$OS" in
+        Darwin)
+            ld_loaded "$SEAMD_LABEL"
+            ;;
+        Linux)
+            command -v systemctl >/dev/null 2>&1 && \
+                systemctl --user is-active --quiet "$SEAMD_UNIT"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+if [ "$ACTION" = "kill-stale" ]; then
+    if ! command -v lsof >/dev/null 2>&1; then
+        err "lsof not found on PATH; cannot inspect listeners"
+        exit 1
+    fi
+    if supervised_seamd_running; then
+        warn "seamd is running under a service manager; not touching it"
+        warn "Use 'make service-stop' if you really want it down"
+        exit 0
+    fi
+    kill_stale_on_port
+    ok "kill-stale: done"
+    exit 0
+fi
 
 case "$OS" in
     Darwin) run_darwin ;;

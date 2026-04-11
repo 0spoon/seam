@@ -14,8 +14,6 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 	"golang.org/x/time/rate"
 
-	"crypto/subtle"
-
 	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/auth"
 	"github.com/katata/seam/internal/graph"
@@ -193,19 +191,19 @@ func New(cfg Config) *Server {
 func (s *Server) Handler(jwtMgr *auth.JWTManager, apiKey string) http.Handler {
 	return mcpserver.NewStreamableHTTPServer(s.mcp,
 		mcpserver.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
+			// Check static API key first (constant-time comparison).
+			if auth.VerifyMCPAPIKey(r, apiKey) {
+				ctx = reqctx.WithUserID(ctx, userdb.DefaultUserID)
+				ctx = reqctx.WithUsername(ctx, "mcp-api-key")
+				return ctx
+			}
+
 			authHeader := r.Header.Get("Authorization")
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
 				return ctx
 			}
 			token := parts[1]
-
-			// Check static API key first (constant-time comparison).
-			if apiKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) == 1 {
-				ctx = reqctx.WithUserID(ctx, userdb.DefaultUserID)
-				ctx = reqctx.WithUsername(ctx, "mcp-api-key")
-				return ctx
-			}
 
 			claims, err := jwtMgr.VerifyAccessToken(token)
 			if err != nil {

@@ -66,7 +66,8 @@ type Config struct {
 	ScheduleHandler  *scheduler.Handler
 	UsageHandler     *usage.Handler
 	WSMessageHandler ws.MessageHandler
-	MCPHandler       http.Handler // MCP endpoint handler (optional, mounts at /api/mcp)
+	MCPHandler       http.Handler  // MCP endpoint handler (optional, mounts at /api/mcp)
+	HooksHandler     *HooksHandler // Claude Code hooks (optional, mounts at /api/hooks)
 }
 
 // New creates a new Server with all routes and middleware configured.
@@ -217,6 +218,13 @@ func New(cfg Config) *Server {
 	// MCP endpoint (auth handled internally via mcp-go's HTTPContextFunc).
 	if cfg.MCPHandler != nil {
 		r.Handle("/api/mcp", cfg.MCPHandler)
+	}
+
+	// Claude Code hooks endpoint (auth via static MCP API key, handled in
+	// the hook handler itself). Mounted outside the JWT-protected group
+	// because Claude Code's hook config has no JWT machinery.
+	if cfg.HooksHandler != nil {
+		r.Mount("/api/hooks", cfg.HooksHandler.Routes())
 	}
 
 	// C-6: Serve the production frontend from web/dist if configured.

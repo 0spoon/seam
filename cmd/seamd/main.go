@@ -162,6 +162,20 @@ func (a *noteBodyAdapter) UpdateNoteBody(ctx context.Context, userID, noteID, bo
 }
 
 func run() error {
+	// Dispatch ops subcommands BEFORE flag.Parse() so subcommand flags do
+	// not collide with the server-mode flags. Each subcommand parses its
+	// own FlagSet against os.Args[2:].
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "install-hooks":
+			return runInstallHooks(os.Args[2:])
+		case "uninstall-hooks":
+			return runUninstallHooks(os.Args[2:])
+		case "doctor":
+			return runDoctor(os.Args[2:])
+		}
+	}
+
 	configPath := flag.String("config", "seam-server.yaml", "path to configuration file")
 	flag.Parse()
 
@@ -883,6 +897,19 @@ func run() error {
 	})
 	mcpHandler := mcpSrv.Handler(jwtMgr, cfg.MCP.APIKey)
 
+	// Claude Code SessionStart hook handler. Always built so the route is
+	// available, but it returns 401 to every request when MCP.APIKey is
+	// empty (no key = no auth = no briefing leakage). The handler reuses
+	// the agent service for sessions/memories and the task service for
+	// the open-task count in the briefing header.
+	hooksHandler := server.NewHooksHandler(
+		agentSvc,
+		taskSvc,
+		cfg.MCP.APIKey,
+		logger,
+		cfg.Hooks.MaxBriefingChars,
+	)
+
 	// Create assistant (agentic AI with tool use).
 	var assistantHandler *assistant.Handler
 	if chatCompleter != nil {
@@ -1033,6 +1060,7 @@ func run() error {
 		UsageHandler:     usageHandler,
 		WSMessageHandler: wsHandler,
 		MCPHandler:       mcpHandler,
+		HooksHandler:     hooksHandler,
 	})
 
 	// Start server in a goroutine.

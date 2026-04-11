@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,8 +35,25 @@ type Config struct {
 	Watcher       WatcherConfig    `yaml:"watcher"`
 	Scheduler     SchedulerConfig  `yaml:"scheduler"`
 	MCP           MCPConfig        `yaml:"mcp"`
+	Hooks         HooksConfig      `yaml:"hooks"`
 	Usage         UsageConfig      `yaml:"usage"`
 	WebDistDir    string           `yaml:"web_dist_dir"` // path to web/dist for SPA serving; empty uses default
+}
+
+// HooksConfig controls the SessionStart hook briefing returned to Claude Code
+// when the user installs the hook into ~/.claude/settings.json. The defaults
+// are tuned to fit comfortably inside Claude Code's hook budget without
+// dominating the agent's system context.
+type HooksConfig struct {
+	// MaxBriefingChars is the soft target for the hook briefing in characters.
+	// Default: 500. The handler aims to assemble a response under this length.
+	// env: SEAM_HOOKS_MAX_BRIEFING_CHARS
+	MaxBriefingChars int `yaml:"max_briefing_chars"`
+
+	// BriefingCap is the hard maximum for the hook briefing in characters.
+	// Default: 1500. Anything longer is truncated with an ellipsis.
+	// env: SEAM_HOOKS_BRIEFING_CAP
+	BriefingCap int `yaml:"briefing_cap"`
 }
 
 // MCPConfig holds MCP server settings.
@@ -243,6 +261,34 @@ func (d Duration) MarshalYAML() (interface{}, error) {
 	return d.Duration.String(), nil
 }
 
+// LoadForTools is a relaxed variant of Load for ops tooling (install-hooks,
+// uninstall-hooks, doctor) that only needs Listen and MCP.APIKey. It parses
+// the YAML, applies env overrides and defaults, but skips validate(): we
+// don't want install-hooks to refuse to run because the user hasn't picked a
+// chat model yet, or because jwt_secret happens to be short. The returned
+// Config is safe to read but should NOT be used to bring up the server.
+func LoadForTools(path string) (*Config, error) {
+	cfg := &Config{}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("config.LoadForTools: read file: %w", err)
+		}
+		// Missing file is fine; tools can still pick up env overrides.
+	} else {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return nil, fmt.Errorf("config.LoadForTools: parse yaml: %w", err)
+		}
+	}
+
+	applyEnvOverrides(cfg)
+	applyDefaults(cfg)
+	normalizePaths(cfg)
+
+	return cfg, nil
+}
+
 // Load reads configuration from the given YAML file path, applies environment
 // variable overrides, fills in defaults, and validates required fields.
 func Load(path string) (*Config, error) {
@@ -316,6 +362,16 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SEAM_MCP_API_KEY"); v != "" {
 		cfg.MCP.APIKey = v
 	}
+	if v := os.Getenv("SEAM_HOOKS_MAX_BRIEFING_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Hooks.MaxBriefingChars = n
+		}
+	}
+	if v := os.Getenv("SEAM_HOOKS_BRIEFING_CAP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Hooks.BriefingCap = n
+		}
+	}
 	if v := os.Getenv("SEAM_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
 	}
@@ -370,6 +426,16 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Watcher.DebounceInterval.Duration == 0 {
 		cfg.Watcher.DebounceInterval.Duration = 200 * time.Millisecond
+	}
+	if cfg.Hooks.MaxBriefingChars <= 0 {
+		cfg.Hooks.MaxBriefingChars = 500
+	}
+	if cfg.Hooks.BriefingCap <= 0 {
+		cfg.Hooks.BriefingCap = 1500
+	}
+	// Cap can never be smaller than the soft target.
+	if cfg.Hooks.BriefingCap < cfg.Hooks.MaxBriefingChars {
+		cfg.Hooks.BriefingCap = cfg.Hooks.MaxBriefingChars
 	}
 	if cfg.Scheduler.Enabled == nil {
 		t := true

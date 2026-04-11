@@ -1,4 +1,4 @@
-.PHONY: help build build-web build-all run dev test test-integration test-race test-web test-web-watch lint fmt vet tidy typecheck coverage bench logs kill-stale clean dev-web init install-service uninstall-service install-onboard-skill uninstall-onboard-skill install-tui uninstall-tui service-status service-start service-stop service-restart service-logs chroma-up chroma-down chroma-logs chroma-status reindex
+.PHONY: help build build-web build-all run dev test test-integration test-race test-web test-web-watch lint fmt vet tidy typecheck coverage bench logs kill-stale clean dev-web init install-service uninstall-service install-onboard-skill uninstall-onboard-skill install-claude-hooks uninstall-claude-hooks doctor install-tui uninstall-tui service-status service-start service-stop service-restart service-logs chroma-up chroma-down chroma-logs chroma-status reindex
 
 CHROMA_COMPOSE := docker compose -f docker/chroma-compose.yml
 
@@ -108,6 +108,19 @@ install-onboard-skill:  ## Install the /seam-onboard Claude Code skill (self-rem
 
 uninstall-onboard-skill:  ## Remove the /seam-onboard Claude Code skill from ~/.claude/skills
 	@bash scripts/uninstall-onboard-skill.sh
+
+# Install the SessionStart hook so Claude Code auto-briefs each new session
+# with recent Seam activity. NOT installed by `make install-service`: users
+# who don't want Claude Code touching their settings.json should leave it
+# alone. Re-runnable to rotate the API key or update the hook URL.
+install-claude-hooks: build  ## Install seam SessionStart hook into ~/.claude/settings.json (Claude Code auto-briefing)
+	@bash scripts/install-claude-hooks.sh
+
+uninstall-claude-hooks: build  ## Remove seam SessionStart hook from ~/.claude/settings.json
+	@bash scripts/uninstall-claude-hooks.sh
+
+doctor: build  ## Run end-to-end self-checks (config, seamd, MCP registration, hooks)
+	@./bin/seamd doctor
 
 # Install just the TUI client (`seam`) into a directory on PATH so it
 # can be launched from anywhere. Builds first, then copies the binary.

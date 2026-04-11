@@ -98,6 +98,9 @@ make install-service       # Install seamd as launchd/systemd user service (also
 make install-tui           # Install seam TUI to /usr/local/bin (PREFIX= to override)
 make install-onboard-skill   # (Re)install the /seam-onboard Claude Code skill for teaching new sessions about Seam MCP
 make uninstall-onboard-skill # Remove the /seam-onboard Claude Code skill from ~/.claude/skills
+make install-claude-hooks    # Install Seam SessionStart hook into Claude Code (auto-briefing on every session)
+make uninstall-claude-hooks  # Remove the Seam SessionStart hook from ~/.claude/settings.json
+make doctor                  # Run end-to-end self-checks (config, seamd, MCP registration, hooks)
 make reindex                 # Re-embed all notes after switching embedding model
 make clean                 # Remove bin/, web/dist, coverage files
 ```

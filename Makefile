@@ -124,9 +124,29 @@ doctor: build  ## Run end-to-end self-checks (config, seamd, MCP registration, h
 
 # Install just the TUI client (`seam`) into a directory on PATH so it
 # can be launched from anywhere. Builds first, then copies the binary.
-# If $(INSTALL_BIN_DIR) is not writable, re-run with sudo or override
-# PREFIX to a user-owned location.
-install-tui: build  ## Install the seam TUI to $(INSTALL_BIN_DIR)
+# The default PREFIX (/usr/local) needs sudo on most systems; the
+# precheck below detects an unwritable target and points the user at
+# both escape hatches before failing.
+install-tui: build  ## Install the seam TUI to $(INSTALL_BIN_DIR) (needs sudo for the default /usr/local prefix)
+	@target="$(INSTALL_BIN_DIR)"; \
+	probe="$$target"; \
+	while [ ! -e "$$probe" ]; do \
+		parent=$$(dirname "$$probe"); \
+		if [ "$$parent" = "$$probe" ]; then break; fi; \
+		probe="$$parent"; \
+	done; \
+	if [ ! -w "$$probe" ]; then \
+		echo ""; \
+		echo "  $$target is not writable by $$(id -un) (blocked at $$probe)."; \
+		echo ""; \
+		echo "  Either re-run with sudo:"; \
+		echo "    sudo make install-tui"; \
+		echo ""; \
+		echo "  Or install into a user-owned prefix (make sure it is on PATH):"; \
+		echo "    make install-tui PREFIX=\$$HOME/.local"; \
+		echo ""; \
+		exit 1; \
+	fi
 	@mkdir -p $(INSTALL_BIN_DIR)
 	@install -m 0755 bin/seam $(INSTALL_BIN_DIR)/seam
 	@echo "Installed seam to $(INSTALL_BIN_DIR)/seam"

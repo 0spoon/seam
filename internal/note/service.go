@@ -672,7 +672,7 @@ func (s *Service) BulkAction(ctx context.Context, userID string, req BulkActionR
 	notesDir := s.userDBManager.UserNotesDir(userID)
 
 	for _, noteID := range req.NoteIDs {
-		if err := s.executeBulkAction(ctx, tx, db, userID, noteID, req, notesDir, &filesToDelete, &pendingMoves); err != nil {
+		if err := s.executeBulkAction(ctx, tx, noteID, req, notesDir, &filesToDelete, &pendingMoves); err != nil {
 			result.Failed++
 			// Sanitize error: map known domain errors to safe messages.
 			errMsg := "internal error"
@@ -733,8 +733,7 @@ type pendingMove struct {
 func (s *Service) executeBulkAction(
 	ctx context.Context,
 	tx *sql.Tx,
-	db *sql.DB,
-	userID, noteID string,
+	noteID string,
 	req BulkActionReq,
 	notesDir string,
 	filesToDelete *[]string,
@@ -781,10 +780,12 @@ func (s *Service) executeBulkAction(
 			return nil // Already in the target project, no-op.
 		}
 
-		// Compute new file path for the moved note.
+		// Compute new file path for the moved note. The project lookup must
+		// run on the transaction -- the user DB is capped at one open
+		// connection, so using db here blocks forever on the open tx.
 		newSubDir := ""
 		if newProjectID != "" {
-			p, pErr := s.projectStore.Get(ctx, db, newProjectID)
+			p, pErr := s.projectStore.Get(ctx, tx, newProjectID)
 			if pErr != nil {
 				return fmt.Errorf("resolve project: %w", pErr)
 			}

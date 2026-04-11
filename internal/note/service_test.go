@@ -385,3 +385,43 @@ func TestService_Create_EmptyTitle(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "title is required")
 }
+
+// Regression: the per-user DB is capped at a single connection, so any
+// store lookup on *sql.DB while the bulk transaction is open will
+// deadlock. The move case resolves the target project inside the tx.
+func TestService_BulkAction_MoveFromInbox(t *testing.T) {
+	svc, mgr, _ := setupService(t)
+	ctx := context.Background()
+
+	projSvc := project.NewService(project.NewStore(), mgr, nil)
+	p, err := projSvc.Create(ctx, testUserID, "Research", "")
+	require.NoError(t, err)
+
+	n1, err := svc.Create(ctx, testUserID, CreateNoteReq{Title: "Inbox Note 1", Body: "body 1"})
+	require.NoError(t, err)
+	require.Equal(t, "inbox-note-1.md", n1.FilePath)
+
+	n2, err := svc.Create(ctx, testUserID, CreateNoteReq{Title: "Inbox Note 2", Body: "body 2"})
+	require.NoError(t, err)
+
+	notesDir := mgr.UserNotesDir(testUserID)
+
+	result, err := svc.BulkAction(ctx, testUserID, BulkActionReq{
+		NoteIDs: []string{n1.ID, n2.ID},
+		Action:  "move",
+		Params:  BulkActionParams{ProjectID: p.ID},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Success, "errors: %v", result.Errors)
+	require.Equal(t, 0, result.Failed, "errors: %v", result.Errors)
+
+	moved, err := svc.Get(ctx, testUserID, n1.ID)
+	require.NoError(t, err)
+	require.Equal(t, p.ID, moved.ProjectID)
+	require.Equal(t, "research/inbox-note-1.md", moved.FilePath)
+
+	_, err = os.Stat(filepath.Join(notesDir, moved.FilePath))
+	require.NoError(t, err, "new file should exist")
+	_, err = os.Stat(filepath.Join(notesDir, n1.FilePath))
+	require.True(t, os.IsNotExist(err), "old file should not exist")
+}

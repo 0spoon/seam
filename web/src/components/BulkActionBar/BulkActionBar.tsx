@@ -4,8 +4,31 @@ import { useNoteStore } from '../../stores/noteStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 import { useToastStore } from '../Toast/ToastContainer';
+import type { BulkActionResult } from '../../api/types';
 import { ConfirmModal } from '../ConfirmModal/ConfirmModal';
 import styles from './BulkActionBar.module.css';
+
+function pluralize(n: number, singular: string): string {
+  return `${n} ${singular}${n !== 1 ? 's' : ''}`;
+}
+
+// Build a toast from a bulk action result. verb is the past-tense action
+// applied to successful notes ("moved", "deleted", "tagged", "untagged").
+function describeBulkResult(
+  result: BulkActionResult,
+  verb: string,
+): { message: string; type: 'success' | 'error' | 'info' } {
+  if (result.failed === 0) {
+    return { message: `${pluralize(result.success, 'note')} ${verb}`, type: 'success' };
+  }
+  if (result.success === 0) {
+    return { message: `Failed to ${verb} ${pluralize(result.failed, 'note')}`, type: 'error' };
+  }
+  return {
+    message: `${pluralize(result.success, 'note')} ${verb}, ${result.failed} failed`,
+    type: 'error',
+  };
+}
 
 export function BulkActionBar() {
   const selectedNoteIds = useNoteStore((s) => s.selectedNoteIds);
@@ -52,10 +75,8 @@ export function BulkActionBar() {
       if (!tag.trim()) return;
       const result = await bulkAction('add_tag', { tag: tag.trim() });
       if (result) {
-        addToast(
-          `Tag added to ${result.success} note${result.success !== 1 ? 's' : ''}`,
-          'success',
-        );
+        const { message, type } = describeBulkResult(result, 'tagged');
+        addToast(message, type);
       }
       setTagDropdownOpen(false);
       setNewTag('');
@@ -67,10 +88,8 @@ export function BulkActionBar() {
     async (tag: string) => {
       const result = await bulkAction('remove_tag', { tag });
       if (result) {
-        addToast(
-          `Tag removed from ${result.success} note${result.success !== 1 ? 's' : ''}`,
-          'success',
-        );
+        const { message, type } = describeBulkResult(result, 'untagged');
+        addToast(message, type);
       }
       setTagDropdownOpen(false);
     },
@@ -81,7 +100,8 @@ export function BulkActionBar() {
     async (projectId: string) => {
       const result = await bulkAction('move', { project_id: projectId });
       if (result) {
-        addToast(`${result.success} note${result.success !== 1 ? 's' : ''} moved`, 'success');
+        const { message, type } = describeBulkResult(result, 'moved');
+        addToast(message, type);
       }
       setProjectDropdownOpen(false);
     },
@@ -91,7 +111,8 @@ export function BulkActionBar() {
   const handleDelete = useCallback(async () => {
     const result = await bulkAction('delete');
     if (result) {
-      addToast(`${result.success} note${result.success !== 1 ? 's' : ''} deleted`, 'success');
+      const { message, type } = describeBulkResult(result, 'deleted');
+      addToast(message, type);
     }
     setDeleteConfirmOpen(false);
   }, [bulkAction, addToast]);

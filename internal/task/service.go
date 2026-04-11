@@ -262,24 +262,41 @@ func (s *Service) ToggleDone(ctx context.Context, userID, taskID string, done bo
 		return fmt.Errorf("task.Service.ToggleDone: open db: %w", err)
 	}
 
+	// Resolve task and note metadata BEFORE opening a transaction. The
+	// per-user DB is capped at one connection, so calling noteSvc.Get
+	// (which reads through db) inside the tx would deadlock.
+	t, err := s.store.Get(ctx, db, taskID)
+	if err != nil {
+		return fmt.Errorf("task.Service.ToggleDone: %w", err)
+	}
+
+	var absPath string
+	if noteSvc := s.getNoteService(); noteSvc != nil {
+		n, err := noteSvc.Get(ctx, userID, t.NoteID)
+		if err != nil {
+			return fmt.Errorf("task.Service.ToggleDone: get note: %w", err)
+		}
+		notesDir := s.dbManager.UserNotesDir(userID)
+		resolved := filepath.Join(notesDir, n.FilePath)
+		if !strings.HasPrefix(resolved, filepath.Clean(notesDir)+string(filepath.Separator)) && resolved != filepath.Clean(notesDir) {
+			return fmt.Errorf("task.Service.ToggleDone: path traversal detected")
+		}
+		absPath = resolved
+	}
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("task.Service.ToggleDone: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	t, err := s.store.Get(ctx, tx, taskID)
-	if err != nil {
-		return fmt.Errorf("task.Service.ToggleDone: %w", err)
-	}
-
 	if err := s.store.UpdateDone(ctx, tx, taskID, done); err != nil {
 		return fmt.Errorf("task.Service.ToggleDone: %w", err)
 	}
 
 	// Update the file BEFORE committing DB transaction.
-	if s.getNoteService() != nil {
-		if err := s.toggleCheckboxInFile(ctx, userID, t.NoteID, t.LineNumber, done); err != nil {
+	if absPath != "" {
+		if err := s.toggleCheckboxInFile(absPath, t.LineNumber, done); err != nil {
 			return fmt.Errorf("task.Service.ToggleDone: file update: %w", err)
 		}
 	}
@@ -291,26 +308,9 @@ func (s *Service) ToggleDone(ctx context.Context, userID, taskID string, done bo
 }
 
 // toggleCheckboxInFile reads the note file, toggles the checkbox on the
-// specified line, and writes the file back.
-func (s *Service) toggleCheckboxInFile(ctx context.Context, userID, noteID string, lineNumber int, done bool) error {
-	noteSvc := s.getNoteService()
-	if noteSvc == nil {
-		return fmt.Errorf("note service not configured")
-	}
-	n, err := noteSvc.Get(ctx, userID, noteID)
-	if err != nil {
-		return fmt.Errorf("get note: %w", err)
-	}
-
-	// Read the actual file from disk.
-	notesDir := s.dbManager.UserNotesDir(userID)
-	absPath := filepath.Join(notesDir, n.FilePath)
-
-	// Defense-in-depth: reject paths that escape the notes directory.
-	if !strings.HasPrefix(absPath, filepath.Clean(notesDir)+string(filepath.Separator)) && absPath != filepath.Clean(notesDir) {
-		return fmt.Errorf("task.Service.toggleCheckboxInFile: path traversal detected")
-	}
-
+// specified line, and writes the file back. absPath must already be
+// resolved and validated by the caller.
+func (s *Service) toggleCheckboxInFile(absPath string, lineNumber int, done bool) error {
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)

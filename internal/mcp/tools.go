@@ -27,7 +27,7 @@ const (
 	maxNameLen     = 200
 	maxContentLen  = 512 * 1024 // 512 KB
 	maxQueryLen    = 10 * 1024  // 10 KB
-	maxSessionList = 100
+	maxSessionList = 1000
 )
 
 // registerTools registers all MCP tools on the server.

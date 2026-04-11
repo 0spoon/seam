@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"golang.org/x/time/rate"
 
 	"github.com/katata/seam/internal/auth"
 )
@@ -46,8 +45,9 @@ func ServeWS(hub *Hub, jwtManager *auth.JWTManager, handler MessageHandler, allo
 		}
 		defer func() { _ = conn.CloseNow() }()
 
-		// Set an explicit read limit (64KB) to prevent oversized messages.
-		conn.SetReadLimit(64 * 1024)
+		// Set an explicit read limit to bound memory on a malformed frame
+		// while still accommodating large chat/assistant payloads.
+		conn.SetReadLimit(4 * 1024 * 1024)
 
 		// Step 1: Read the auth message with a timeout.
 		authCtx, authCancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -140,9 +140,6 @@ func pingLoop(ctx context.Context, conn *websocket.Conn, logger *slog.Logger) {
 // readLoop reads messages from the WebSocket connection until the client
 // disconnects or the context is cancelled.
 func readLoop(ctx context.Context, hub *Hub, conn *websocket.Conn, userID string, logger *slog.Logger, handler MessageHandler) {
-	// Per-connection rate limiter to prevent message flooding.
-	limiter := rate.NewLimiter(20, 30)
-
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -158,13 +155,6 @@ func readLoop(ctx context.Context, hub *Hub, conn *websocket.Conn, userID string
 			}
 			logger.Warn("ws.readLoop: read error", "error", err)
 			return
-		}
-
-		// Rate-limit incoming messages per connection.
-		if !limiter.Allow() {
-			logger.Warn("ws.readLoop: message rate exceeded, dropping message",
-				"user_id", userID)
-			continue
 		}
 
 		var msg Message

@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 )
 
 // Handler handles HTTP requests for template endpoints.
@@ -88,7 +89,7 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 
 	name := chi.URLParam(r, "name")
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req applyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		// If the body is empty/EOF, use empty vars. For actual

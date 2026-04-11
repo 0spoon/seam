@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 )
 
 // ServiceInterface defines the business logic methods for chat history.
@@ -175,7 +176,7 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		Role       string     `json:"role"`
 		Content    string     `json:"content"`

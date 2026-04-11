@@ -18,7 +18,7 @@ const (
 )
 
 // defaultReindexLimit is the maximum number of notes loaded in a single ReindexAll call.
-const defaultReindexLimit = 10000
+const defaultReindexLimit = 100000
 
 // Embedder manages the embedding pipeline: chunking notes, generating
 // embeddings via a local embedding model, and storing them in ChromaDB.

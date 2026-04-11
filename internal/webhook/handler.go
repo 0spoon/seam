@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 )
 
 // Handler handles HTTP requests for webhook endpoints.
@@ -46,7 +47,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req CreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -157,7 +158,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req UpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -237,8 +238,8 @@ func (h *Handler) deliveries(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 10000 {
+		limit = 10000
 	}
 
 	deliveries, err := h.service.Deliveries(r.Context(), userID, webhookID, limit)

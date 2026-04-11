@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 )
 
 // Handler handles HTTP requests for capture endpoints.
@@ -50,13 +51,13 @@ func (h *Handler) capture(w http.ResponseWriter, r *http.Request) {
 
 	// For multipart/form-data, handle voice capture.
 	if len(contentType) >= 19 && contentType[:19] == "multipart/form-data" {
-		r.Body = http.MaxBytesReader(w, r.Body, 25<<20) // 25 MB max upload
+		r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxUploadBody)
 		h.handleVoiceCapture(w, r, userID)
 		return
 	}
 
-	// Otherwise, JSON body for URL capture (limit to 1MB).
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	// Otherwise, JSON body for URL capture.
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req captureRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 	"github.com/katata/seam/internal/validate"
 )
 
@@ -136,7 +137,7 @@ func (h *Handler) appendToNote(w http.ResponseWriter, r *http.Request) {
 
 	noteID := chi.URLParam(r, "id")
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		Text string `json:"text"`
 	}
@@ -171,7 +172,7 @@ func (h *Handler) bulkAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req BulkActionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -182,8 +183,8 @@ func (h *Handler) bulkAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "note_ids is required")
 		return
 	}
-	if len(req.NoteIDs) > 100 {
-		writeError(w, http.StatusBadRequest, "maximum 100 notes per bulk operation")
+	if len(req.NoteIDs) > 10000 {
+		writeError(w, http.StatusBadRequest, "maximum 10000 notes per bulk operation")
 		return
 	}
 
@@ -223,7 +224,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req CreateNoteReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -320,15 +321,15 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	// need the body should use the single-note GET endpoint.
 	filter.ExcludeBody = true
 
-	// Default limit is 100, max is 500.
+	// Default limit is 100, max is 10000 (single-user deployment).
 	filter.Limit = 100
 	if limit := r.URL.Query().Get("limit"); limit != "" {
 		if v, err := strconv.Atoi(limit); err == nil && v > 0 {
 			filter.Limit = v
 		}
 	}
-	if filter.Limit > 500 {
-		filter.Limit = 500
+	if filter.Limit > 10000 {
+		filter.Limit = 10000
 	}
 
 	if offset := r.URL.Query().Get("offset"); offset != "" {
@@ -383,7 +384,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 	noteID := chi.URLParam(r, "id")
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req UpdateNoteReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

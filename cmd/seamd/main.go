@@ -1121,10 +1121,6 @@ func run() error {
 	// 2. Close MCP server (stop background goroutines).
 	mcpSrv.Close()
 
-	// 2a. Stop handler background goroutines (rate limiter eviction).
-	aiHandler.Close()
-	authHandler.Close()
-
 	// 3. Close all WebSocket connections with close frames.
 	hub.CloseAll()
 

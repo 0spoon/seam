@@ -18,7 +18,7 @@ const writeTimeout = 5 * time.Second
 
 // maxConnsPerUser is the maximum number of concurrent WebSocket connections
 // allowed per user. Additional connections are rejected.
-const maxConnsPerUser = 10
+const maxConnsPerUser = 64
 
 // Message represents a WebSocket message.
 type Message struct {

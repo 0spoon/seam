@@ -36,7 +36,7 @@ func (s *FTSStore) Search(ctx context.Context, db *sql.DB, query string, limit, 
 		return nil, 0, nil
 	}
 
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 10000 {
 		limit = 100
 	}
 	if offset < 0 {
@@ -98,7 +98,7 @@ func (s *FTSStore) SearchScoped(ctx context.Context, db *sql.DB, query string, l
 		return nil, 0, nil
 	}
 
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 10000 {
 		limit = 100
 	}
 	if offset < 0 {
@@ -174,7 +174,7 @@ func (s *FTSStore) SearchWithRecency(ctx context.Context, db *sql.DB, query stri
 		return nil, 0, nil
 	}
 
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 10000 {
 		limit = 100
 	}
 	if offset < 0 {
@@ -202,8 +202,8 @@ func (s *FTSStore) SearchWithRecency(ctx context.Context, db *sql.DB, query stri
 	reranking := recencyBias > 0
 	if reranking {
 		fetchLimit = limit * 3
-		if fetchLimit > 500 {
-			fetchLimit = 500
+		if fetchLimit > 10000 {
+			fetchLimit = 10000
 		}
 		fetchOffset = 0
 	}
@@ -276,7 +276,7 @@ func (s *FTSStore) SearchScopedWithRecency(ctx context.Context, db *sql.DB, quer
 		return nil, 0, nil
 	}
 
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 10000 {
 		limit = 100
 	}
 	if offset < 0 {
@@ -315,8 +315,8 @@ func (s *FTSStore) SearchScopedWithRecency(ctx context.Context, db *sql.DB, quer
 	reranking := recencyBias > 0
 	if reranking {
 		fetchLimit = limit * 3
-		if fetchLimit > 500 {
-			fetchLimit = 500
+		if fetchLimit > 10000 {
+			fetchLimit = 10000
 		}
 		fetchOffset = 0
 	}

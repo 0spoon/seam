@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 	"github.com/katata/seam/internal/settings"
 	"github.com/katata/seam/internal/userdb"
 )
@@ -219,7 +220,7 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		Enabled   *bool  `json:"enabled"`
 		Period    string `json:"period"`

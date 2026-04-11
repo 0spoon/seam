@@ -52,8 +52,8 @@ func (h *Handler) searchFTS(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > 10000 {
+		limit = 10000
 	}
 
 	offset := 0
@@ -119,8 +119,8 @@ func (h *Handler) searchSemantic(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > 10000 {
+		limit = 10000
 	}
 
 	// Parse optional recency_bias parameter.

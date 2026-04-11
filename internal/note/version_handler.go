@@ -28,8 +28,8 @@ func (h *Handler) listVersions(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 10000 {
+		limit = 10000
 	}
 
 	offset := 0

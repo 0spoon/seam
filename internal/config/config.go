@@ -105,7 +105,7 @@ type DailyBriefingConfig struct {
 // AssistantConfig specifies agentic assistant parameters.
 type AssistantConfig struct {
 	// MaxIterations is the maximum number of tool-use loop iterations.
-	// Default: 10.
+	// Default: 25.
 	MaxIterations int `yaml:"max_iterations"`
 
 	// ConfirmationRequired lists tool names that require user approval.
@@ -469,7 +469,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Usage.TrackLocal = &t
 	}
 	if cfg.Assistant.MaxIterations <= 0 {
-		cfg.Assistant.MaxIterations = 10
+		cfg.Assistant.MaxIterations = 25
 	}
 	if len(cfg.Assistant.ConfirmationRequired) == 0 {
 		// H-5: Every assistant tool that mutates persistent state must

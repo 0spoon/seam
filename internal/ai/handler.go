@@ -8,25 +8,18 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/time/rate"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 	"github.com/katata/seam/internal/userdb"
 )
 
 // maxInputLen is the maximum allowed length (in bytes) for user-provided
 // query, selection, and prompt fields in AI handler requests.
-const maxInputLen = 100 * 1024 // 100 KB
-
-// Default rate limit: 10 requests per minute per user.
-const (
-	defaultRateLimit = rate.Limit(10.0 / 60.0) // 10 per minute
-	defaultRateBurst = 10                      // allow short bursts
-)
+const maxInputLen = 10 * 1024 * 1024 // 10 MB
 
 // Handler handles HTTP requests for AI endpoints.
 type Handler struct {
@@ -39,18 +32,6 @@ type Handler struct {
 	suggester   *Suggester
 	dbManager   userdb.Manager
 	logger      *slog.Logger
-
-	// Per-user rate limiters for AI endpoints.
-	limiterMu sync.Mutex
-	limiters  map[string]*userLimiter
-	done      chan struct{} // closed on Close() to stop background goroutines
-	closeOnce sync.Once
-}
-
-// userLimiter wraps a rate.Limiter with a last-seen timestamp for eviction.
-type userLimiter struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
 }
 
 // NewHandler creates a new AI Handler.
@@ -68,7 +49,7 @@ func NewHandler(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &Handler{
+	return &Handler{
 		queue:       queue,
 		chatSvc:     chatSvc,
 		synthesizer: synthesizer,
@@ -78,73 +59,12 @@ func NewHandler(
 		suggester:   suggester,
 		dbManager:   dbManager,
 		logger:      logger,
-		limiters:    make(map[string]*userLimiter),
-		done:        make(chan struct{}),
 	}
-	go h.evictStaleLimiters()
-	return h
-}
-
-// Close stops background goroutines (limiter eviction).
-func (h *Handler) Close() {
-	h.closeOnce.Do(func() { close(h.done) })
-}
-
-// getLimiter returns the per-user rate limiter, creating one if necessary.
-func (h *Handler) getLimiter(userID string) *rate.Limiter {
-	h.limiterMu.Lock()
-	defer h.limiterMu.Unlock()
-	if entry, ok := h.limiters[userID]; ok {
-		entry.lastSeen = time.Now()
-		return entry.limiter
-	}
-	lim := rate.NewLimiter(defaultRateLimit, defaultRateBurst)
-	h.limiters[userID] = &userLimiter{limiter: lim, lastSeen: time.Now()}
-	return lim
-}
-
-// evictStaleLimiters removes limiters that haven't been seen in 10 minutes.
-func (h *Handler) evictStaleLimiters() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-h.done:
-			return
-		case <-ticker.C:
-			h.limiterMu.Lock()
-			cutoff := time.Now().Add(-10 * time.Minute)
-			for uid, entry := range h.limiters {
-				if entry.lastSeen.Before(cutoff) {
-					delete(h.limiters, uid)
-				}
-			}
-			h.limiterMu.Unlock()
-		}
-	}
-}
-
-// rateLimitMiddleware enforces per-user rate limiting on AI endpoints.
-func (h *Handler) rateLimitMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := reqctx.UserIDFromContext(r.Context())
-		if userID == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		lim := h.getLimiter(userID)
-		if !lim.Allow() {
-			writeError(w, http.StatusTooManyRequests, "rate limit exceeded, try again later")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // Routes returns a chi router with AI routes mounted.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Use(h.rateLimitMiddleware)
 	r.Post("/ask", h.ask)
 	r.Post("/synthesize", h.synthesize)
 	r.Post("/synthesize/stream", h.synthesizeStream)
@@ -169,7 +89,7 @@ func (h *Handler) ask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		Query   string        `json:"query"`
 		History []ChatMessage `json:"history,omitempty"`
@@ -225,7 +145,7 @@ func (h *Handler) synthesize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var payload SynthesizePayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -270,7 +190,7 @@ func (h *Handler) synthesizeStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var payload SynthesizePayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -453,7 +373,7 @@ func (h *Handler) assist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		Action    string `json:"action"`
 		Selection string `json:"selection"`
@@ -504,7 +424,7 @@ func (h *Handler) suggestTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		NoteID string `json:"note_id"`
 	}
@@ -590,7 +510,7 @@ func (h *Handler) suggestProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		NoteID string `json:"note_id"`
 	}

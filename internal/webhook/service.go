@@ -42,11 +42,11 @@ var AllEventTypes = []string{
 const maxResponseBody = 1024
 
 // deliveryTimeout is the HTTP timeout for webhook delivery.
-const deliveryTimeout = 10 * time.Second
+const deliveryTimeout = 30 * time.Second
 
 // maxConcurrentDeliveries limits how many webhook deliveries can be in-flight
 // simultaneously, preventing resource exhaustion during bulk operations.
-const maxConcurrentDeliveries = 20
+const maxConcurrentDeliveries = 100
 
 // Sentinel errors for validation failures.
 var (

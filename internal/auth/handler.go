@@ -4,39 +4,19 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/time/rate"
 
 	"github.com/katata/seam/internal/reqctx"
-)
-
-// Per-IP rate limiting for auth endpoints: 5 requests per minute, burst of 5.
-const (
-	authRateLimit = rate.Limit(5.0 / 60.0) // 5 per minute
-	authRateBurst = 5
+	"github.com/katata/seam/internal/reqlimits"
 )
 
 // Handler handles HTTP requests for authentication endpoints.
 type Handler struct {
 	service *Service
 	logger  *slog.Logger
-
-	limiterMu sync.Mutex
-	limiters  map[string]*ipLimiter
-	done      chan struct{} // closed on Close() to stop background goroutines
-	closeOnce sync.Once
-}
-
-// ipLimiter wraps a rate.Limiter with a last-seen timestamp for eviction.
-type ipLimiter struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
 }
 
 // NewHandler creates a new auth Handler.
@@ -44,80 +24,15 @@ func NewHandler(service *Service, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &Handler{
-		service:  service,
-		logger:   logger,
-		limiters: make(map[string]*ipLimiter),
-		done:     make(chan struct{}),
+	return &Handler{
+		service: service,
+		logger:  logger,
 	}
-	go h.evictStaleLimiters()
-	return h
-}
-
-// Close stops background goroutines (limiter eviction). Safe to call multiple times.
-func (h *Handler) Close() {
-	h.closeOnce.Do(func() { close(h.done) })
-}
-
-// getIPLimiter returns the per-IP rate limiter, creating one if necessary.
-func (h *Handler) getIPLimiter(ip string) *rate.Limiter {
-	h.limiterMu.Lock()
-	defer h.limiterMu.Unlock()
-	if entry, ok := h.limiters[ip]; ok {
-		entry.lastSeen = time.Now()
-		return entry.limiter
-	}
-	lim := rate.NewLimiter(authRateLimit, authRateBurst)
-	h.limiters[ip] = &ipLimiter{limiter: lim, lastSeen: time.Now()}
-	return lim
-}
-
-// evictStaleLimiters removes limiters that haven't been seen in 10 minutes.
-func (h *Handler) evictStaleLimiters() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-h.done:
-			return
-		case <-ticker.C:
-			h.limiterMu.Lock()
-			cutoff := time.Now().Add(-10 * time.Minute)
-			for ip, entry := range h.limiters {
-				if entry.lastSeen.Before(cutoff) {
-					delete(h.limiters, ip)
-				}
-			}
-			h.limiterMu.Unlock()
-		}
-	}
-}
-
-// authRateLimitMiddleware enforces per-IP rate limiting on public auth endpoints.
-func (h *Handler) authRateLimitMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
-		if !h.getIPLimiter(ip).Allow() {
-			writeError(w, http.StatusTooManyRequests, "too many requests, try again later")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// clientIP extracts the client IP from the request, stripping the port.
-func clientIP(r *http.Request) string {
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
 }
 
 // Routes returns a chi router with all auth routes mounted.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.Use(h.authRateLimitMiddleware)
 	r.Post("/register", h.register)
 	r.Post("/login", h.login)
 	r.Post("/refresh", h.refresh)
@@ -142,9 +57,8 @@ func (h *Handler) ProtectedRoutes() chi.Router {
 func (h *Handler) CombinedRoutes(authMiddleware func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
 
-	// Public routes (no auth required, rate-limited per IP).
+	// Public routes (no auth required).
 	r.Group(func(r chi.Router) {
-		r.Use(h.authRateLimitMiddleware)
 		r.Post("/register", h.register)
 		r.Post("/login", h.login)
 		r.Post("/refresh", h.refresh)
@@ -186,7 +100,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
@@ -221,7 +135,7 @@ func (h *Handler) updateEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		Email string `json:"email"`
 	}
@@ -249,7 +163,7 @@ func (h *Handler) updateEmail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req RegisterReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -290,7 +204,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req LoginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -312,7 +226,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req RefreshReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -334,7 +248,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req LogoutReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

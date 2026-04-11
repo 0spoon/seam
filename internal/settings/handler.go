@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 )
 
 // ServiceInterface defines the business logic methods for settings.
@@ -72,7 +73,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var settings map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

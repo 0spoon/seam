@@ -352,8 +352,8 @@ func (s *Store) SearchMessages(ctx context.Context, db DBTX, query string, limit
 	if limit <= 0 {
 		limit = 20
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 10000 {
+		limit = 10000
 	}
 
 	// Use LIKE for basic substring matching. FTS on messages could be added later.

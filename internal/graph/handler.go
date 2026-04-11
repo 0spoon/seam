@@ -71,9 +71,11 @@ func (h *Handler) getGraph(w http.ResponseWriter, r *http.Request) {
 			filter.Limit = v
 		}
 	}
-	// Cap at maximum 500 nodes.
-	if filter.Limit > 500 {
-		filter.Limit = 500
+	// Cap at 2000 nodes. Deliberately tighter than other list APIs
+	// because Cytoscape + fcose gets sluggish on dense graphs regardless
+	// of how much the owner has on disk.
+	if filter.Limit > 2000 {
+		filter.Limit = 2000
 	}
 
 	graph, err := h.service.GetGraph(r.Context(), userID, filter)

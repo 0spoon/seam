@@ -259,11 +259,17 @@ func New(cfg Config) *Server {
 
 	return &Server{
 		httpServer: &http.Server{
-			Addr:         cfg.Listen,
-			Handler:      r,
-			ReadTimeout:  15 * time.Second,
-			WriteTimeout: 30 * time.Second,
-			IdleTimeout:  60 * time.Second,
+			Addr:    cfg.Listen,
+			Handler: r,
+			// Generous timeouts for local single-user deployment: long
+			// enough that slow local LLM roundtrips don't get cut off,
+			// short enough that a truly stuck connection still drains.
+			// SSE paths reset the write deadline per token via
+			// http.ResponseController, so the WriteTimeout only bounds
+			// non-streaming handlers.
+			ReadTimeout:  60 * time.Second,
+			WriteTimeout: 10 * time.Minute,
+			IdleTimeout:  10 * time.Minute,
 		},
 		router: r,
 		logger: cfg.Logger,

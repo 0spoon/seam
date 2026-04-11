@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/katata/seam/internal/reqctx"
+	"github.com/katata/seam/internal/reqlimits"
 )
 
 // Handler handles HTTP requests for task endpoints.
@@ -147,7 +148,7 @@ func (h *Handler) toggle(w http.ResponseWriter, r *http.Request) {
 
 	taskID := chi.URLParam(r, "id")
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, reqlimits.MaxJSONBody)
 	var req struct {
 		Done bool `json:"done"`
 	}

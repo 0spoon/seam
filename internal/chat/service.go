@@ -81,8 +81,8 @@ func (s *Service) ListConversations(ctx context.Context, userID string, limit, o
 	if limit <= 0 {
 		limit = 20
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 10000 {
+		limit = 10000
 	}
 	if offset < 0 {
 		offset = 0

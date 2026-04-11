@@ -40,8 +40,8 @@ func (s *Service) GetQueue(ctx context.Context, userID string, limit int) ([]Rev
 	if limit <= 0 {
 		limit = 20
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 10000 {
+		limit = 10000
 	}
 
 	var items []ReviewItem

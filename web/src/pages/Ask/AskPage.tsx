@@ -203,7 +203,15 @@ export function AskPage() {
       let confirmationPending: PendingConfirmation | null = null;
 
       const handleEvent = (e: AssistantStreamEvent) => {
-        if (e.type === 'text') {
+        if (e.type === 'text_delta') {
+          // Incremental token from a streaming provider. Append and
+          // flush so the UI renders tokens as they arrive.
+          finalText += e.content ?? '';
+          setStreamingText(finalText);
+        } else if (e.type === 'text') {
+          // Authoritative final text. For streaming providers this
+          // equals the accumulated deltas; for non-streaming it is the
+          // full blob.
           finalText = e.content ?? '';
           setStreamingText(finalText);
         } else if (e.type === 'tool_use') {
@@ -358,7 +366,10 @@ export function AskPage() {
     let nextConfirmation: PendingConfirmation | null = null;
 
     const handleEvent = (e: AssistantStreamEvent) => {
-      if (e.type === 'text') {
+      if (e.type === 'text_delta') {
+        finalText += e.content ?? '';
+        setStreamingText(finalText);
+      } else if (e.type === 'text') {
         finalText = e.content ?? '';
         setStreamingText(finalText);
       } else if (e.type === 'tool_use') {

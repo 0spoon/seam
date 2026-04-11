@@ -399,6 +399,175 @@ func (c *OllamaClient) ChatCompletionWithTools(ctx context.Context, model string
 	return tcr, nil
 }
 
+// ChatCompletionWithToolsStream streams an Ollama tool-chat as NDJSON.
+// Each response line carries a partial message.content chunk; the final
+// line has done=true and may carry accumulated tool_calls. The returned
+// channel emits a text-delta frame for every non-empty content chunk,
+// then exactly one Final frame with the accumulated content, tool calls,
+// and usage before closing.
+//
+// Ollama delivers tool calls only on the terminal frame in practice,
+// so we collect them there; if a future Ollama release interleaves
+// tool_calls into earlier frames we still accumulate by overwrite-wins.
+func (c *OllamaClient) ChatCompletionWithToolsStream(ctx context.Context, model string, messages []ToolMessage, tools []ToolDefinition) (<-chan ToolChatDelta, <-chan error) {
+	deltaCh := make(chan ToolChatDelta, 64)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(deltaCh)
+		defer close(errCh)
+
+		ctx, cancel := context.WithTimeout(ctx, c.chatTimeout)
+		defer cancel()
+
+		var ollamaTools []ollamaTool
+		for _, t := range tools {
+			ollamaTools = append(ollamaTools, ollamaTool{
+				Type:     "function",
+				Function: ollamaToolFunction(t),
+			})
+		}
+
+		var ollamaMessages []ollamaToolMessage
+		for _, m := range messages {
+			msg := ollamaToolMessage{
+				Role:    m.Role,
+				Content: m.Content,
+			}
+			for _, tc := range m.ToolCalls {
+				argsRaw := json.RawMessage(tc.Arguments)
+				msg.ToolCalls = append(msg.ToolCalls, ollamaToolCall{
+					Function: struct {
+						Name      string          `json:"name"`
+						Arguments json.RawMessage `json:"arguments"`
+					}{
+						Name:      tc.Name,
+						Arguments: argsRaw,
+					},
+				})
+			}
+			ollamaMessages = append(ollamaMessages, msg)
+		}
+
+		reqBody := ollamaToolChatRequest{
+			Model:    model,
+			Messages: ollamaMessages,
+			Stream:   true,
+			Tools:    ollamaTools,
+		}
+
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			errCh <- fmt.Errorf("ai.OllamaClient.ChatCompletionWithToolsStream: marshal: %w", err)
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/chat", bytes.NewReader(body))
+		if err != nil {
+			errCh <- fmt.Errorf("ai.OllamaClient.ChatCompletionWithToolsStream: new request: %w", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			errCh <- fmt.Errorf("ai.OllamaClient.ChatCompletionWithToolsStream: %w: %w", ErrOllamaUnavailable, err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if err := c.checkResponse(resp); err != nil {
+			errCh <- fmt.Errorf("ai.OllamaClient.ChatCompletionWithToolsStream: %w", err)
+			return
+		}
+
+		var (
+			contentBuf    bytes.Buffer
+			finalToolCalls []ollamaToolCall
+			promptEval     int
+			evalCount      int
+		)
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var chunk ollamaChatResponse
+			if err := json.Unmarshal(line, &chunk); err != nil {
+				slog.Warn("ai.OllamaClient.ChatCompletionWithToolsStream: malformed JSON line",
+					"error", err, "line", string(line[:min(len(line), 200)]))
+				continue
+			}
+
+			if chunk.Message.Content != "" {
+				contentBuf.WriteString(chunk.Message.Content)
+				select {
+				case deltaCh <- ToolChatDelta{TextDelta: chunk.Message.Content}:
+				case <-ctx.Done():
+					errCh <- ctx.Err()
+					return
+				}
+			}
+			if len(chunk.Message.ToolCalls) > 0 {
+				finalToolCalls = chunk.Message.ToolCalls
+			}
+
+			if chunk.Done {
+				if chunk.PromptEvalCount > 0 {
+					promptEval = chunk.PromptEvalCount
+				}
+				if chunk.EvalCount > 0 {
+					evalCount = chunk.EvalCount
+				}
+				break
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			errCh <- fmt.Errorf("ai.OllamaClient.ChatCompletionWithToolsStream: scan: %w", err)
+			return
+		}
+
+		final := &ToolChatResponse{
+			Content:      contentBuf.String(),
+			FinishReason: "stop",
+		}
+		if promptEval > 0 || evalCount > 0 {
+			final.Usage = &TokenUsage{
+				InputTokens:  promptEval,
+				OutputTokens: evalCount,
+				TotalTokens:  promptEval + evalCount,
+			}
+		}
+		if len(finalToolCalls) > 0 {
+			final.FinishReason = "tool_calls"
+			for _, tc := range finalToolCalls {
+				argsJSON, marshalErr := json.Marshal(tc.Function.Arguments)
+				if marshalErr != nil {
+					errCh <- fmt.Errorf("ai.OllamaClient.ChatCompletionWithToolsStream: marshal tool args for %s: %w", tc.Function.Name, marshalErr)
+					return
+				}
+				final.ToolCalls = append(final.ToolCalls, ToolCall{
+					ID:        fmt.Sprintf("call_%s_%d", tc.Function.Name, len(final.ToolCalls)),
+					Name:      tc.Function.Name,
+					Arguments: string(argsJSON),
+				})
+			}
+		}
+
+		select {
+		case deltaCh <- ToolChatDelta{Final: final}:
+		case <-ctx.Done():
+			errCh <- ctx.Err()
+			return
+		}
+	}()
+
+	return deltaCh, errCh
+}
+
 // checkResponse handles non-2xx responses from Ollama.
 func (c *OllamaClient) checkResponse(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {

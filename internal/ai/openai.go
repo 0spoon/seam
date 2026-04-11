@@ -382,6 +382,253 @@ func (c *OpenAIClient) ChatCompletionWithTools(ctx context.Context, model string
 	return tcr, nil
 }
 
+// openaiToolStreamChunk decodes one SSE chunk from a tool-chat stream.
+// OpenAI streams tool calls as an array of delta entries, each identified
+// by Index, with optional ID / function.name (usually on the first chunk
+// for that index) and a function.arguments string that must be
+// concatenated across chunks to produce the final JSON.
+type openaiToolStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content   string `json:"content"`
+			ToolCalls []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id,omitempty"`
+				Type     string `json:"type,omitempty"`
+				Function struct {
+					Name      string `json:"name,omitempty"`
+					Arguments string `json:"arguments,omitempty"`
+				} `json:"function"`
+			} `json:"tool_calls,omitempty"`
+		} `json:"delta"`
+		FinishReason *string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *openaiUsage `json:"usage,omitempty"`
+}
+
+// streamOptions toggles usage reporting on the terminal chunk. Without
+// this, OpenAI omits the usage object when stream=true.
+type openaiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+// openaiToolChatStreamRequest is the streaming variant of
+// openaiToolChatRequest that additionally requests usage on the final
+// chunk.
+type openaiToolChatStreamRequest struct {
+	Model         string              `json:"model"`
+	Messages      []openaiToolMessage `json:"messages"`
+	Stream        bool                `json:"stream"`
+	StreamOptions openaiStreamOptions `json:"stream_options"`
+	Tools         []openaiTool        `json:"tools,omitempty"`
+}
+
+// ChatCompletionWithToolsStream streams an OpenAI tool-chat. Text
+// deltas are emitted as they arrive; tool-call deltas are accumulated
+// locally by index and materialized into the Final frame only once the
+// stream closes. Final.Content is the concatenation of all streamed
+// text deltas, so the TUI's terminal-text overwrite is a no-op.
+func (c *OpenAIClient) ChatCompletionWithToolsStream(ctx context.Context, model string, messages []ToolMessage, tools []ToolDefinition) (<-chan ToolChatDelta, <-chan error) {
+	deltaCh := make(chan ToolChatDelta, 64)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(deltaCh)
+		defer close(errCh)
+
+		ctx, cancel := context.WithTimeout(ctx, c.chatTimeout)
+		defer cancel()
+
+		var oaiTools []openaiTool
+		for _, t := range tools {
+			oaiTools = append(oaiTools, openaiTool{
+				Type:     "function",
+				Function: openaiToolFunction(t),
+			})
+		}
+
+		var oaiMessages []openaiToolMessage
+		for _, m := range messages {
+			msg := openaiToolMessage{
+				Role:       m.Role,
+				Content:    m.Content,
+				ToolCallID: m.ToolCallID,
+				Name:       m.Name,
+			}
+			for _, tc := range m.ToolCalls {
+				msg.ToolCalls = append(msg.ToolCalls, openaiToolCall{
+					ID:   tc.ID,
+					Type: "function",
+					Function: struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					}{
+						Name:      tc.Name,
+						Arguments: tc.Arguments,
+					},
+				})
+			}
+			oaiMessages = append(oaiMessages, msg)
+		}
+
+		reqBody := openaiToolChatStreamRequest{
+			Model:         model,
+			Messages:      oaiMessages,
+			Stream:        true,
+			StreamOptions: openaiStreamOptions{IncludeUsage: true},
+			Tools:         oaiTools,
+		}
+
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			errCh <- fmt.Errorf("ai.OpenAIClient.ChatCompletionWithToolsStream: marshal: %w", err)
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			errCh <- fmt.Errorf("ai.OpenAIClient.ChatCompletionWithToolsStream: new request: %w", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			errCh <- fmt.Errorf("ai.OpenAIClient.ChatCompletionWithToolsStream: request failed: %w", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if err := c.checkResponse(resp); err != nil {
+			errCh <- fmt.Errorf("ai.OpenAIClient.ChatCompletionWithToolsStream: %w", err)
+			return
+		}
+
+		// Accumulators. Tool calls are indexed by the "index" field from
+		// the stream, which is stable across chunks belonging to the same
+		// call. A slice keyed by index handles the (typical) sparse
+		// sequential case, growing as needed.
+		type partialCall struct {
+			id        string
+			name      string
+			arguments strings.Builder
+		}
+		var (
+			contentBuf   strings.Builder
+			partialCalls []*partialCall
+			finishReason string
+			usage        *openaiUsage
+		)
+
+		ensureCall := func(idx int) *partialCall {
+			for len(partialCalls) <= idx {
+				partialCalls = append(partialCalls, &partialCall{})
+			}
+			return partialCalls[idx]
+		}
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				break
+			}
+
+			var chunk openaiToolStreamChunk
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				truncated := data
+				if runes := []rune(data); len(runes) > 200 {
+					truncated = string(runes[:200])
+				}
+				slog.Warn("ai.OpenAIClient.ChatCompletionWithToolsStream: malformed JSON chunk",
+					"error", err, "data", truncated)
+				continue
+			}
+
+			if chunk.Usage != nil {
+				usage = chunk.Usage
+			}
+
+			if len(chunk.Choices) == 0 {
+				// Usage-only frames carry an empty choices array.
+				continue
+			}
+			choice := chunk.Choices[0]
+
+			if choice.Delta.Content != "" {
+				contentBuf.WriteString(choice.Delta.Content)
+				select {
+				case deltaCh <- ToolChatDelta{TextDelta: choice.Delta.Content}:
+				case <-ctx.Done():
+					errCh <- ctx.Err()
+					return
+				}
+			}
+
+			for _, tc := range choice.Delta.ToolCalls {
+				pc := ensureCall(tc.Index)
+				if tc.ID != "" {
+					pc.id = tc.ID
+				}
+				if tc.Function.Name != "" {
+					pc.name = tc.Function.Name
+				}
+				if tc.Function.Arguments != "" {
+					pc.arguments.WriteString(tc.Function.Arguments)
+				}
+			}
+
+			if choice.FinishReason != nil {
+				finishReason = *choice.FinishReason
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			errCh <- fmt.Errorf("ai.OpenAIClient.ChatCompletionWithToolsStream: scan: %w", err)
+			return
+		}
+
+		final := &ToolChatResponse{
+			Content:      contentBuf.String(),
+			FinishReason: finishReason,
+		}
+		if usage != nil {
+			final.Usage = &TokenUsage{
+				InputTokens:  usage.PromptTokens,
+				OutputTokens: usage.CompletionTokens,
+				TotalTokens:  usage.TotalTokens,
+			}
+		}
+		for _, pc := range partialCalls {
+			if pc == nil || pc.name == "" {
+				continue
+			}
+			final.ToolCalls = append(final.ToolCalls, ToolCall{
+				ID:        pc.id,
+				Name:      pc.name,
+				Arguments: pc.arguments.String(),
+			})
+		}
+
+		select {
+		case deltaCh <- ToolChatDelta{Final: final}:
+		case <-ctx.Done():
+			errCh <- ctx.Err()
+			return
+		}
+	}()
+
+	return deltaCh, errCh
+}
+
 // checkResponse handles non-2xx responses from the OpenAI API.
 func (c *OpenAIClient) checkResponse(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {

@@ -1281,3 +1281,241 @@ func mustParseTime(t *testing.T, value string) time.Time {
 	require.NoError(t, err)
 	return parsed
 }
+
+// mockToolChatStreamer satisfies both ToolChatCompleter and
+// ToolChatStreamer. Each call emits a canned sequence of text deltas
+// followed by a final response frame.
+type mockToolChatStreamer struct {
+	deltas []string
+	final  *ai.ToolChatResponse
+	calls  int
+}
+
+func (m *mockToolChatStreamer) ChatCompletionWithTools(ctx context.Context, model string, messages []ai.ToolMessage, tools []ai.ToolDefinition) (*ai.ToolChatResponse, error) {
+	m.calls++
+	return m.final, nil
+}
+
+func (m *mockToolChatStreamer) ChatCompletionWithToolsStream(ctx context.Context, model string, messages []ai.ToolMessage, tools []ai.ToolDefinition) (<-chan ai.ToolChatDelta, <-chan error) {
+	m.calls++
+	deltaCh := make(chan ai.ToolChatDelta, len(m.deltas)+1)
+	errCh := make(chan error, 1)
+	for _, d := range m.deltas {
+		deltaCh <- ai.ToolChatDelta{TextDelta: d}
+	}
+	deltaCh <- ai.ToolChatDelta{Final: m.final}
+	close(deltaCh)
+	close(errCh)
+	return deltaCh, errCh
+}
+
+func TestService_ChatStream_EmitsTextDeltas(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	streamer := &mockToolChatStreamer{
+		deltas: []string{"Hel", "lo, ", "world!"},
+		final:  &ai.ToolChatResponse{Content: "Hello, world!", FinishReason: "stop"},
+	}
+
+	svc := NewService(ServiceDeps{
+		Store:         NewStore(),
+		MemoryStore:   NewMemoryStore(),
+		ProfileStore:  NewProfileStore(),
+		Registry:      NewToolRegistry(),
+		LLM:           streamer,
+		ChatModel:     "test-model",
+		UserDBManager: &mockUserDBManager{db: db},
+		ChatHistory:   chat.NewStore(),
+		Logger:        slog.Default(),
+		Config:        ServiceConfig{MaxIterations: 10},
+	})
+
+	eventCh, err := svc.ChatStream(context.Background(), ChatRequest{
+		UserID: "default", ConversationID: "conv1", Message: "Hi",
+	})
+	require.NoError(t, err)
+
+	var events []StreamEvent
+	for event := range eventCh {
+		events = append(events, event)
+	}
+
+	// Expect three text_delta events, one final text event, then done.
+	require.GreaterOrEqual(t, len(events), 5)
+	require.Equal(t, StreamEventTextDelta, events[0].Type)
+	require.Equal(t, "Hel", events[0].Content)
+	require.Equal(t, StreamEventTextDelta, events[1].Type)
+	require.Equal(t, "lo, ", events[1].Content)
+	require.Equal(t, StreamEventTextDelta, events[2].Type)
+	require.Equal(t, "world!", events[2].Content)
+	require.Equal(t, StreamEventText, events[3].Type)
+	require.Equal(t, "Hello, world!", events[3].Content)
+	require.Equal(t, StreamEventDone, events[4].Type)
+}
+
+func TestService_ChatStream_NoTextDeltasWhenToolCalls(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	// First call: streamer returns tool call with no text. Second call:
+	// a second streamer invocation runs after the tool executes and
+	// returns the final text as a stream of deltas.
+	tooledStreamer := &sequencedToolChatStreamer{
+		steps: []streamerStep{
+			{
+				deltas: nil,
+				final: &ai.ToolChatResponse{
+					FinishReason: "tool_calls",
+					ToolCalls:    []ai.ToolCall{{ID: "call_1", Name: "echo", Arguments: `{}`}},
+				},
+			},
+			{
+				deltas: []string{"Done"},
+				final:  &ai.ToolChatResponse{Content: "Done", FinishReason: "stop"},
+			},
+		},
+	}
+
+	registry := NewToolRegistry()
+	registry.Register(&Tool{
+		Name:        "echo",
+		Description: "echo",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+		Func: func(ctx context.Context, userID string, args json.RawMessage) (json.RawMessage, error) {
+			return json.RawMessage(`{"ok":true}`), nil
+		},
+		ReadOnly: true,
+	})
+
+	svc := NewService(ServiceDeps{
+		Store:         NewStore(),
+		MemoryStore:   NewMemoryStore(),
+		ProfileStore:  NewProfileStore(),
+		Registry:      registry,
+		LLM:           tooledStreamer,
+		ChatModel:     "test-model",
+		UserDBManager: &mockUserDBManager{db: db},
+		ChatHistory:   chat.NewStore(),
+		Logger:        slog.Default(),
+		Config:        ServiceConfig{MaxIterations: 10},
+	})
+
+	eventCh, err := svc.ChatStream(context.Background(), ChatRequest{
+		UserID: "default", ConversationID: "conv1", Message: "run echo",
+	})
+	require.NoError(t, err)
+
+	var events []StreamEvent
+	for event := range eventCh {
+		events = append(events, event)
+	}
+
+	// First iteration: tool_use only -- no text_delta.
+	// Second iteration: one text_delta ("Done"), then text, then done.
+	var (
+		toolUseIdx   = -1
+		firstDelta   = -1
+		finalTextIdx = -1
+	)
+	for i, e := range events {
+		switch {
+		case e.Type == StreamEventToolUse && toolUseIdx == -1:
+			toolUseIdx = i
+		case e.Type == StreamEventTextDelta && firstDelta == -1:
+			firstDelta = i
+		case e.Type == StreamEventText && finalTextIdx == -1:
+			finalTextIdx = i
+		}
+	}
+	require.GreaterOrEqual(t, toolUseIdx, 0, "expected tool_use event")
+	require.Greater(t, firstDelta, toolUseIdx, "text_delta should arrive after tool_use")
+	require.Equal(t, "Done", events[firstDelta].Content)
+	require.Greater(t, finalTextIdx, firstDelta, "final text must follow deltas")
+	require.Equal(t, "Done", events[finalTextIdx].Content)
+}
+
+func TestService_ChatStream_FallsBackWhenLLMIsNotStreamer(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`INSERT INTO conversations (id, title) VALUES ('conv1', 'Test')`)
+	require.NoError(t, err)
+
+	// mockToolChatCompleter intentionally does not satisfy
+	// ToolChatStreamer. The service must fall back to
+	// ChatCompletionWithTools and emit only the terminal text event.
+	mock := &mockToolChatCompleter{
+		responses: []*ai.ToolChatResponse{
+			{Content: "Plain response", FinishReason: "stop"},
+		},
+	}
+	svc := newTestService(t, db, mock, NewToolRegistry(), ServiceConfig{MaxIterations: 10})
+
+	eventCh, err := svc.ChatStream(context.Background(), ChatRequest{
+		UserID: "default", ConversationID: "conv1", Message: "Hi",
+	})
+	require.NoError(t, err)
+
+	var events []StreamEvent
+	for event := range eventCh {
+		events = append(events, event)
+	}
+
+	for _, e := range events {
+		require.NotEqual(t, StreamEventTextDelta, e.Type, "non-streamer LLM must not produce deltas")
+	}
+	var sawText bool
+	for _, e := range events {
+		if e.Type == StreamEventText {
+			sawText = true
+			require.Equal(t, "Plain response", e.Content)
+		}
+	}
+	require.True(t, sawText, "expected terminal text event")
+}
+
+// streamerStep describes one canned streamer invocation: zero or more
+// text deltas followed by a final response.
+type streamerStep struct {
+	deltas []string
+	final  *ai.ToolChatResponse
+}
+
+// sequencedToolChatStreamer chains multiple streamerStep replies across
+// successive calls. Required to cover multi-iteration agent loops where
+// the LLM makes a tool call on the first iteration and replies with
+// text on the second.
+type sequencedToolChatStreamer struct {
+	steps []streamerStep
+	calls int
+}
+
+func (s *sequencedToolChatStreamer) ChatCompletionWithTools(ctx context.Context, model string, messages []ai.ToolMessage, tools []ai.ToolDefinition) (*ai.ToolChatResponse, error) {
+	if s.calls >= len(s.steps) {
+		return nil, fmt.Errorf("sequencedToolChatStreamer: unexpected call %d", s.calls)
+	}
+	step := s.steps[s.calls]
+	s.calls++
+	return step.final, nil
+}
+
+func (s *sequencedToolChatStreamer) ChatCompletionWithToolsStream(ctx context.Context, model string, messages []ai.ToolMessage, tools []ai.ToolDefinition) (<-chan ai.ToolChatDelta, <-chan error) {
+	deltaCh := make(chan ai.ToolChatDelta, 8)
+	errCh := make(chan error, 1)
+	if s.calls >= len(s.steps) {
+		errCh <- fmt.Errorf("sequencedToolChatStreamer: unexpected call %d", s.calls)
+		close(deltaCh)
+		close(errCh)
+		return deltaCh, errCh
+	}
+	step := s.steps[s.calls]
+	s.calls++
+	for _, d := range step.deltas {
+		deltaCh <- ai.ToolChatDelta{TextDelta: d}
+	}
+	deltaCh <- ai.ToolChatDelta{Final: step.final}
+	close(deltaCh)
+	close(errCh)
+	return deltaCh, errCh
+}

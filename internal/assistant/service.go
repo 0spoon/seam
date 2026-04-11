@@ -533,7 +533,7 @@ func (s *Service) runAssistantTurn(
 		resp = seedResp
 	} else {
 		var llmErr error
-		resp, llmErr = s.llm.ChatCompletionWithTools(ctx, s.chatModel, messages, toolDefs)
+		resp, llmErr = s.chatWithToolsMaybeStream(ctx, eventCh, messages, toolDefs)
 		if llmErr != nil {
 			errMsg := fmt.Sprintf("llm call failed: %s", llmErr)
 			s.persistChatMessage(ctx, db, chat.Message{
@@ -700,6 +700,48 @@ func (s *Service) runAssistantTurn(
 	}
 
 	return messages, iterContinue
+}
+
+// chatWithToolsMaybeStream calls the LLM and returns its full response.
+// When the configured LLM implements ai.ToolChatStreamer, text tokens are
+// forwarded onto eventCh as StreamEventTextDelta events as they arrive.
+// When the LLM only implements the non-streaming ToolChatCompleter, a
+// single blocking call is issued and no delta events are emitted -- the
+// caller's terminal StreamEventText still fires with the full content.
+func (s *Service) chatWithToolsMaybeStream(
+	ctx context.Context,
+	eventCh chan<- StreamEvent,
+	messages []ai.ToolMessage,
+	toolDefs []ai.ToolDefinition,
+) (*ai.ToolChatResponse, error) {
+	streamer, ok := s.llm.(ai.ToolChatStreamer)
+	if !ok {
+		return s.llm.ChatCompletionWithTools(ctx, s.chatModel, messages, toolDefs)
+	}
+
+	deltaCh, errCh := streamer.ChatCompletionWithToolsStream(ctx, s.chatModel, messages, toolDefs)
+	var final *ai.ToolChatResponse
+	for delta := range deltaCh {
+		if delta.Final != nil {
+			final = delta.Final
+			continue
+		}
+		if delta.TextDelta == "" {
+			continue
+		}
+		select {
+		case eventCh <- StreamEvent{Type: StreamEventTextDelta, Content: delta.TextDelta}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if err := <-errCh; err != nil {
+		return nil, err
+	}
+	if final == nil {
+		return nil, fmt.Errorf("assistant.Service.chatWithToolsMaybeStream: stream closed without final frame")
+	}
+	return final, nil
 }
 
 // ResumeAction approves a pending action, executes its tool, persists
@@ -1095,6 +1137,7 @@ type StreamEvent struct {
 // Stream event types.
 const (
 	StreamEventText         = "text"
+	StreamEventTextDelta    = "text_delta"
 	StreamEventToolUse      = "tool_use"
 	StreamEventError        = "error"
 	StreamEventDone         = "done"

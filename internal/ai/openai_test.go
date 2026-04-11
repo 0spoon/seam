@@ -173,6 +173,117 @@ func TestOpenAIClient_ChatCompletionStream(t *testing.T) {
 	require.Equal(t, []string{"Hello", " from", " OpenAI", "!"}, tokens)
 }
 
+func TestOpenAIClient_ChatCompletionWithToolsStream_TextOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/chat/completions", r.URL.Path)
+
+		var req openaiToolChatStreamRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+		require.True(t, req.Stream)
+		require.True(t, req.StreamOptions.IncludeUsage)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		require.True(t, ok)
+
+		chunks := []string{
+			`{"choices":[{"delta":{"content":"Hel"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"content":"lo"},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"content":" world"},"finish_reason":"stop"}]}`,
+			`{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient("test-key", server.URL, 30*time.Second)
+	deltaCh, errCh := client.ChatCompletionWithToolsStream(context.Background(), "gpt-4o", []ToolMessage{
+		{Role: "user", Content: "hi"},
+	}, nil)
+
+	var textDeltas []string
+	var final *ToolChatResponse
+	for d := range deltaCh {
+		if d.Final != nil {
+			final = d.Final
+			continue
+		}
+		if d.TextDelta != "" {
+			textDeltas = append(textDeltas, d.TextDelta)
+		}
+	}
+	require.NoError(t, <-errCh)
+
+	require.Equal(t, []string{"Hel", "lo", " world"}, textDeltas)
+	require.NotNil(t, final)
+	require.Equal(t, "Hello world", final.Content)
+	require.Equal(t, "stop", final.FinishReason)
+	require.Empty(t, final.ToolCalls)
+	require.NotNil(t, final.Usage)
+	require.Equal(t, 7, final.Usage.InputTokens)
+	require.Equal(t, 3, final.Usage.OutputTokens)
+	require.Equal(t, 10, final.Usage.TotalTokens)
+}
+
+func TestOpenAIClient_ChatCompletionWithToolsStream_ToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		require.True(t, ok)
+
+		// OpenAI streams tool calls as multiple delta chunks: the first
+		// carries the id and function.name, subsequent chunks extend
+		// function.arguments. Text stays empty throughout.
+		chunks := []string{
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"get_time"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"tz\":"}}]},"finish_reason":null}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"UTC\"}"}}]},"finish_reason":"tool_calls"}]}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient("test-key", server.URL, 30*time.Second)
+	deltaCh, errCh := client.ChatCompletionWithToolsStream(context.Background(), "gpt-4o", []ToolMessage{
+		{Role: "user", Content: "what time is it"},
+	}, []ToolDefinition{
+		{Name: "get_time", Description: "time", Parameters: json.RawMessage(`{"type":"object"}`)},
+	})
+
+	var textCount int
+	var final *ToolChatResponse
+	for d := range deltaCh {
+		if d.Final != nil {
+			final = d.Final
+			continue
+		}
+		if d.TextDelta != "" {
+			textCount++
+		}
+	}
+	require.NoError(t, <-errCh)
+
+	require.Zero(t, textCount, "tool-only response should emit no text deltas")
+	require.NotNil(t, final)
+	require.Equal(t, "tool_calls", final.FinishReason)
+	require.Empty(t, final.Content)
+	require.Len(t, final.ToolCalls, 1)
+	require.Equal(t, "call_abc", final.ToolCalls[0].ID)
+	require.Equal(t, "get_time", final.ToolCalls[0].Name)
+	require.Equal(t, `{"tz":"UTC"}`, final.ToolCalls[0].Arguments)
+}
+
 func TestOpenAIClient_ChatCompletionStream_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

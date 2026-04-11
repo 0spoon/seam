@@ -210,3 +210,104 @@ func TestOllamaClient_ChatCompletionStream(t *testing.T) {
 		}
 	})
 }
+
+func TestOllamaClient_ChatCompletionWithToolsStream_TextOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/chat", r.URL.Path)
+
+		var req ollamaToolChatRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		require.NoError(t, err)
+		require.True(t, req.Stream)
+
+		flusher, ok := w.(http.Flusher)
+		require.True(t, ok)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+
+		lines := []string{
+			`{"message":{"role":"assistant","content":"Hel"},"done":false}`,
+			`{"message":{"role":"assistant","content":"lo"},"done":false}`,
+			`{"message":{"role":"assistant","content":" world"},"done":false}`,
+			`{"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":5,"eval_count":3}`,
+		}
+		for _, l := range lines {
+			fmt.Fprintln(w, l)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	client := NewOllamaClient(server.URL, 30*time.Second, 30*time.Second)
+	deltaCh, errCh := client.ChatCompletionWithToolsStream(context.Background(), "test-model", []ToolMessage{
+		{Role: "user", Content: "hi"},
+	}, nil)
+
+	var textDeltas []string
+	var final *ToolChatResponse
+	for d := range deltaCh {
+		if d.Final != nil {
+			final = d.Final
+			continue
+		}
+		if d.TextDelta != "" {
+			textDeltas = append(textDeltas, d.TextDelta)
+		}
+	}
+	require.NoError(t, <-errCh)
+
+	require.Equal(t, []string{"Hel", "lo", " world"}, textDeltas)
+	require.NotNil(t, final)
+	require.Equal(t, "Hello world", final.Content)
+	require.Equal(t, "stop", final.FinishReason)
+	require.Empty(t, final.ToolCalls)
+	require.NotNil(t, final.Usage)
+	require.Equal(t, 5, final.Usage.InputTokens)
+	require.Equal(t, 3, final.Usage.OutputTokens)
+	require.Equal(t, 8, final.Usage.TotalTokens)
+}
+
+func TestOllamaClient_ChatCompletionWithToolsStream_ToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		require.True(t, ok)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+
+		// Ollama emits tool calls on the terminal frame with done=true.
+		lines := []string{
+			`{"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"get_time","arguments":{"tz":"UTC"}}}]},"done":true,"prompt_eval_count":4,"eval_count":2}`,
+		}
+		for _, l := range lines {
+			fmt.Fprintln(w, l)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	client := NewOllamaClient(server.URL, 30*time.Second, 30*time.Second)
+	deltaCh, errCh := client.ChatCompletionWithToolsStream(context.Background(), "test-model", []ToolMessage{
+		{Role: "user", Content: "time?"},
+	}, []ToolDefinition{
+		{Name: "get_time", Description: "time", Parameters: json.RawMessage(`{"type":"object"}`)},
+	})
+
+	var textCount int
+	var final *ToolChatResponse
+	for d := range deltaCh {
+		if d.Final != nil {
+			final = d.Final
+			continue
+		}
+		if d.TextDelta != "" {
+			textCount++
+		}
+	}
+	require.NoError(t, <-errCh)
+
+	require.Zero(t, textCount)
+	require.NotNil(t, final)
+	require.Equal(t, "tool_calls", final.FinishReason)
+	require.Empty(t, final.Content)
+	require.Len(t, final.ToolCalls, 1)
+	require.Equal(t, "get_time", final.ToolCalls[0].Name)
+	require.JSONEq(t, `{"tz":"UTC"}`, final.ToolCalls[0].Arguments)
+}

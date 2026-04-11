@@ -404,9 +404,16 @@ func (m askModel) nextToolIdx(current, step int) int {
 // handleStreamEvent mutates the model in response to one SSE event.
 func (m askModel) handleStreamEvent(e AssistantStreamEvent) askModel {
 	switch e.Type {
+	case "text_delta":
+		// Incremental text chunks from streaming providers. Appended
+		// to the scratch buffer as they arrive; the terminal "text"
+		// event later overwrites with the authoritative content.
+		m.streamingText += e.Content
+
 	case "text":
-		// Text arrives as one final blob (the inner LLM call is
-		// non-streaming). We convert it to a turn on "done".
+		// Authoritative final text. For streaming providers this is
+		// the concatenation of every prior text_delta; for
+		// non-streaming providers it is the single blob we get back.
 		m.streamingText = e.Content
 
 	case "tool_use":

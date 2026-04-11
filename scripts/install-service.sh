@@ -11,6 +11,7 @@ CONFIG="$REPO_ROOT/seam-server.yaml"
 WEB_DIST="$REPO_ROOT/web/dist"
 CHROMA_COMPOSE="$REPO_ROOT/docker/chroma-compose.yml"
 CHROMA_SUPERVISOR="$REPO_ROOT/scripts/chroma-supervisor.sh"
+ONBOARD_SKILL_INSTALLER="$REPO_ROOT/scripts/install-onboard-skill.sh"
 
 info() { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
 ok()   { printf "\033[1;32m==>\033[0m %s\n" "$1"; }
@@ -297,6 +298,24 @@ EOF
     echo
 }
 
+install_seam_onboard_skill() {
+    # Claude Code loads skills from ~/.claude/skills/. We drop a one-shot
+    # onboarding skill there so the user can run /seam-onboard in any
+    # session to install Seam-awareness into a CLAUDE.md (global or per
+    # project). The skill removes itself on success; re-run
+    # `make install-onboard-skill` to put it back.
+    if [ ! -x "$ONBOARD_SKILL_INSTALLER" ] && [ ! -r "$ONBOARD_SKILL_INSTALLER" ]; then
+        return 0
+    fi
+
+    echo
+    info "Installing /seam-onboard Claude Code skill"
+    if ! bash "$ONBOARD_SKILL_INSTALLER"; then
+        warn "Failed to install /seam-onboard skill (non-fatal)"
+        return 0
+    fi
+}
+
 maybe_install_chroma_supervisor() {
     # Precondition: compose file exists.
     if [ ! -f "$CHROMA_COMPOSE" ]; then
@@ -351,3 +370,5 @@ case "$OS" in
 esac
 
 maybe_install_chroma_supervisor
+
+install_seam_onboard_skill

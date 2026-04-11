@@ -193,6 +193,17 @@ func run() error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
+	// Take an exclusive advisory lock on a pid file before touching the
+	// DB. This is the canonical defense against "two seamds on the same
+	// data dir" -- one will fail immediately with an actionable error
+	// message instead of racing over port 8080 or corrupting SQLite.
+	pidPath := filepath.Join(cfg.DataDir, "seamd.pid")
+	pl, err := acquirePIDLock(pidPath)
+	if err != nil {
+		return err
+	}
+	defer pl.release()
+
 	// Open seam.db -- single database for everything (owner, notes, projects, etc.).
 	seamDBPath := filepath.Join(cfg.DataDir, "seam.db")
 	seamDB, err := auth.OpenDB(seamDBPath)
@@ -1040,8 +1051,36 @@ func run() error {
 		}
 	}
 
-	// Graceful shutdown with 10-second timeout.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Once graceful shutdown begins, a second SIGINT/SIGTERM should hard
+	// exit instead of being swallowed. Without this, a user who Ctrl-Cs
+	// a hung shutdown and then closes their terminal can leave seamd
+	// running detached -- the exact "stale process" scenario we are
+	// trying to prevent. NotifyContext is still registered for the
+	// same signals, but it only cancels an already-cancelled context;
+	// signal.Notify delivers to every registered channel, so forceCh
+	// sees the second signal.
+	forceCh := make(chan os.Signal, 1)
+	signal.Notify(forceCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-forceCh
+		logger.Warn("second signal received, forcing exit")
+		// Release the pid file so a subsequent restart is clean. We
+		// skip the other deferred cleanups because they are exactly
+		// what is hanging.
+		pl.release()
+		os.Exit(1)
+	}()
+
+	// Graceful shutdown with a 5-second HTTP drain + 5-second drain for
+	// each of the AI queue and scheduler. Worst case total is ~15s,
+	// which fits comfortably under launchd's default ExitTimeOut of 20s
+	// -- so a `launchctl bootout` finishes via our graceful path
+	// instead of a SIGKILL that would leave a stale pid file behind.
+	const (
+		httpShutdownTimeout = 5 * time.Second
+		drainTimeout        = 5 * time.Second
+	)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer cancel()
 
 	logger.Info("shutting down...")
@@ -1061,15 +1100,29 @@ func run() error {
 	// 3. Close all WebSocket connections with close frames.
 	hub.CloseAll()
 
-	// 4. Wait for AI queue workers to finish before closing databases.
-	<-aiQueueDone
+	// 4. Wait for AI queue workers to finish before closing databases,
+	//    but bound the wait. A stuck handler (DB lock, slow Ollama
+	//    call that ignores ctx) could otherwise block shutdown for up
+	//    to DefaultTaskTimeout (5 minutes). Losing the result of one
+	//    in-flight task is better than hanging the process.
+	select {
+	case <-aiQueueDone:
+	case <-time.After(drainTimeout):
+		logger.Warn("ai queue drain timed out, continuing shutdown",
+			"timeout", drainTimeout)
+	}
 
 	// 4a. Wait for the scheduler goroutine to return so any in-flight
 	//     tick (e.g. briefing.Generate writing to the user DB) finishes
 	//     before the deferred CloseAll runs and yields "database is
-	//     closed" errors.
+	//     closed" errors. Bounded for the same reason as aiQueueDone.
 	if schedDone != nil {
-		<-schedDone
+		select {
+		case <-schedDone:
+		case <-time.After(drainTimeout):
+			logger.Warn("scheduler drain timed out, continuing shutdown",
+				"timeout", drainTimeout)
+		}
 	}
 
 	// 5. Stop file watcher (deferred w.Close() handles this -- LIFO before DB).

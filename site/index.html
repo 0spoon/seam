@@ -593,7 +593,7 @@ a:focus-visible, button:focus-visible {
       <a href="#quickstart" class="btn-primary">Get Started</a>
       <a href="https://github.com/0x3k/seam" class="btn-ghost">View on GitHub</a>
     </div>
-    <code class="hero-cmd">git clone https://github.com/0x3k/seam.git &amp;&amp; cd seam &amp;&amp; make build</code>
+    <code class="hero-cmd">git clone https://github.com/0x3k/seam.git &amp;&amp; cd seam &amp;&amp; make build &amp;&amp; make init &amp;&amp; make dev</code>
   </div>
 </section>
 
@@ -765,7 +765,7 @@ a:focus-visible, button:focus-visible {
 <span class="cmd">cd</span> seam
 <span class="cmd">make build</span>      <span class="comment"># builds seamd (server) + seam (TUI)</span>
 <span class="cmd">make init</span>       <span class="comment"># interactive setup: JWT secret, data dir, LLM</span>
-<span class="cmd">make run</span>        <span class="comment"># starts server on :8080</span></pre>
+<span class="cmd">make dev</span>        <span class="comment"># runs seamd + Vite + Chroma in parallel</span></pre>
     </div>
     <h3 class="fade-in" style="font-size: 0.9375rem; color: var(--text-primary); margin-bottom: 16px;">What you'll need</h3>
     <div class="prereq-grid fade-in">

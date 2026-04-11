@@ -71,15 +71,11 @@ The [Librarian](docs/ai.md#librarian) is an autonomous background service that r
 ## Quick Start
 
 ```bash
-git clone https://github.com/katata/seam.git
+git clone https://github.com/0x3k/seam.git
 cd seam
 make build          # builds bin/seamd (server), bin/seam (TUI), bin/seam-reindex (re-embed tool)
 make init           # interactive setup: JWT secret, data dir, LLM provider, ChromaDB
-make run            # starts server on :8080
-
-# In separate terminals:
-./bin/seam --server http://localhost:8080          # TUI client
-cd web && npm install && npm run dev               # Web frontend on :5173
+make dev            # runs seamd + Vite + Chroma in parallel (Ctrl-C to stop)
 ```
 
 Seam works without AI -- you get a solid markdown note system with full-text search out of the box. Add Ollama for AI features. Add ChromaDB for semantic search (`make init` can manage a Docker container for you). See [Getting Started](docs/getting-started.md) for prerequisites and the full setup walkthrough.

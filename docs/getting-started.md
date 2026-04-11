@@ -79,14 +79,13 @@ seamd does not require ChromaDB to start. On startup, it does a 2-second heartbe
 ## Running
 
 ```bash
-# Start the server
-make run                                          # builds and starts seamd on :8080
+# Everything at once (recommended for development)
+make dev                                          # runs seamd + Vite + Chroma in parallel (Ctrl-C to stop)
 
-# TUI client (separate terminal)
-./bin/seam --server http://localhost:8080
-
-# Web frontend (separate terminal)
-cd web && npm install && npm run dev              # Vite dev server on :5173, proxies /api to :8080
+# Or run components separately
+make run                                          # seamd only, on :8080
+make dev-web                                      # Vite dev server only, on :5173
+./bin/seam --server http://localhost:8080          # TUI client (separate terminal)
 ```
 
 ## Configuration

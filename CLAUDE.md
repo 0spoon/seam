@@ -56,30 +56,48 @@ data/templates/     Built-in note templates
 
 ```bash
 # Build & Run
-make build              # Build server + TUI to ./bin/
-make run                # Build and run server (reads seam-server.yaml, default :8080)
-make dev-web            # Vite dev server on :5173, proxies /api to :8080
+make build              # Build server + TUI + reindex tool to ./bin/
+make dev                # Run seamd + Vite + Chroma in parallel (Ctrl-C to stop)
+make run                # Build and run seamd alone (no Vite, no Chroma)
+make dev-web            # Vite dev server only (:5173, proxies /api to :8080)
+
+# Testing
+make test               # Go unit tests
+make test-integration   # Integration tests (real filesystem, on-disk SQLite)
+make test-race          # Go unit tests with race detector
+make test-web           # Frontend tests (Vitest, single run)
+make test-web-watch     # Frontend tests in watch mode
+
+# Quality
+make lint               # golangci-lint + eslint
+make fmt                # gofmt + prettier
+make vet                # go vet
+make typecheck          # TypeScript typecheck (no emit)
+make coverage           # Go tests with coverage report (coverage.html)
+
+# Single test
+go test ./internal/note/ -run TestService_Create -v
+cd web && npx vitest run src/api/client
 
 # ChromaDB container (optional, opt-in via `make init`)
-make chroma-up          # Start ChromaDB container (docker/chroma-compose.yml)
+make chroma-up          # Start ChromaDB container
 make chroma-down        # Stop and remove the container
 make chroma-logs        # Follow container logs
 make chroma-status      # Container status
 
-# Testing
-make test               # Go unit tests (no filesystem, no external services)
-make test-integration   # Integration tests (real filesystem, on-disk SQLite)
-make test-web           # Frontend tests (Vitest)
+# Service management (after `make install-service`)
+make service-status     # Show service status
+make service-start      # Start seamd service
+make service-stop       # Stop seamd service
+make service-restart    # Restart seamd service
+make logs               # Tail seamd + Chroma logs
+make kill-stale         # Kill stale seamd listener on configured port
 
-# Single Go test
-go test ./internal/note/ -run TestService_Create -v
-
-# Frontend test (single file)
-cd web && npx vitest run src/api/client
-
-# Linting & Formatting
-make lint               # golangci-lint + eslint
-make fmt                # gofmt + prettier
+# Install
+make install-service    # Install seamd as launchd/systemd user service
+make install-tui        # Install seam TUI to /usr/local/bin (PREFIX= to override)
+make reindex            # Re-embed all notes after switching embedding model
+make clean              # Remove bin/, web/dist, coverage files
 ```
 
 ## Tech Stack

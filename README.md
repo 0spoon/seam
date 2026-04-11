@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>Where ideas connect.</strong><br/>
-  <em>A local-first, AI-powered knowledge system built on plain markdown.</em>
+  <em>Shared memory for you and your AI agents. Local-first, built on plain markdown.</em>
 </p>
 
 <p align="center">
@@ -26,19 +26,27 @@
   <img src="./resources/feature-image.webp" alt="Seam -- where things connect" width="100%">
 </p>
 
-Seam is a personal knowledge system where your notes are plain `.md` files on disk and AI helps you think, find, and connect ideas. It runs entirely on your machine by default -- your notes never leave, your AI never phones home, and you never pay per token. Switch to OpenAI or Anthropic with one config line when you want to.
+You talk to a lot of agents. Claude Code for one task, Cursor for another, a research session here, a debugging session there. Each one starts from zero. What you figured out in one conversation doesn't carry over to the next. What one agent discovered, the other will never know. The knowledge that didn't make it into code or your own memory is gone.
+
+Seam is the fix. It's a local knowledge base -- plain `.md` files on disk -- with an [MCP server](docs/mcp.md) that gives every agent you work with shared, persistent memory. Start a coding session and your agent gets a briefing: what happened in past sessions, what other agents found, what's on your plate. End the session and findings are preserved for next time. Your agents stop being isolated conversations and start being a team that builds on each other's work.
+
+Everything runs on your machine by default. Your notes, your AI, your vectors -- nothing leaves unless you want it to.
 
 > **Seam** -- _the join between two pieces._ Knowledge gains meaning at the intersections.
 
 ## Why Seam
 
+**Your agents forget everything.** Every conversation is a blank slate. You re-explain context, re-share decisions, watch agents rediscover things you already know. Seam gives every MCP-compatible agent -- Claude Code, Cursor, Windsurf, anything -- access to persistent memory, session history, and your full knowledge base. What one agent learns, the next one knows.
+
 **Your notes are files.** Not rows in someone else's database. Plain markdown with YAML frontmatter, organized in folders. Edit them with Seam, vim, VS Code, or anything else. Back them up with git, sync them with Syncthing, grep them from the terminal. No export step because there's nothing to export from.
 
 **AI runs on your machine.** [Ollama](https://ollama.com) powers everything by default -- embeddings, chat, search, writing assist. Zero cloud dependencies, zero API costs, zero privacy trade-offs. Need more horsepower? Switch to OpenAI or Anthropic with one config line. Your notes stay local either way.
 
-**AI agents get memory.** Seam exposes an [MCP server](docs/mcp.md) that gives tools like Claude Code and Cursor persistent long-term memory, session tracking, and direct access to your knowledge base. Your AI assistant remembers what happened last session, knows what you're working on, and can search your notes for context -- across conversations, across tools.
-
 ## What You Can Do
+
+### Connect all your agents
+
+Seam's [MCP server](docs/mcp.md) turns isolated agent conversations into a connected workflow. Every agent reads from and writes to the same knowledge base -- session plans, findings, research notes, decisions. Multiple agents can [collaborate](docs/mcp.md#research-lab) on the same investigation through session hierarchies and shared research labs. Your afternoon debugging session in Cursor knows what your morning architecture session in Claude Code decided.
 
 ### Ask your notes anything
 
@@ -50,7 +58,7 @@ The agentic assistant doesn't just answer questions about your knowledge base --
 
 ### Capture fast, find later
 
-Quick capture for passing thoughts. URL-to-note for articles. Voice transcription via local Whisper -- no audio leaves your machine. Daily notes. Templates. Everything lands in your inbox until you or the Librarian sorts it.
+Quick capture for passing thoughts. URL-to-note for articles. Voice transcription via local Whisper -- no audio leaves your machine. Daily notes. Templates. Everything lands in your inbox until you or the [Librarian](docs/ai.md#librarian) sorts it.
 
 ### See how ideas connect
 
@@ -59,10 +67,6 @@ The knowledge graph shows connections between notes through `[[wikilinks]]`, sha
 ### Let AI organize for you
 
 The [Librarian](docs/ai.md#librarian) is an autonomous background service that reviews orphaned and untagged notes, assigns them to projects, and adds tags from your existing taxonomy. It never touches your content, never invents new categories, and only processes notes that have been quiet for 15+ minutes. A library that shelves its own books.
-
-### Give your AI agents memory
-
-Seam's [MCP server](docs/mcp.md) turns AI coding tools into persistent collaborators. Start a session and your agent gets a briefing -- recent activity, relevant memories, open tasks. End it and findings are preserved for next time. Multiple agents can collaborate on the same investigation through session hierarchies and shared [research labs](docs/mcp.md#research-lab). Your coding agent and your knowledge base, connected.
 
 ## Quick Start
 

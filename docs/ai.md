@@ -1,6 +1,6 @@
 # AI & Assistant
 
-AI in Seam isn't a chat widget bolted onto the side -- it's woven into how you capture, organize, search, and think. Everything runs locally by default through Ollama. No API keys, no usage meters, no one reading your notes. When you need more power, switch providers with one config line.
+Seam's AI layer works both sides: it helps *you* think, search, and write inside your knowledge base, and it gives your *agents* the context they need to be useful across sessions. Everything runs locally by default through Ollama -- no API keys, no usage meters, no one reading your notes. Switch providers with one config line when you need more power.
 
 ## Providers
 

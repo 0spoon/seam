@@ -1,16 +1,16 @@
 # MCP Server
 
-AI coding agents are stateless by default. Every conversation starts from scratch -- no memory of what happened last session, no awareness of what other agents found, no access to the context sitting in your notes. You end up repeating yourself, re-explaining decisions, and watching agents rediscover things you already know.
+You work with many agents. A Claude Code session for backend work, a Cursor session for frontend, a research conversation for architecture decisions. Each one is a separate context window. Each one forgets everything when the conversation ends. The insight from your morning session doesn't exist in your afternoon session. What one agent discovered, the other will never know. The knowledge that didn't make it into code -- the reasoning, the dead ends, the decisions -- is lost.
 
-Seam fixes this. It exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp` that gives any compatible agent -- Claude Code, Cursor, Windsurf, or anything that speaks MCP -- persistent long-term memory, structured session tracking, and direct access to your knowledge base.
+Seam is the shared memory layer for all of them. It exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/api/mcp` that gives any compatible agent persistent long-term memory, structured session tracking, and direct access to your knowledge base.
 
-**What this means in practice:**
+**What changes:**
 
-- Your agent starts a session and gets a **briefing** -- recent activity, relevant memories from past sessions, open tasks, and context from your notes.
-- During work, it **stores findings** as persistent memory that survives across conversations.
-- When it finishes, it **records what it learned** so the next session (or a different agent) picks up where it left off.
-- Multiple agents can **collaborate** on the same investigation through session hierarchies and shared research labs.
-- Your agent can **search, read, and create notes** in your knowledge base -- turning your notes into shared context between you and your tools.
+- An agent **starts a session** and gets a briefing: what happened in past sessions, what other agents found, open tasks, relevant notes.
+- During work, it **stores findings** -- architectural decisions, debugging insights, research notes -- as persistent memory that survives after the conversation ends.
+- When it finishes, it **records what it learned** so the next session picks up where this one left off.
+- Multiple agents **collaborate** on the same problem through session hierarchies and shared [research labs](#research-lab). Agent B sees what Agent A tried and decided.
+- Every agent can **search, read, and create notes** in the same knowledge base -- your notes become shared context between you and all of your tools.
 
 ## Connecting
 

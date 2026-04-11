@@ -113,30 +113,6 @@ make fmt                # gofmt + prettier
 - **MCP agent memory**: sessions, knowledge storage, briefings at `/api/mcp`.
 - **ChromaDB is optional and external**: seamd treats it as a remote HTTP service. It can be unreachable at startup -- main.go probes once with a 2s heartbeat and logs a Warn, never blocks. The recommended way to run it locally is the Seam-managed Docker container in `docker/chroma-compose.yml` (managed via `make chroma-up`/`down`/`logs`/`status` or the optional `scripts/chroma-supervisor.sh` service installed by `make install-service`).
 
-## Testing Conventions
-
-- Use `testify/require` (fail fast), not `assert`.
-- Table-driven tests for multiple input variations.
-- SQLite test isolation: `file:{t.Name()}?mode=memory&cache=shared` (named in-memory DBs).
-- Mock external services (Ollama, ChromaDB) with `httptest.NewServer()`.
-- Test helpers: `testutil.TestServerDB(t)`, `testutil.TestUserDB(t)`, `testutil.TestDataDir(t)`.
-- Build tags: default (unit), `integration`, `external` (needs Ollama/ChromaDB), `performance`.
-- No `time.Sleep` for sync -- use channels or `sync.WaitGroup`.
-
-## Key Rules
-
-1. **No CGO** -- pure Go SQLite driver only.
-2. **No emojis** in code or comments.
-3. **No circular imports** -- respect the layering.
-4. **Context everywhere** -- all service/store methods take `context.Context` first.
-5. **ULID for IDs** -- never UUID.
-6. **CSS variables only** -- never hardcode colors, spacing, or font sizes in the frontend.
-7. **No `!important`** in CSS. Max 2 levels of nesting in CSS Modules.
-8. **Security first** -- reject `..` in paths, validate all input at handler level, reject private IPs in URL capture.
-9. **Sanitize responses** -- never expose internal error details in HTTP responses.
-10. **Migrations must be idempotent** -- embedded via `go:embed`, run on DB open.
-11. **Read `AGENTS.md` > "Common pitfalls"** before writing Go code -- recurring footguns from prior audit passes (`ulid.MustNew`, byte-slicing UTF-8, non-atomic `.md` writes, missing `RowsAffected`/`rows.Err()`, etc.). `make lint` enforces a subset; the rest is on you.
-
 ## Storage Layout
 
 ```
@@ -165,16 +141,6 @@ source_url: https://example.com
 Content with [[wikilinks]] and #tags.
 ```
 
-## Frontend Design System
-
-- **Dark theme only** with warm aesthetics.
-- Backgrounds: deep blue-black (`--bg-primary: #1d2130`).
-- Text: warm off-white (`--text-primary: #e8e2d9`).
-- Accent: amber/copper (`--accent-primary: #c4915c`) -- the "golden thread."
-- Fonts: Fraunces (display), Outfit (UI), Lora (content), IBM Plex Mono (code).
-- All tokens in `web/src/styles/variables.css`.
-- Components use CSS Modules (`.module.css`, camelCase class names).
-
 ## MCP Server (Agent Tools)
 
 Seam exposes an MCP server at `/api/mcp` that gives you persistent memory and access to the user's knowledge base. If configured, prefer these tools over asking the user to look things up manually.
@@ -196,18 +162,6 @@ Seam exposes an MCP server at `/api/mcp` that gives you persistent memory and ac
 
 **Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), webhooks (`webhook_*`), research lab (`lab_open`, `trial_*`, `decision_*`), context search (`context_gather`). Full reference: `docs/mcp.md`.
 
-## Key Files to Know
+## Coding Rules
 
-| File | Why |
-| --- | --- |
-| `cmd/seamd/main.go` | Server entry point, dependency wiring |
-| `internal/server/server.go` | Router setup, middleware chain |
-| `internal/testutil/testutil.go` | Shared test helpers |
-| `web/src/styles/variables.css` | All design tokens |
-| `web/vite.config.ts` | Vite config, API proxy |
-| `seam-server.yaml.example` | Configuration reference |
-| `docker/chroma-compose.yml` | Seam-managed ChromaDB container (pinned image, bind-mounted volume) |
-| `scripts/chroma-supervisor.sh` | Wakes Docker, waits for daemon, runs `compose up`. Run by the optional supervisor service. |
-| `scripts/install-service.sh` | Installs seamd as launchd/systemd; optionally installs the chroma supervisor too |
-| `AGENTS.md` | Detailed coding conventions and accepted designs |
-| `docs/security.md` | Security invariants, assistant safety, known gaps |
+All Go and frontend coding conventions, testing patterns, common pitfalls, forbidden APIs, and accepted designs are in `AGENTS.md`. Read it before writing code.

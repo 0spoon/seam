@@ -72,6 +72,10 @@ If you install seamd as a system service (`make install-service`), the installer
 
 Skip the supervisor if you manage Chroma yourself or run it on a different host. You can always run `make chroma-up` manually instead.
 
+### Claude Code onboarding skill
+
+`make install-service` also drops a one-shot `/seam-onboard` skill into `~/.claude/skills/`. In any Claude Code session you can then run `/seam-onboard`, pick whether to install Seam-awareness into the **global** `~/.claude/CLAUDE.md` (every project sees it) or into **this project's** `./CLAUDE.md`, and it will write a marker-wrapped block that teaches future sessions to use `mcp__seam__session_start`, `memory_*`, `notes_search`, and friends for non-trivial work. The skill removes itself on success; re-install it standalone with `make install-onboard-skill` when you want to onboard another project.
+
 ### What seamd does if Chroma is unreachable
 
 seamd does not require ChromaDB to start. On startup, it does a 2-second heartbeat probe against `chromadb_url`. If Chroma is unreachable, it logs a single loud warning telling you to run `make chroma-up` (or install the supervisor). The AI task queue continues running normally and embeddings will succeed once Chroma comes up.

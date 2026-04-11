@@ -30,6 +30,10 @@ Any MCP-compatible client connects via Streamable HTTP:
 }
 ```
 
+### Teaching Claude Code about Seam
+
+Registering the MCP server makes the tools available, but a fresh Claude Code session still has no idea what Seam is or when to reach for it. Running `make install-service` drops a one-shot `/seam-onboard` skill into `~/.claude/skills/`. In any Claude Code session you can then run `/seam-onboard`, choose whether to install into the **global** `~/.claude/CLAUDE.md` (every project) or **this project's** `./CLAUDE.md`, and it will write a marker-wrapped block that teaches future sessions to call `session_start` for non-trivial work, use `memory_*` for cross-conversation knowledge, and search notes before asking the user to find things. The skill removes itself on success; re-install it standalone with `make install-onboard-skill`.
+
 ## Available Tools
 
 ### Session Management

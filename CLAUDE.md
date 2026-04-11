@@ -94,10 +94,11 @@ make logs               # Tail seamd + Chroma logs
 make kill-stale         # Kill stale seamd listener on configured port
 
 # Install
-make install-service    # Install seamd as launchd/systemd user service
-make install-tui        # Install seam TUI to /usr/local/bin (PREFIX= to override)
-make reindex            # Re-embed all notes after switching embedding model
-make clean              # Remove bin/, web/dist, coverage files
+make install-service       # Install seamd as launchd/systemd user service (also drops the /seam-onboard skill)
+make install-tui           # Install seam TUI to /usr/local/bin (PREFIX= to override)
+make install-onboard-skill # (Re)install the /seam-onboard Claude Code skill for teaching new sessions about Seam MCP
+make reindex               # Re-embed all notes after switching embedding model
+make clean                 # Remove bin/, web/dist, coverage files
 ```
 
 ## Tech Stack

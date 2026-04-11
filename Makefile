@@ -1,4 +1,4 @@
-.PHONY: help build build-web build-all run dev test test-integration test-race test-web test-web-watch lint fmt vet tidy typecheck coverage bench logs kill-stale clean dev-web init install-service uninstall-service install-onboard-skill install-tui uninstall-tui service-status service-start service-stop service-restart service-logs chroma-up chroma-down chroma-logs chroma-status reindex
+.PHONY: help build build-web build-all run dev test test-integration test-race test-web test-web-watch lint fmt vet tidy typecheck coverage bench logs kill-stale clean dev-web init install-service uninstall-service install-onboard-skill uninstall-onboard-skill install-tui uninstall-tui service-status service-start service-stop service-restart service-logs chroma-up chroma-down chroma-logs chroma-status reindex
 
 CHROMA_COMPOSE := docker compose -f docker/chroma-compose.yml
 
@@ -105,6 +105,9 @@ uninstall-service:  ## Uninstall the seamd user service
 
 install-onboard-skill:  ## Install the /seam-onboard Claude Code skill (self-removing onboarding helper)
 	@bash scripts/install-onboard-skill.sh
+
+uninstall-onboard-skill:  ## Remove the /seam-onboard Claude Code skill from ~/.claude/skills
+	@bash scripts/uninstall-onboard-skill.sh
 
 # Install just the TUI client (`seam`) into a directory on PATH so it
 # can be launched from anywhere. Builds first, then copies the binary.

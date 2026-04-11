@@ -96,8 +96,9 @@ make kill-stale         # Kill stale seamd listener on configured port
 # Install
 make install-service       # Install seamd as launchd/systemd user service (also drops the /seam-onboard skill)
 make install-tui           # Install seam TUI to /usr/local/bin (PREFIX= to override)
-make install-onboard-skill # (Re)install the /seam-onboard Claude Code skill for teaching new sessions about Seam MCP
-make reindex               # Re-embed all notes after switching embedding model
+make install-onboard-skill   # (Re)install the /seam-onboard Claude Code skill for teaching new sessions about Seam MCP
+make uninstall-onboard-skill # Remove the /seam-onboard Claude Code skill from ~/.claude/skills
+make reindex                 # Re-embed all notes after switching embedding model
 make clean                 # Remove bin/, web/dist, coverage files
 ```
 

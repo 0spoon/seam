@@ -26,7 +26,14 @@ build:  ## Build seamd + seam (TUI) + seam-reindex to ./bin/
 	go build -o bin/seam-reindex ./cmd/seam-reindex
 
 build-web:  ## Install web deps and build the React SPA to web/dist
-	cd web && npm install && npm run build
+	@bash -c 'set -e; \
+	    cd web; \
+	    NVM_SH="$${NVM_DIR:-$$HOME/.nvm}/nvm.sh"; \
+	    if [ -s "$$NVM_SH" ]; then \
+	        . "$$NVM_SH" >/dev/null 2>&1; \
+	        nvm use --silent >/dev/null 2>&1 || true; \
+	    fi; \
+	    npm install && npm run build'
 
 build-all: build build-web  ## Build Go binaries and the React SPA
 

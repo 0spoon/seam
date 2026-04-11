@@ -21,6 +21,17 @@ ask()  { printf "\033[1;37m  > \033[0m%s " "$1"; }
 
 # -- preflight ----------------------------------------------------------------
 
+# Launchd user agents and systemd --user units are strictly per-user.
+# Running this under sudo targets the wrong launchd domain (gui/0 instead
+# of gui/<your uid>), which fails with the cryptic "Domain does not
+# support specified action" error (125). Refuse up front.
+if [ "$(id -u)" -eq 0 ]; then
+    err "Do not run install-service as root."
+    err "Seam installs a per-user service. Re-run without sudo:"
+    err "    make install-service"
+    exit 1
+fi
+
 if [ ! -x "$BINARY" ]; then
     err "Binary not found at $BINARY"
     err "Run 'make build' first."

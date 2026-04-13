@@ -233,8 +233,7 @@ func (s *SQLStore) GetRefreshToken(ctx context.Context, tokenHash string) (strin
 	}
 	expiresAt, parseErr := time.Parse(time.RFC3339, expiresAtStr)
 	if parseErr != nil {
-		slog.Warn("auth.Store.GetRefreshToken: malformed expires_at, using zero time",
-			"raw", expiresAtStr, "error", parseErr)
+		return "", time.Time{}, fmt.Errorf("auth.Store.GetRefreshToken: malformed expires_at %q: %w", expiresAtStr, parseErr)
 	}
 	return userID, expiresAt, nil
 }
@@ -258,8 +257,7 @@ func (s *SQLStore) ConsumeRefreshToken(ctx context.Context, tokenHash string) (s
 	}
 	expiresAt, parseErr := time.Parse(time.RFC3339, expiresAtStr)
 	if parseErr != nil {
-		slog.Warn("auth.Store.ConsumeRefreshToken: malformed expires_at, using zero time",
-			"raw", expiresAtStr, "error", parseErr)
+		return "", time.Time{}, fmt.Errorf("auth.Store.ConsumeRefreshToken: malformed expires_at %q: %w", expiresAtStr, parseErr)
 	}
 	return userID, expiresAt, nil
 }

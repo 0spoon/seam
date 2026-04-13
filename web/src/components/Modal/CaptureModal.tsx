@@ -75,6 +75,11 @@ export function CaptureModal() {
         mediaRecorderRef.current.stop();
       }
     }
+    return () => {
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+    };
   }, [isOpen, defaultProjectId]);
 
   // Detect URL paste in body field.

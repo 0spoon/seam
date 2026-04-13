@@ -460,6 +460,7 @@ func (s *SQLStore) ResolveDanglingLinks(ctx context.Context, db DBTX, noteID, ti
 	for rows.Next() {
 		var dl danglingLink
 		if scanErr := rows.Scan(&dl.sourceNoteID, &dl.linkText); scanErr != nil {
+			slog.Warn("note.SQLStore.ResolveDanglingLinks: scan row", "error", scanErr)
 			continue
 		}
 		if slugify(dl.linkText) == titleSlug {

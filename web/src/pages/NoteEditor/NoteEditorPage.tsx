@@ -305,6 +305,14 @@ export function NoteEditorPage() {
     [id, updateNote, addToast],
   );
 
+  // Refs for the unmount-only cleanup effect and debounced saves.
+  const handleSaveRef = useRef(handleSave);
+  const updateNoteRef = useRef(updateNote);
+  const currentTitleRef = useRef(currentNote?.title);
+  handleSaveRef.current = handleSave;
+  updateNoteRef.current = updateNote;
+  currentTitleRef.current = currentNote?.title;
+
   const handleChange = useCallback(
     (value: string) => {
       setContent(value);
@@ -316,19 +324,11 @@ export function NoteEditorPage() {
         clearTimeout(saveTimerRef.current);
       }
       saveTimerRef.current = setTimeout(() => {
-        handleSave(value);
+        handleSaveRef.current(value);
       }, 1000);
     },
-    [id, handleSave],
+    [id],
   );
-
-  // Refs for the unmount-only cleanup effect.
-  const handleSaveRef = useRef(handleSave);
-  const updateNoteRef = useRef(updateNote);
-  const currentTitleRef = useRef(currentNote?.title);
-  handleSaveRef.current = handleSave;
-  updateNoteRef.current = updateNote;
-  currentTitleRef.current = currentNote?.title;
 
   // Cleanup save timers on unmount only (deps: [id]).
   // Uses refs to avoid re-running on every dependency change,

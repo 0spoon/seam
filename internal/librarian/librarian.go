@@ -486,18 +486,21 @@ func hasTag(tags []string, target string) bool {
 }
 
 // mergeUnique returns the union of two string slices, preserving order.
+// Deduplication is case-insensitive to match validateClassification.
 func mergeUnique(existing, additions []string) []string {
 	seen := make(map[string]bool, len(existing))
 	result := make([]string, 0, len(existing)+len(additions))
 	for _, s := range existing {
-		if !seen[s] {
-			seen[s] = true
+		lower := strings.ToLower(s)
+		if !seen[lower] {
+			seen[lower] = true
 			result = append(result, s)
 		}
 	}
 	for _, s := range additions {
-		if !seen[s] {
-			seen[s] = true
+		lower := strings.ToLower(s)
+		if !seen[lower] {
+			seen[lower] = true
 			result = append(result, s)
 		}
 	}
@@ -505,18 +508,19 @@ func mergeUnique(existing, additions []string) []string {
 }
 
 // tagsEqual reports whether two tag slices contain the same elements
-// regardless of order.
+// regardless of order. Comparison is case-insensitive to match
+// mergeUnique and validateClassification.
 func tagsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	set := make(map[string]int, len(a))
 	for _, s := range a {
-		set[s]++
+		set[strings.ToLower(s)]++
 	}
 	for _, s := range b {
-		set[s]--
-		if set[s] < 0 {
+		set[strings.ToLower(s)]--
+		if set[strings.ToLower(s)] < 0 {
 			return false
 		}
 	}

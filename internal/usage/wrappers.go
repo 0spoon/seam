@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -189,6 +190,85 @@ func (t *TrackedToolChatCompleter) ChatCompletionWithTools(ctx context.Context, 
 	return resp, nil
 }
 
+// ChatCompletionWithToolsStream delegates to the inner completer's
+// streaming method and records usage from the final frame. If the inner
+// completer does not implement ai.ToolChatStreamer, returns a channel
+// that immediately yields an error.
+func (t *TrackedToolChatCompleter) ChatCompletionWithToolsStream(ctx context.Context, model string, messages []ai.ToolMessage, tools []ai.ToolDefinition) (<-chan ai.ToolChatDelta, <-chan error) {
+	streamer, ok := t.inner.(ai.ToolChatStreamer)
+	if !ok {
+		deltaCh := make(chan ai.ToolChatDelta)
+		errCh := make(chan error, 1)
+		errCh <- fmt.Errorf("usage: inner completer does not support streaming")
+		close(deltaCh)
+		close(errCh)
+		return deltaCh, errCh
+	}
+
+	userID := resolveUserID(ctx)
+	if err := t.tracker.CheckBudget(ctx, userID); err != nil {
+		deltaCh := make(chan ai.ToolChatDelta)
+		errCh := make(chan error, 1)
+		errCh <- err
+		close(deltaCh)
+		close(errCh)
+		return deltaCh, errCh
+	}
+
+	innerDeltaCh, innerErrCh := streamer.ChatCompletionWithToolsStream(ctx, model, messages, tools)
+
+	deltaCh := make(chan ai.ToolChatDelta, 64)
+	errCh := make(chan error, 1)
+	start := time.Now()
+
+	go func() {
+		defer close(deltaCh)
+		defer close(errCh)
+
+		var final *ai.ToolChatResponse
+		for d := range innerDeltaCh {
+			if d.Final != nil {
+				final = d.Final
+			}
+			select {
+			case deltaCh <- d:
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+				return
+			}
+		}
+
+		if err := <-innerErrCh; err != nil {
+			errCh <- err
+			return
+		}
+
+		elapsed := time.Since(start)
+		r := &Record{
+			UserID:     userID,
+			Function:   t.fn,
+			Provider:   t.provider,
+			Model:      model,
+			IsLocal:    t.provider == "ollama",
+			DurationMS: elapsed.Milliseconds(),
+		}
+		if final != nil && final.Usage != nil {
+			r.InputTokens = final.Usage.InputTokens
+			r.OutputTokens = final.Usage.OutputTokens
+			r.TotalTokens = final.Usage.TotalTokens
+		} else if final != nil {
+			r.InputTokens = estimateToolInputTokens(messages)
+			r.OutputTokens = estimateTokenCount(final.Content)
+			r.TotalTokens = r.InputTokens + r.OutputTokens
+		}
+		if trackErr := t.tracker.Track(ctx, r); trackErr != nil {
+			t.tracker.logger.Warn("failed to track tool chat stream usage", "error", trackErr)
+		}
+	}()
+
+	return deltaCh, errCh
+}
+
 // TrackedEmbedder wraps ai.EmbeddingGenerator with usage tracking.
 type TrackedEmbedder struct {
 	inner    ai.EmbeddingGenerator
@@ -243,6 +323,7 @@ func (t *TrackedEmbedder) GenerateEmbedding(ctx context.Context, model, text str
 var (
 	_ ai.ChatCompleter     = (*TrackedChatCompleter)(nil)
 	_ ai.ToolChatCompleter = (*TrackedToolChatCompleter)(nil)
+	_ ai.ToolChatStreamer   = (*TrackedToolChatCompleter)(nil)
 	_ ai.EmbeddingGenerator = (*TrackedEmbedder)(nil)
 )
 

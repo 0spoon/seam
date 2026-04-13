@@ -2,20 +2,18 @@ package main
 
 import "charm.land/lipgloss/v2"
 
-// marioPipeBorder draws a thick double-line frame reminiscent of a green
-// warp pipe. Used by themeMario as its BorderShape so the assistant
-// confirmation pane keeps its signature look. The shape is decorative
-// (not a color), so it lives here even though all color vars have moved
-// into the Theme registry.
+// marioPipeBorder uses thin single-line box-drawing chars for a clean
+// retro terminal look. The thinner lines let the accent colors and
+// content breathe instead of competing with a heavy frame.
 var marioPipeBorder = lipgloss.Border{
-	Top:         "═",
-	Bottom:      "═",
-	Left:        "║",
-	Right:       "║",
-	TopLeft:     "╔",
-	TopRight:    "╗",
-	BottomLeft:  "╚",
-	BottomRight: "╝",
+	Top:         "─",
+	Bottom:      "─",
+	Left:        "│",
+	Right:       "│",
+	TopLeft:     "┌",
+	TopRight:    "┐",
+	BottomLeft:  "└",
+	BottomRight: "┘",
 }
 
 // marioBlock is the gold question-block glyph used to prefix tool cards
@@ -27,7 +25,9 @@ const marioBlock = "▣"
 
 // marioStatusGlyph returns the unicode glyph for a tool's status. The
 // glyph is intentionally theme-independent so success/error/running stay
-// recognizable across the Mario and Catppuccin assistant looks.
+// recognizable across the Mario and Catppuccin assistant looks. It is
+// rendered inside the tool bubble banner, which carries the semantic
+// color via its inverse fg/bg.
 func marioStatusGlyph(status string) string {
 	switch status {
 	case "ok":
@@ -39,16 +39,3 @@ func marioStatusGlyph(status string) string {
 	}
 }
 
-// assistantStatusStyle returns the style paired with a status glyph,
-// reading from the active assistantStyleSet so it tracks the current
-// theme.
-func assistantStatusStyle(status string) lipgloss.Style {
-	switch status {
-	case "ok":
-		return assistantStyles.ToolStatusOk
-	case "error":
-		return assistantStyles.ToolStatusErr
-	default:
-		return assistantStyles.ToolStatusRun
-	}
-}

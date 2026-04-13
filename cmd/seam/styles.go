@@ -6,16 +6,20 @@ import "charm.land/lipgloss/v2"
 // is rebuilt by buildStyleSet whenever the active theme changes; call
 // sites read from the package-level `styles` pointer at View() time.
 type styleSet struct {
-	Header     lipgloss.Style
-	StatusBar  lipgloss.Style
-	Error      lipgloss.Style
-	Success    lipgloss.Style
-	Title      lipgloss.Style
-	Muted      lipgloss.Style
-	Selected   lipgloss.Style
-	Normal     lipgloss.Style
-	Pane       lipgloss.Style
-	PaneActive lipgloss.Style
+	Header        lipgloss.Style
+	StatusBar     lipgloss.Style
+	Error         lipgloss.Style
+	Success       lipgloss.Style
+	Title         lipgloss.Style
+	Muted         lipgloss.Style
+	Selected      lipgloss.Style
+	Normal        lipgloss.Style
+	Pane          lipgloss.Style
+	PaneActive    lipgloss.Style
+	EditorTitle   lipgloss.Style
+	EditorCrumb   lipgloss.Style
+	EditorDivider lipgloss.Style
+	EditorBadge   lipgloss.Style
 }
 
 // assistantStyleSet holds styles used only by the assistant screen
@@ -23,20 +27,34 @@ type styleSet struct {
 // be themeMario or a copy of the active global theme depending on the
 // `assistant_theme` config value.
 type assistantStyleSet struct {
-	Header        lipgloss.Style
-	ConfirmPane   lipgloss.Style
-	ToolBlock     lipgloss.Style
-	MessageUser   lipgloss.Style
-	MessageAssist lipgloss.Style
-	ToolStatusOk  lipgloss.Style
-	ToolStatusErr lipgloss.Style
-	ToolStatusRun lipgloss.Style
-	Muted         lipgloss.Style
-	Error         lipgloss.Style
-	StatusBar     lipgloss.Style
+	Header         lipgloss.Style
+	ConfirmPane    lipgloss.Style
+	ToolBlock      lipgloss.Style
+	MessageUser    lipgloss.Style
+	MessageAssist  lipgloss.Style
+	ToolStatusOk   lipgloss.Style
+	ToolStatusErr  lipgloss.Style
+	ToolStatusRun  lipgloss.Style
+	Muted          lipgloss.Style
+	Error          lipgloss.Style
+	StatusBar      lipgloss.Style
+	InputBox       lipgloss.Style
+	BubbleUser     lipgloss.Style
+	BannerUser     lipgloss.Style
+	BubbleAssist   lipgloss.Style
+	BannerAssist   lipgloss.Style
+	BubbleTool     lipgloss.Style
+	BannerTool     lipgloss.Style
+	BubbleToolWarn lipgloss.Style
+	BannerToolWarn lipgloss.Style
 	// Block is the accent glyph used to prefix tool cards. Mario uses
 	// the question-block; non-Mario themes use a smaller dot.
 	Block string
+	// Mario is true when the active assistant theme is the Mario
+	// palette. It gates a handful of theme-specific flourishes (star
+	// and block labels in the chat banners) so non-Mario themes stay
+	// understated.
+	Mario bool
 }
 
 // styles is the active main-screen style set. Replaced by ApplyTheme.
@@ -93,6 +111,24 @@ func buildStyleSet(t Theme) *styleSet {
 		PaneActive: lipgloss.NewStyle().
 			Border(t.BorderShape).
 			BorderForeground(t.Primary),
+
+		EditorTitle: lipgloss.NewStyle().
+			Foreground(t.Primary).
+			Bold(true).
+			Padding(0, 1),
+
+		EditorCrumb: lipgloss.NewStyle().
+			Foreground(t.Muted).
+			Italic(true),
+
+		EditorDivider: lipgloss.NewStyle().
+			Foreground(t.Border),
+
+		EditorBadge: lipgloss.NewStyle().
+			Foreground(t.HeaderBg).
+			Background(t.Secondary).
+			Bold(true).
+			Padding(0, 1),
 	}
 }
 
@@ -150,7 +186,54 @@ func buildAssistantStyleSet(t Theme) *assistantStyleSet {
 			Background(t.StatusBarBg).
 			Padding(0, 1),
 
+		InputBox: lipgloss.NewStyle().
+			Border(t.BorderShape).
+			BorderForeground(t.Border).
+			Padding(0, 1),
+
+		BubbleUser: lipgloss.NewStyle().
+			Border(t.BorderShape).
+			BorderForeground(t.Secondary).
+			Padding(0, 1),
+
+		// Banners use the bubble's accent color as foreground with no
+		// background fill -- colored text on the default terminal bg.
+		// This strips away the GUI-style ribbon and gives a raw,
+		// retro-terminal header aesthetic. The accent matches the
+		// parent bubble's border so label and frame feel cohesive.
+		BannerUser: lipgloss.NewStyle().
+			Foreground(t.Secondary).
+			Bold(true),
+
+		BubbleAssist: lipgloss.NewStyle().
+			Border(t.BorderShape).
+			BorderForeground(t.Primary).
+			Padding(0, 1),
+
+		BannerAssist: lipgloss.NewStyle().
+			Foreground(t.Primary).
+			Bold(true),
+
+		BubbleTool: lipgloss.NewStyle().
+			Border(t.BorderShape).
+			BorderForeground(t.Success).
+			Padding(0, 1),
+
+		BannerTool: lipgloss.NewStyle().
+			Foreground(t.Success).
+			Bold(true),
+
+		BubbleToolWarn: lipgloss.NewStyle().
+			Border(t.BorderShape).
+			BorderForeground(t.Error).
+			Padding(0, 1),
+
+		BannerToolWarn: lipgloss.NewStyle().
+			Foreground(t.Error).
+			Bold(true),
+
 		Block: block,
+		Mario: t.Name == themeMario.Name,
 	}
 }
 

@@ -259,5 +259,9 @@ func (m appModel) View() tea.View {
 	v := tea.NewView(content)
 	// Run in the alternate screen buffer (moved from tea.NewProgram options in v2).
 	v.AltScreen = true
+	// Enable mouse cell motion so mouse wheel events reach Update. The
+	// Ask Seam chat uses them to scroll the conversation viewport; all
+	// other screens ignore mouse messages and behave as before.
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }

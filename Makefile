@@ -27,6 +27,16 @@ build:  ## Build seamd + seam (TUI) + seam-reindex to ./bin/
 
 build-web:  ## Install web deps and build the React SPA to web/dist
 	@bash -c 'set -e; \
+	    if [ -d web/dist ]; then \
+	        foreign=$$(find web/dist -not -user "$$(id -un)" -print -quit 2>/dev/null); \
+	        if [ -n "$$foreign" ]; then \
+	            printf "\n\033[1;31m==>\033[0m web/dist contains files not owned by %s (e.g. %s)\n" "$$(id -un)" "$$foreign" >&2; \
+	            printf "    This usually means a previous build ran with sudo, leaving root-owned\n" >&2; \
+	            printf "    artifacts that vite cannot overwrite. Fix with:\n\n" >&2; \
+	            printf "        sudo rm -rf web/dist\n\n" >&2; \
+	            exit 1; \
+	        fi; \
+	    fi; \
 	    cd web; \
 	    NVM_SH="$${NVM_DIR:-$$HOME/.nvm}/nvm.sh"; \
 	    if [ -s "$$NVM_SH" ]; then \

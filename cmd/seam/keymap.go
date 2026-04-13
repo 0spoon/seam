@@ -44,10 +44,11 @@ const (
 const (
 	ActionGlobalLogout ActionID = "global.logout"
 
-	ActionEditorSave        ActionID = "editor.save"
-	ActionEditorBack        ActionID = "editor.back"
-	ActionEditorToggleTitle ActionID = "editor.toggle_title"
-	ActionEditorAIAssist    ActionID = "editor.ai_assist"
+	ActionEditorSave          ActionID = "editor.save"
+	ActionEditorBack          ActionID = "editor.back"
+	ActionEditorToggleTitle   ActionID = "editor.toggle_title"
+	ActionEditorAIAssist      ActionID = "editor.ai_assist"
+	ActionEditorTogglePreview ActionID = "editor.toggle_preview"
 
 	ActionCaptureSave        ActionID = "capture.save"
 	ActionCaptureSwitchField ActionID = "capture.switch_field"
@@ -106,6 +107,7 @@ const (
 	ActionAskFocusPrevTool ActionID = "ask.focus_prev_tool"
 	ActionAskApprove       ActionID = "ask.approve"
 	ActionAskReject        ActionID = "ask.reject"
+	ActionAskCopy          ActionID = "ask.copy"
 
 	ActionTplPickerCancel  ActionID = "template_picker.cancel"
 	ActionTplPickerNavUp   ActionID = "template_picker.nav_up"
@@ -150,6 +152,7 @@ var actionRegistry = []actionMeta{
 	{id: ActionEditorBack, scope: ScopeEditor, defaults: []string{"esc"}, help: "Back"},
 	{id: ActionEditorToggleTitle, scope: ScopeEditor, defaults: []string{"ctrl+t"}, help: "Title"},
 	{id: ActionEditorAIAssist, scope: ScopeEditor, defaults: []string{"ctrl+a"}, help: "AI"},
+	{id: ActionEditorTogglePreview, scope: ScopeEditor, defaults: []string{"ctrl+r"}, help: "Preview"},
 
 	{id: ActionCaptureSave, scope: ScopeCapture, defaults: []string{"ctrl+s", "super+s"}, help: "Save"},
 	{id: ActionCaptureSwitchField, scope: ScopeCapture, defaults: []string{"tab"}, help: "Next field"},
@@ -208,6 +211,7 @@ var actionRegistry = []actionMeta{
 	{id: ActionAskFocusPrevTool, scope: ScopeAsk, defaults: []string{"shift+tab"}, help: "Prev tool"},
 	{id: ActionAskApprove, scope: ScopeAsk, defaults: []string{"a"}, help: "Approve", allowBarePrintable: true},
 	{id: ActionAskReject, scope: ScopeAsk, defaults: []string{"r"}, help: "Reject", allowBarePrintable: true},
+	{id: ActionAskCopy, scope: ScopeAsk, defaults: []string{"ctrl+y"}, help: "Copy last reply"},
 
 	{id: ActionTplPickerCancel, scope: ScopeTemplatePicker, defaults: []string{"esc"}, help: "Cancel"},
 	{id: ActionTplPickerNavUp, scope: ScopeTemplatePicker, defaults: []string{"k", "up"}, help: "Up"},

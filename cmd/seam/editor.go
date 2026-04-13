@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -19,6 +19,8 @@ type editorModel struct {
 	titleInput     textinput.Model
 	editingTitle   bool
 	body           textarea.Model
+	preview        viewport.Model
+	previewMode    bool
 	err            string
 	status         string
 	loading        bool
@@ -31,6 +33,11 @@ type editorModel struct {
 	showAIAssist   bool
 	aiAssistModel  aiAssistModel
 }
+
+// editorChromeHeight is the number of vertical rows reserved by the editor
+// for its own chrome (header line, divider, status bar). Everything else
+// is handed to the body textarea or preview viewport.
+const editorChromeHeight = 3
 
 // openEditorMsg triggers opening a note in the editor.
 type openEditorMsg struct {
@@ -50,19 +57,23 @@ func newEditorModel(client *APIClient, noteID string, width, height int) editorM
 	ta.Placeholder = "Start writing..."
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
+	ta.Prompt = " "
+	ta.EndOfBufferCharacter = ' '
+	ta.SetStyles(editorTextareaStyles())
 
 	ti := textinput.New()
 	ti.Placeholder = "Note title"
 	ti.CharLimit = 256
 
-	// Reserve space for header (title input), separator, and status bar.
-	ta.SetWidth(width - 2)
-	editorHeight := height - 6
-	if editorHeight < 5 {
-		editorHeight = 5
-	}
-	ta.SetHeight(editorHeight)
+	vp := viewport.New()
+	vp.SoftWrap = true
+
+	bodyWidth, bodyHeight := editorBodyDimensions(width, height)
+	ta.SetWidth(bodyWidth)
+	ta.SetHeight(bodyHeight)
 	ta.Focus()
+	vp.SetWidth(bodyWidth)
+	vp.SetHeight(bodyHeight)
 
 	if width > 4 {
 		ti.SetWidth(width - 4)
@@ -73,10 +84,50 @@ func newEditorModel(client *APIClient, noteID string, width, height int) editorM
 		noteID:     noteID,
 		titleInput: ti,
 		body:       ta,
+		preview:    vp,
 		loading:    true,
 		width:      width,
 		height:     height,
 	}
+}
+
+// editorBodyDimensions returns the width and height the body pane should
+// occupy given the overall terminal size. The body fills everything except
+// the editor chrome (header + divider + status bar), so no vertical rows
+// are wasted.
+func editorBodyDimensions(width, height int) (int, int) {
+	bodyWidth := max(width-2, 10)
+	bodyHeight := max(height-editorChromeHeight, 3)
+	return bodyWidth, bodyHeight
+}
+
+// editorTextareaStyles produces a textarea StyleSet themed to the active
+// palette. We replace the library's bright-grey defaults with softer theme
+// colors so the editor blends with the rest of the TUI.
+func editorTextareaStyles() textarea.Styles {
+	base := textarea.DefaultDarkStyles()
+	cursorLine := lipgloss.NewStyle().Background(activeTheme.Selected).Foreground(activeTheme.Fg)
+	eob := lipgloss.NewStyle().Foreground(activeTheme.Dim)
+	text := lipgloss.NewStyle().Foreground(activeTheme.Fg)
+	prompt := lipgloss.NewStyle().Foreground(activeTheme.Border)
+	placeholder := lipgloss.NewStyle().Foreground(activeTheme.Dim).Italic(true)
+
+	base.Focused.Base = lipgloss.NewStyle()
+	base.Focused.Text = text
+	base.Focused.CursorLine = cursorLine
+	base.Focused.EndOfBuffer = eob
+	base.Focused.Prompt = prompt
+	base.Focused.Placeholder = placeholder
+
+	base.Blurred.Base = lipgloss.NewStyle()
+	base.Blurred.Text = text
+	base.Blurred.CursorLine = lipgloss.NewStyle().Foreground(activeTheme.Fg)
+	base.Blurred.EndOfBuffer = eob
+	base.Blurred.Prompt = prompt
+	base.Blurred.Placeholder = placeholder
+
+	base.Cursor.Color = activeTheme.Primary
+	return base
 }
 
 func (m editorModel) Init() tea.Cmd {
@@ -101,12 +152,14 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.body.SetWidth(m.width - 2)
-		editorHeight := m.height - 6
-		if editorHeight < 5 {
-			editorHeight = 5
+		bodyWidth, bodyHeight := editorBodyDimensions(m.width, m.height)
+		m.body.SetWidth(bodyWidth)
+		m.body.SetHeight(bodyHeight)
+		m.preview.SetWidth(bodyWidth)
+		m.preview.SetHeight(bodyHeight)
+		if m.previewMode {
+			m.preview.SetContent(renderMarkdown(m.body.Value(), bodyWidth))
 		}
-		m.body.SetHeight(editorHeight)
 		if m.width > 4 {
 			m.titleInput.SetWidth(m.width - 4)
 		}
@@ -194,6 +247,18 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 			m.showAIAssist = true
 			m.aiAssistModel = newAIAssistModel(m.client, m.noteID, selection, m.width, m.height)
 			return m, m.aiAssistModel.Init()
+
+		case km.Matches(msg, ActionEditorTogglePreview):
+			m.previewMode = !m.previewMode
+			if m.previewMode {
+				bodyWidth, _ := editorBodyDimensions(m.width, m.height)
+				m.preview.SetContent(renderMarkdown(m.body.Value(), bodyWidth))
+				m.preview.GotoTop()
+				m.body.Blur()
+			} else {
+				m.body.Focus()
+			}
+			return m, nil
 		}
 
 		// Any key not matching ActionEditorBack resets the discard
@@ -204,15 +269,18 @@ func (m editorModel) Update(msg tea.Msg) (editorModel, tea.Cmd) {
 		}
 	}
 
-	// Update the active input (title or body).
+	// Update the active input (title, body, or preview viewport).
 	var cmd tea.Cmd
-	if m.editingTitle {
+	switch {
+	case m.editingTitle:
 		prev := m.titleInput.Value()
 		m.titleInput, cmd = m.titleInput.Update(msg)
 		if m.titleInput.Value() != prev {
 			m.modified = true
 		}
-	} else {
+	case m.previewMode:
+		m.preview, cmd = m.preview.Update(msg)
+	default:
 		prev := m.body.Value()
 		m.body, cmd = m.body.Update(msg)
 		if m.body.Value() != prev {
@@ -245,6 +313,10 @@ func (m editorModel) updateAIAssist(msg tea.Msg) (editorModel, tea.Cmd) {
 			m.body.SetValue(updated)
 			m.modified = true
 			m.status = "AI result inserted"
+			if m.previewMode {
+				bodyWidth, _ := editorBodyDimensions(m.width, m.height)
+				m.preview.SetContent(renderMarkdown(m.body.Value(), bodyWidth))
+			}
 		}
 		return m, nil
 	}
@@ -261,111 +333,100 @@ func (m editorModel) View() string {
 		return m.aiAssistModel.View()
 	}
 
-	// Title section: editable input or static display.
-	var titleView string
-	if m.editingTitle {
-		titleLabel := styles.Muted.Render("Title: ")
-		titleView = styles.Header.Width(m.width).Render(titleLabel + m.titleInput.View())
-	} else {
-		headerText := fmt.Sprintf(" %s", m.titleInput.Value())
-		if m.modified {
-			headerText += " [modified]"
-		}
-		titleView = styles.Header.Width(m.width).Render(headerText)
-	}
+	header := m.renderHeader()
+	divider := styles.EditorDivider.Render(strings.Repeat("─", m.width))
+	body := m.renderBody()
+	statusBar := m.renderStatusBar()
 
-	// Editor body.
-	var bodyView string
-	if m.loading {
-		bodyView = styles.Muted.Render("Loading note...")
-	} else {
-		bodyView = m.body.View()
-	}
-
-	// Markdown preview bar: show heading highlights for the current line.
-	mdHint := renderMarkdownHint(m.body.Value(), m.width)
-
-	// Status bar.
-	var statusParts []string
-	if m.err != "" {
-		statusParts = append(statusParts, styles.Error.Render(m.err))
-	}
-	if m.status != "" {
-		statusParts = append(statusParts, styles.Success.Render(m.status))
-	}
-	km := currentKeymap()
-	statusParts = append(statusParts, styles.Muted.Render(fmt.Sprintf("%s: save | %s: title | %s: AI | %s: back",
-		km.Display(ActionEditorSave),
-		km.Display(ActionEditorToggleTitle),
-		km.Display(ActionEditorAIAssist),
-		km.Display(ActionEditorBack))))
-	statusBar := styles.StatusBar.Width(m.width).Render(strings.Join(statusParts, "  |  "))
-
-	parts := []string{titleView, bodyView}
-	if mdHint != "" {
-		parts = append(parts, mdHint)
-	}
-	parts = append(parts, statusBar)
-
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return lipgloss.JoinVertical(lipgloss.Left, header, divider, body, statusBar)
 }
 
-// Markdown syntax highlighting regex patterns.
-var (
-	reH1     = regexp.MustCompile(`^# .+`)
-	reH2     = regexp.MustCompile(`^## .+`)
-	reH3     = regexp.MustCompile(`^### .+`)
-	reBold   = regexp.MustCompile(`\*\*[^*]+\*\*`)
-	reItalic = regexp.MustCompile(`\*[^*]+\*`)
-	reCode   = regexp.MustCompile("`[^`]+`")
-	reLink   = regexp.MustCompile(`\[[^\]]+\]\([^)]+\)`)
-)
+// renderHeader lays out the single-line editor title strip. In read mode it
+// shows the note title in the primary color with an optional [modified]
+// badge and a right-aligned mode indicator; in title-edit mode it swaps in
+// the text input.
+func (m editorModel) renderHeader() string {
+	if m.editingTitle {
+		label := styles.Muted.Render("Title ")
+		inner := label + m.titleInput.View()
+		return lipgloss.NewStyle().Width(m.width).Padding(0, 1).Render(inner)
+	}
 
-// renderMarkdownHint produces a single-line summary of markdown elements
-// detected in the note body. Because the Bubbles textarea does not support
-// inline styled rendering, full syntax highlighting within the editor is
-// not feasible. Instead, we show a status line indicating the structure
-// of the document: headings, bold, italic, code, and links found.
-func renderMarkdownHint(body string, width int) string {
+	title := strings.TrimSpace(m.titleInput.Value())
+	if title == "" {
+		title = "Untitled"
+	}
+	left := styles.EditorTitle.Render(title)
+	if m.modified {
+		left += " " + styles.EditorCrumb.Render("• modified")
+	}
+
+	mode := "EDIT"
+	if m.previewMode {
+		mode = "PREVIEW"
+	}
+	right := styles.EditorBadge.Render(mode)
+
+	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	return left + strings.Repeat(" ", gap) + right
+}
+
+// renderBody returns either the textarea view or, when preview mode is on,
+// the rendered-markdown viewport. A loading message takes precedence before
+// the note has been fetched.
+func (m editorModel) renderBody() string {
+	if m.loading {
+		return styles.Muted.Render(" Loading note...")
+	}
+	if m.previewMode {
+		return m.preview.View()
+	}
+	return m.body.View()
+}
+
+// renderStatusBar builds the bottom strip: errors or transient status on
+// the left, cursor position and key hints on the right, separated so the
+// hint row stays anchored to the edge of the terminal.
+func (m editorModel) renderStatusBar() string {
+	km := currentKeymap()
+
+	var leftParts []string
+	switch {
+	case m.err != "":
+		leftParts = append(leftParts, styles.Error.Render(m.err))
+	case m.status != "":
+		leftParts = append(leftParts, styles.Success.Render(m.status))
+	default:
+		leftParts = append(leftParts, styles.Muted.Render(m.cursorStats()))
+	}
+	left := strings.Join(leftParts, "  ")
+
+	hints := fmt.Sprintf("%s save  %s preview  %s title  %s AI  %s back",
+		km.Display(ActionEditorSave),
+		km.Display(ActionEditorTogglePreview),
+		km.Display(ActionEditorToggleTitle),
+		km.Display(ActionEditorAIAssist),
+		km.Display(ActionEditorBack))
+	right := styles.Muted.Render(hints)
+
+	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right)-2, 1)
+	inner := " " + left + strings.Repeat(" ", gap) + right + " "
+	return styles.StatusBar.Width(m.width).Render(inner)
+}
+
+// cursorStats returns a short "ln:col / lines · words" string used when no
+// transient error or status is showing. Mirrors the old markdown-count
+// hint but with data a user actually checks while writing.
+func (m editorModel) cursorStats() string {
+	body := m.body.Value()
+	lines := strings.Count(body, "\n") + 1
 	if body == "" {
-		return ""
+		lines = 0
 	}
-
-	headingStyle := lipgloss.NewStyle().Foreground(activeTheme.Primary).Bold(true)
-	codeStyle := lipgloss.NewStyle().Foreground(activeTheme.Secondary)
-	linkStyle := lipgloss.NewStyle().Foreground(activeTheme.Primary).Underline(true)
-
-	lines := strings.Split(body, "\n")
-	var hints []string
-	headingCount := 0
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if reH1.MatchString(trimmed) || reH2.MatchString(trimmed) || reH3.MatchString(trimmed) {
-			headingCount++
-		}
+	words := len(strings.Fields(body))
+	if m.previewMode {
+		return fmt.Sprintf("%d lines · %d words", lines, words)
 	}
-	if headingCount > 0 {
-		hints = append(hints, headingStyle.Render(fmt.Sprintf("%d heading(s)", headingCount)))
-	}
-	boldCount := len(reBold.FindAllString(body, -1))
-	if boldCount > 0 {
-		hints = append(hints, lipgloss.NewStyle().Bold(true).Foreground(activeTheme.Fg).Render(fmt.Sprintf("%d bold", boldCount)))
-	}
-	italicCount := len(reItalic.FindAllString(body, -1)) - boldCount
-	if italicCount > 0 {
-		hints = append(hints, lipgloss.NewStyle().Italic(true).Foreground(activeTheme.Fg).Render(fmt.Sprintf("%d italic", italicCount)))
-	}
-	codeCount := len(reCode.FindAllString(body, -1))
-	if codeCount > 0 {
-		hints = append(hints, codeStyle.Render(fmt.Sprintf("%d code", codeCount)))
-	}
-	linkCount := len(reLink.FindAllString(body, -1))
-	if linkCount > 0 {
-		hints = append(hints, linkStyle.Render(fmt.Sprintf("%d link(s)", linkCount)))
-	}
-
-	if len(hints) == 0 {
-		return ""
-	}
-	return styles.Muted.Render(" md: ") + strings.Join(hints, styles.Muted.Render(" | "))
+	return fmt.Sprintf("ln %d:%d · %d lines · %d words",
+		m.body.Line()+1, m.body.Column()+1, lines, words)
 }

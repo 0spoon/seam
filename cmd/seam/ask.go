@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -15,6 +16,29 @@ import (
 
 // openAskMsg triggers switching to the Ask Seam screen.
 type openAskMsg struct{}
+
+// marioTickMsg advances the Mario chat-icon animation by one frame.
+// The tick only runs while the Ask screen is open AND the Mario
+// assistant theme is active; both conditions are rechecked inside the
+// Update handler so a theme toggle mid-conversation cleanly stops the
+// loop without leaking a stale goroutine.
+type marioTickMsg struct{}
+
+// marioTickInterval is the delay between Mario walk-cycle frames in
+// the "thinking..." indicator. Two frames at 320ms give a natural
+// walking cadence -- fast enough to read as "moving", slow enough not
+// to distract from the surrounding chat copy.
+const marioTickInterval = 320 * time.Millisecond
+
+// marioTick returns a bubbletea Cmd that fires one marioTickMsg after
+// marioTickInterval. The Update handler enqueues a fresh tick after
+// each frame, so the animation is a self-sustaining ping-pong loop
+// that terminates when askModel exits or the theme changes.
+func marioTick() tea.Cmd {
+	return tea.Tick(marioTickInterval, func(time.Time) tea.Msg {
+		return marioTickMsg{}
+	})
+}
 
 // -- Stream message types ----------------------------------------------------
 
@@ -69,11 +93,12 @@ type assistantReloadMsg struct {
 // chatTurn is one rendered row in the chat view. It can be a user
 // message, an assistant text reply, a tool card, or a system note.
 type chatTurn struct {
-	kind     string // "user" | "assistant" | "tool" | "system" | "stream-tool"
-	content  string
-	toolName string
-	status   string // "running" | "ok" | "error" -- for tool kinds
-	raw      json.RawMessage
+	kind      string // "user" | "assistant" | "tool" | "system" | "stream-tool"
+	content   string
+	toolName  string
+	status    string // "running" | "ok" | "error" -- for tool kinds
+	raw       json.RawMessage
+	createdAt time.Time
 }
 
 // confirmationPrompt holds the tool action awaiting user approval.
@@ -101,6 +126,10 @@ type askModel struct {
 	scrollY       int
 	focusToolIdx  int          // index into turns of the focused tool card, -1 for none
 	expanded      map[int]bool // turn index -> expanded state
+
+	// animFrame drives the Mario-theme chat icon animation. Non-Mario
+	// themes leave it at zero; the icon renderer simply ignores it.
+	animFrame int
 
 	done bool
 }
@@ -138,9 +167,17 @@ func newAskModel(client *APIClient, width, height int) askModel {
 const askInputHeight = 4
 
 // askInputChromeWidth is the total horizontal chrome around the textarea
-// (border + padding) that is subtracted from the terminal width when
-// sizing the textarea body.
-const askInputChromeWidth = 4
+// that is subtracted from the terminal width when sizing the textarea
+// body. It accounts for the outer margin (4 cols), the bordered input
+// box (2 cols), and the inner padding (2 cols).
+const askInputChromeWidth = 8
+
+// askInputRows is the fixed vertical budget of the Ask Seam footer
+// when the textarea is active. It accounts for the textarea itself
+// (askInputHeight), the bordered input box (2 rows), and one blank
+// row above and below the box (2 rows) so the border does not butt
+// directly against the conversation viewport or the status bar.
+const askInputRows = askInputHeight + 4
 
 // styleAskTextarea applies theme-aware colors to the Ask Seam input so
 // it blends with the assistant pane. The default bubbles v2 textarea
@@ -174,6 +211,9 @@ func styleAskTextarea(ta *textarea.Model) {
 }
 
 func (m askModel) Init() tea.Cmd {
+	if assistantStyles.Mario {
+		return tea.Batch(textarea.Blink, marioTick())
+	}
 	return textarea.Blink
 }
 
@@ -246,13 +286,32 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 			return m, nil
 		}
 		m.turns = append(m.turns, chatTurn{
-			kind:    "system",
-			content: "Action rejected",
+			kind:      "system",
+			content:   "Action rejected",
+			createdAt: time.Now(),
 		})
 		return m, nil
 
 	case apiErrorMsg:
 		m.err = msg.err.Error()
+		return m, nil
+
+	case marioTickMsg:
+		// The tick self-terminates if the screen is closing or the
+		// user switched away from the Mario theme between frames.
+		if m.done || !assistantStyles.Mario {
+			return m, nil
+		}
+		m.animFrame = (m.animFrame + 1) % marioSpriteFrameCount
+		return m, marioTick()
+
+	case tea.MouseWheelMsg:
+		return m.handleWheel(msg), nil
+
+	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseMotionMsg:
+		// Swallow non-wheel mouse events so they don't reach the
+		// textarea (which would try to move the cursor based on
+		// pixel coordinates that don't match our layout).
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -263,6 +322,27 @@ func (m askModel) Update(msg tea.Msg) (askModel, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// handleWheel maps a vertical mouse wheel event to a scroll offset
+// change. Three lines per notch feels closer to a native chat window
+// than one-line-at-a-time on a tall conversation.
+func (m askModel) handleWheel(msg tea.MouseWheelMsg) askModel {
+	const step = 3
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		m.scrollY -= step
+		if m.scrollY < 0 {
+			m.scrollY = 0
+		}
+	case tea.MouseWheelDown:
+		max := m.maxScroll()
+		m.scrollY += step
+		if m.scrollY > max {
+			m.scrollY = max
+		}
+	}
+	return m
 }
 
 // handleKey dispatches key presses.
@@ -309,6 +389,13 @@ func (m askModel) handleKey(msg tea.KeyPressMsg) (askModel, tea.Cmd) {
 
 	case km.Matches(msg, ActionAskFocusPrevTool):
 		m.focusToolIdx = m.nextToolIdx(m.focusToolIdx, -1)
+		return m, nil
+
+	case km.Matches(msg, ActionAskCopy):
+		if text := m.copyableText(); text != "" {
+			m.err = "copied"
+			return m, tea.SetClipboard(text)
+		}
 		return m, nil
 	}
 
@@ -426,10 +513,11 @@ func (m askModel) handleStreamEvent(e AssistantStreamEvent) askModel {
 			raw = json.RawMessage(fmt.Sprintf("%q", e.Error))
 		}
 		m.turns = append(m.turns, chatTurn{
-			kind:     "stream-tool",
-			toolName: e.ToolName,
-			status:   status,
-			raw:      raw,
+			kind:      "stream-tool",
+			toolName:  e.ToolName,
+			status:    status,
+			raw:       raw,
+			createdAt: time.Now(),
 		})
 
 	case "confirmation":
@@ -441,8 +529,9 @@ func (m askModel) handleStreamEvent(e AssistantStreamEvent) askModel {
 	case "done":
 		if m.streamingText != "" {
 			m.turns = append(m.turns, chatTurn{
-				kind:    "assistant",
-				content: m.streamingText,
+				kind:      "assistant",
+				content:   m.streamingText,
+				createdAt: time.Now(),
 			})
 			m.streamingText = ""
 		}
@@ -477,7 +566,7 @@ func (m askModel) createConversationThenSend(query string) tea.Cmd {
 // startStream appends the user turn, spawns the stream goroutine, and
 // returns a Cmd that reads the first event from the channel.
 func (m askModel) startStream(query string) (askModel, tea.Cmd) {
-	m.turns = append(m.turns, chatTurn{kind: "user", content: query})
+	m.turns = append(m.turns, chatTurn{kind: "user", content: query, createdAt: time.Now()})
 	m.streamingText = ""
 	m.streaming = true
 	m.scrollY = m.maxScroll()
@@ -622,9 +711,10 @@ func buildHistory(turns []chatTurn) []AssistantHistoryMessage {
 func persistedToTurns(msgs []AssistantPersistedMessage) []chatTurn {
 	var out []chatTurn
 	for _, m := range msgs {
+		ts := parsePersistedTime(m.CreatedAt)
 		switch m.Role {
 		case "user":
-			out = append(out, chatTurn{kind: "user", content: m.Content})
+			out = append(out, chatTurn{kind: "user", content: m.Content, createdAt: ts})
 		case "assistant":
 			if len(m.ToolCalls) > 0 && m.Content == "" {
 				// The envelope row carries no body text; the
@@ -632,23 +722,41 @@ func persistedToTurns(msgs []AssistantPersistedMessage) []chatTurn {
 				// render the visible cards.
 				continue
 			}
-			out = append(out, chatTurn{kind: "assistant", content: m.Content})
+			out = append(out, chatTurn{kind: "assistant", content: m.Content, createdAt: ts})
 		case "tool":
 			status := "ok"
 			if strings.HasPrefix(m.Content, "Error:") {
 				status = "error"
 			}
 			out = append(out, chatTurn{
-				kind:     "tool",
-				toolName: m.ToolName,
-				status:   status,
-				raw:      json.RawMessage(m.Content),
+				kind:      "tool",
+				toolName:  m.ToolName,
+				status:    status,
+				raw:       json.RawMessage(m.Content),
+				createdAt: ts,
 			})
 		case "system":
 			// Audit marker -- skip.
 		}
 	}
 	return out
+}
+
+// parsePersistedTime parses the ISO-8601 timestamp the server attaches
+// to a persisted chat message. Failure returns the zero time so the
+// renderer simply omits the timestamp rather than showing a bogus one.
+func parsePersistedTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339, s)
+		if err != nil {
+			return time.Time{}
+		}
+	}
+	return t.Local()
 }
 
 // -- View --------------------------------------------------------------------
@@ -664,12 +772,11 @@ type askLayout struct {
 // computeLayout returns the per-region row counts used by View. The
 // header and status bar are one row each. When a confirmation prompt
 // is pending the bordered approval box takes askConfirmRows rows; the
-// rest of the time the textarea footer takes askInputHeight rows plus
-// a blank row above and below. Everything remaining goes to the
-// conversation viewport, with a floor of three rows for very short
-// terminals.
+// rest of the time the bordered textarea footer takes askInputRows
+// rows. Everything remaining goes to the conversation viewport, with
+// a floor of three rows for very short terminals.
 func (m askModel) computeLayout() askLayout {
-	inputRows := askInputHeight + 2 // blank separator above, blank below
+	inputRows := askInputRows
 	if m.pendingConfirm != nil {
 		inputRows = askConfirmRows
 	}
@@ -734,13 +841,21 @@ func (m askModel) View() string {
 			Render(m.renderConfirmPrompt())
 	} else {
 		// Trim the textarea's trailing newline so the lipgloss height
-		// constraint sees exactly askInputHeight rows of content.
+		// constraint sees exactly askInputHeight rows of content. We
+		// size the input box by its OUTER width (content + border +
+		// padding) because lipgloss Width() counts border/padding as
+		// part of the given width budget.
 		inputView := strings.TrimRight(m.input.View(), "\n")
+		inputOuter := m.width - 4 // outer Padding(1, 2) = 4 cols
+		if inputOuter < 20 {
+			inputOuter = 20
+		}
+		boxed := assistantStyles.InputBox.Width(inputOuter).Render(inputView)
 		bottom = lipgloss.NewStyle().
 			Width(m.width).
 			Height(layout.inputRows).
 			Padding(1, 2).
-			Render(inputView)
+			Render(boxed)
 	}
 
 	statusBar := m.renderStatusBar()
@@ -753,91 +868,426 @@ func (m askModel) View() string {
 	)
 }
 
+// bubbleChromeWidth is the width of the border+padding chrome applied
+// to a chat bubble (1-col border + 1-col padding on each side).
+const bubbleChromeWidth = 4
+
+// bubbleLeftMargin is the space prepended to every bubble line so
+// that the bordered box sits slightly inset from the viewport edge.
+const bubbleLeftMargin = "  "
+
+// askEmptyHint is the placeholder shown in an empty conversation.
+const askEmptyHint = "Ask the assistant anything -- it can search, read, write, and remember."
+
+// bubbleContentWidth returns the inner (content) width used when
+// rendering a chat bubble, clamped so very wide terminals still get
+// readable line lengths and very narrow ones still get a usable box.
+func (m askModel) bubbleContentWidth() int {
+	const cap = 72
+	const floor = 20
+	// 2 cols left margin + 4 cols chrome + 4 cols right breathing room.
+	w := m.width - len(bubbleLeftMargin) - bubbleChromeWidth - 4
+	if w > cap {
+		w = cap
+	}
+	if w < floor {
+		w = floor
+	}
+	return w
+}
+
 // buildConversationLines flattens turns into display lines with styling.
 func (m askModel) buildConversationLines() []string {
 	var lines []string
-	wrapWidth := m.width - 8
-	if wrapWidth < 20 {
-		wrapWidth = 20
-	}
+	innerWidth := m.bubbleContentWidth()
 
 	if len(m.turns) == 0 && !m.streaming {
-		lines = append(lines, "")
-		lines = append(lines, assistantStyles.Muted.Render("  "+marioBlock+"  Ask the assistant anything -- it can search, read, write, and remember."))
-		lines = append(lines, "")
+		if assistantStyles.Mario {
+			sprite := renderMarioSprite(m.animFrame)
+			captionRow := marioSpriteTermHeight / 2
+			lines = append(lines, "")
+			for i, row := range sprite {
+				line := bubbleLeftMargin + row
+				if i == captionRow {
+					line += "  " + assistantStyles.Muted.Render(askEmptyHint)
+				}
+				lines = append(lines, line)
+			}
+			lines = append(lines, "")
+		} else {
+			lines = append(lines, "")
+			lines = append(lines, bubbleLeftMargin+assistantStyles.Muted.Render(marioBlock+"  "+askEmptyHint))
+			lines = append(lines, "")
+		}
 	}
 
 	for i, t := range m.turns {
 		focused := i == m.focusToolIdx
 		switch t.kind {
 		case "user":
-			lines = append(lines, assistantStyles.MessageUser.Render("  You: "))
-			for _, line := range strings.Split(t.content, "\n") {
-				wrapped := wrapText(line, wrapWidth)
-				for _, wl := range strings.Split(wrapped, "\n") {
-					lines = append(lines, "    "+assistantStyles.MessageAssist.Render(wl))
-				}
-			}
-			lines = append(lines, "")
+			label := m.userLabel()
+			ts := formatTurnTime(t.createdAt)
+			fw := contentFitWidth(t.content, label, ts, innerWidth)
+			lines = append(lines, m.renderMessageBubble(
+				assistantStyles.BubbleUser,
+				assistantStyles.BannerUser,
+				label,
+				t.content,
+				t.createdAt,
+				fw,
+				false,
+				true, // right-align
+			)...)
 
 		case "assistant":
-			lines = append(lines, assistantStyles.ToolBlock.Render("  Seam: "))
-			for _, line := range strings.Split(t.content, "\n") {
-				wrapped := wrapText(line, wrapWidth)
-				for _, wl := range strings.Split(wrapped, "\n") {
-					lines = append(lines, "    "+assistantStyles.MessageAssist.Render(wl))
-				}
-			}
-			lines = append(lines, "")
+			label := m.assistantLabel()
+			ts := formatTurnTime(t.createdAt)
+			fw := contentFitWidth(t.content, label, ts, innerWidth)
+			lines = append(lines, m.renderMessageBubble(
+				assistantStyles.BubbleAssist,
+				assistantStyles.BannerAssist,
+				label,
+				t.content,
+				t.createdAt,
+				fw,
+				false,
+				false,
+			)...)
 
 		case "system":
-			lines = append(lines, assistantStyles.Muted.Render("  · "+t.content))
-			lines = append(lines, "")
+			lines = append(lines, m.renderSystemLine(t)...)
 
 		case "tool", "stream-tool":
-			lines = append(lines, m.renderToolCard(i, t, focused, wrapWidth)...)
-			lines = append(lines, "")
+			lines = append(lines, m.renderToolBubble(i, t, focused, innerWidth)...)
 		}
 	}
 
 	// Streaming text bubble.
 	if m.streaming && m.streamingText != "" {
-		lines = append(lines, assistantStyles.ToolBlock.Render("  Seam: "))
-		for _, line := range strings.Split(m.streamingText, "\n") {
-			wrapped := wrapText(line, wrapWidth)
-			for _, wl := range strings.Split(wrapped, "\n") {
-				lines = append(lines, "    "+assistantStyles.MessageAssist.Render(wl))
-			}
-		}
-		lines = append(lines, "")
+		label := m.assistantLabel()
+		fw := contentFitWidth(m.streamingText, label, "...", innerWidth)
+		lines = append(lines, m.renderMessageBubble(
+			assistantStyles.BubbleAssist,
+			assistantStyles.BannerAssist,
+			label,
+			m.streamingText,
+			time.Time{},
+			fw,
+			true,
+			false,
+		)...)
 	} else if m.streaming && m.streamingText == "" {
-		lines = append(lines, assistantStyles.Muted.Render("  "+marioBlock+" thinking..."))
-		lines = append(lines, "")
+		lines = append(lines, m.renderThinkingIndicator()...)
 	}
 
 	return lines
 }
 
-// renderToolCard formats a single tool turn as one or more lines.
-func (m askModel) renderToolCard(idx int, t chatTurn, focused bool, wrapWidth int) []string {
-	cursor := "  "
-	nameStyle := assistantStyles.ToolBlock
-	if focused {
-		cursor = assistantStyles.ToolBlock.Render("> ")
-		nameStyle = assistantStyles.ToolBlock.Bold(true).Underline(true)
-	}
-	glyph := assistantStatusStyle(t.status).Render(marioStatusGlyph(t.status))
-	head := cursor + assistantStyles.ToolBlock.Render(marioBlock+" ") + nameStyle.Render(t.toolName) + "  " + glyph
-
-	lines := []string{head}
-	if m.expanded[idx] {
-		body := renderToolResult(t.toolName, t.raw)
-		for _, bl := range strings.Split(body, "\n") {
-			// Indent with three spaces to line up under the block glyph.
-			lines = append(lines, "   "+bl)
+// copyableText returns the content the Ctrl+Y copy shortcut should
+// put on the clipboard. If a tool card is focused it returns the tool
+// result; otherwise it scans backwards for the most recent assistant
+// reply and returns its text. Empty string means nothing to copy.
+func (m askModel) copyableText() string {
+	if m.focusToolIdx >= 0 && m.focusToolIdx < len(m.turns) {
+		t := m.turns[m.focusToolIdx]
+		if t.kind == "tool" || t.kind == "stream-tool" {
+			return string(t.raw)
 		}
 	}
-	return lines
+	for i := len(m.turns) - 1; i >= 0; i-- {
+		if m.turns[i].kind == "assistant" {
+			return m.turns[i].content
+		}
+	}
+	return ""
+}
+
+// contentFitWidth returns the narrowest bubble width that contains
+// both the banner (label + timestamp) and the widest content line
+// without forcing a wrap, clamped between a floor of 20 cells and
+// maxWidth. Short messages get a compact bubble; long messages expand
+// up to the viewport cap, identical to the previous fixed-width
+// behaviour.
+func contentFitWidth(content, label, ts string, maxWidth int) int {
+	const floor = 20
+	widest := 0
+	for _, line := range strings.Split(content, "\n") {
+		if w := lipgloss.Width(line); w > widest {
+			widest = w
+		}
+	}
+	bannerMin := lipgloss.Width(" "+label+" ") + 1
+	if ts != "" {
+		bannerMin += lipgloss.Width(ts + " ")
+	}
+	if bannerMin > widest {
+		widest = bannerMin
+	}
+	if widest > maxWidth {
+		return maxWidth
+	}
+	if widest < floor {
+		return floor
+	}
+	return widest
+}
+
+// userLabel returns the sender label for user messages. Mario gets a
+// star flourish; other themes get a plain uppercase label.
+func (m askModel) userLabel() string {
+	if assistantStyles.Mario {
+		return "★ YOU ★"
+	}
+	return "YOU"
+}
+
+// renderThinkingIndicator returns the lines that represent "the
+// assistant is thinking" in the chat view. Mario renders an animated
+// pixel-art Mario sprite walking in place with a muted caption to the
+// right; other themes fall back to a single-line glyph + text. The
+// middle row of the sprite carries the caption so the combined block
+// reads as one balanced unit rather than a sprite floating above a
+// text label.
+func (m askModel) renderThinkingIndicator() []string {
+	if !assistantStyles.Mario {
+		return []string{
+			bubbleLeftMargin + assistantStyles.Muted.Render(marioBlock+" thinking..."),
+			"",
+		}
+	}
+
+	sprite := renderMarioSprite(m.animFrame)
+	caption := assistantStyles.Muted.Render("thinking...")
+	captionRow := marioSpriteTermHeight / 2
+
+	out := make([]string, 0, len(sprite)+1)
+	for i, row := range sprite {
+		line := bubbleLeftMargin + row
+		if i == captionRow {
+			line += "  " + caption
+		}
+		out = append(out, line)
+	}
+	out = append(out, "")
+	return out
+}
+
+// assistantLabel returns the sender label for assistant messages.
+// Mario gets the question-block flourish on both sides of the label;
+// other themes use a single leading dot. The actual Mario animation
+// lives in the "thinking..." indicator via renderMarioSprite -- the
+// label itself stays static so every message bubble renders with a
+// stable width.
+func (m askModel) assistantLabel() string {
+	if assistantStyles.Mario {
+		return "▣ SEAM ▣"
+	}
+	return assistantStyles.Block + " SEAM"
+}
+
+// renderMessageBubble builds a bordered chat bubble with a cartoonish
+// full-width banner header (inverse fg/bg) and wrapped content body.
+// When alignRight is true the bubble is pushed against the right edge
+// of the viewport (used for user messages). innerWidth is the number
+// of visible cells inside the bubble (excluding border and padding),
+// and is used to size both the banner and the wrapped content. The
+// trailing blank separator is included so every call site appends a
+// single block of lines.
+func (m askModel) renderMessageBubble(
+	box lipgloss.Style,
+	bannerStyle lipgloss.Style,
+	label string,
+	content string,
+	createdAt time.Time,
+	innerWidth int,
+	streaming bool,
+	alignRight bool,
+) []string {
+	ts := formatTurnTime(createdAt)
+	if streaming {
+		ts = "..."
+	}
+	banner := renderBanner(bannerStyle, label, ts, innerWidth)
+
+	// Thin separator in the banner's accent color between header and
+	// body. Gives a retro terminal panel divider without a heavy
+	// full-width colored bar.
+	sep := lipgloss.NewStyle().
+		Foreground(bannerStyle.GetForeground()).
+		Faint(true).
+		Render(strings.Repeat("─", innerWidth))
+
+	body := banner + "\n" + sep
+	wrapped := wrapContent(content, innerWidth)
+	if wrapped != "" {
+		body += "\n" + assistantStyles.MessageAssist.Render(wrapped)
+	}
+
+	// lipgloss Width() is the total rendered width including border
+	// and padding, so we add the 4 cells of chrome to the content
+	// budget before handing the body to the box.
+	rendered := box.Width(innerWidth + bubbleChromeWidth).Render(body)
+	if alignRight {
+		return m.rightAlignAndTerminate(rendered, innerWidth)
+	}
+	return prefixAndTerminate(rendered, bubbleLeftMargin)
+}
+
+// renderToolBubble builds a bordered card for a tool call turn. The
+// border color tracks the tool status (success = green, error = red),
+// the banner mirrors the border tint, and the card body is only
+// rendered when the user has expanded it.
+func (m askModel) renderToolBubble(idx int, t chatTurn, focused bool, innerWidth int) []string {
+	box := assistantStyles.BubbleTool
+	bannerSt := assistantStyles.BannerTool
+	if t.status == "error" {
+		box = assistantStyles.BubbleToolWarn
+		bannerSt = assistantStyles.BannerToolWarn
+	}
+
+	label := assistantStyles.Block + " " + strings.ToUpper(t.toolName)
+	if focused {
+		label = "> " + label
+	}
+	glyph := marioStatusGlyph(t.status)
+	ts := formatTurnTime(t.createdAt)
+
+	// Adaptive: size the tool card to its content when expanded.
+	toolContent := ""
+	if m.expanded[idx] {
+		toolContent = renderToolResult(t.toolName, t.raw)
+	}
+	fw := contentFitWidth(toolContent, label+"  "+glyph, ts, innerWidth)
+
+	header := renderBannerWithGlyph(bannerSt, label, glyph, ts, fw)
+
+	body := header
+	if toolContent != "" {
+		wrapped := wrapContent(toolContent, fw)
+		if wrapped != "" {
+			body += "\n" + wrapped
+		}
+	}
+
+	rendered := box.Width(fw + bubbleChromeWidth).Render(body)
+	return prefixAndTerminate(rendered, bubbleLeftMargin)
+}
+
+// renderBanner builds a single-line banner with label pinned to the
+// left, optional timestamp pinned to the right, and the bannerStyle's
+// background filling the full innerWidth between them. Widths are
+// measured with lipgloss.Width so they match the same cell-counting
+// heuristic lipgloss uses when laying out the final box -- mixing
+// uniseg here caused ambiguous-width glyphs (★, ▣) to wrap the
+// banner to two lines.
+func renderBanner(style lipgloss.Style, label, ts string, innerWidth int) string {
+	left := " " + label + " "
+	right := ""
+	if ts != "" {
+		right = ts + " "
+	}
+	return style.Width(innerWidth).Render(joinSpread(left, right, innerWidth))
+}
+
+// renderBannerWithGlyph is a tool-bubble variant that places a status
+// glyph between the label and the timestamp. The glyph inherits the
+// banner foreground so it matches the inverse color scheme.
+func renderBannerWithGlyph(style lipgloss.Style, label, glyph, ts string, innerWidth int) string {
+	left := " " + label + "  " + glyph + " "
+	right := ""
+	if ts != "" {
+		right = ts + " "
+	}
+	return style.Width(innerWidth).Render(joinSpread(left, right, innerWidth))
+}
+
+// joinSpread concatenates left and right with enough blanks between
+// them to fill exactly totalWidth visible cells. If the natural width
+// already exceeds totalWidth, the result is truncated gracefully by
+// falling back to a single-space separator -- lipgloss will then wrap
+// as a last resort, which is still preferable to panicking.
+func joinSpread(left, right string, totalWidth int) string {
+	if right == "" {
+		return left
+	}
+	gap := totalWidth - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+// rightAlignAndTerminate pads each rendered line of a bordered bubble
+// with leading spaces so the bubble sits against the right edge of
+// the viewport, leaving two cols of breathing room on the right.
+// Appends a trailing blank line to separate consecutive bubbles.
+func (m askModel) rightAlignAndTerminate(rendered string, innerWidth int) []string {
+	const rightMargin = 2
+	bubbleOuterWidth := innerWidth + bubbleChromeWidth
+	padLeft := m.width - bubbleOuterWidth - rightMargin
+	if padLeft < 0 {
+		padLeft = 0
+	}
+	pad := strings.Repeat(" ", padLeft)
+	raw := strings.Split(rendered, "\n")
+	out := make([]string, 0, len(raw)+1)
+	for _, line := range raw {
+		out = append(out, pad+line)
+	}
+	out = append(out, "")
+	return out
+}
+
+// renderSystemLine renders a centered, italic audit marker with a
+// timestamp -- cheaper than a full bubble and visually quieter.
+func (m askModel) renderSystemLine(t chatTurn) []string {
+	text := "· " + t.content
+	if ts := formatTurnTime(t.createdAt); ts != "" {
+		text += "  " + ts
+	}
+	return []string{bubbleLeftMargin + assistantStyles.Muted.Italic(true).Render(text), ""}
+}
+
+// wrapContent applies wrapText to every \n-delimited line of s and
+// rejoins the result. Blank-line separators are preserved. Returns
+// an empty string when s is empty so callers can skip the content
+// region of a bubble entirely.
+func wrapContent(s string, width int) string {
+	if s == "" {
+		return ""
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line == "" {
+			out = append(out, "")
+			continue
+		}
+		wrapped := wrapText(line, width)
+		out = append(out, strings.Split(wrapped, "\n")...)
+	}
+	return strings.Join(out, "\n")
+}
+
+// prefixAndTerminate prepends margin to every line of rendered and
+// appends a trailing blank line to separate the bubble from whatever
+// comes next in the conversation stream.
+func prefixAndTerminate(rendered string, margin string) []string {
+	raw := strings.Split(rendered, "\n")
+	out := make([]string, 0, len(raw)+1)
+	for _, line := range raw {
+		out = append(out, margin+line)
+	}
+	out = append(out, "")
+	return out
+}
+
+// formatTurnTime renders a timestamp as HH:MM. A zero time yields an
+// empty string so the renderer can omit the slot entirely.
+func formatTurnTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("15:04")
 }
 
 // renderStatusBar picks the longest hint string that still fits on
@@ -846,7 +1296,7 @@ func (m askModel) renderToolCard(idx int, t chatTurn, focused bool, wrapWidth in
 // throws off the fixed layout maths in computeLayout.
 func (m askModel) renderStatusBar() string {
 	km := currentKeymap()
-	full := fmt.Sprintf("%s: send | %s: newline | %s/%s: focus tool | %s (on tool): expand | %s/%s: scroll | %s: stop/back",
+	full := fmt.Sprintf("%s: send | %s: newline | %s/%s: tool | %s: expand | %s/%s: scroll | %s: copy | %s: back",
 		km.Display(ActionAskSubmit),
 		km.Display(ActionAskNewline),
 		km.Display(ActionAskFocusNextTool),
@@ -854,16 +1304,20 @@ func (m askModel) renderStatusBar() string {
 		km.Display(ActionAskSubmit),
 		km.Display(ActionAskScrollUp),
 		km.Display(ActionAskScrollDown),
+		km.Display(ActionAskCopy),
 		km.Display(ActionAskBack))
-	medium := fmt.Sprintf("%s send · %s newline · %s/%s tool · %s/%s scroll · %s back",
+	medium := fmt.Sprintf("%s send · %s/%s tool · %s copy · %s/%s scroll · %s back",
 		km.Display(ActionAskSubmit),
-		km.Display(ActionAskNewline),
 		km.Display(ActionAskFocusNextTool),
 		km.Display(ActionAskFocusPrevTool),
+		km.Display(ActionAskCopy),
 		km.Display(ActionAskScrollUp),
 		km.Display(ActionAskScrollDown),
 		km.Display(ActionAskBack))
-	short := fmt.Sprintf("%s send · %s back", km.Display(ActionAskSubmit), km.Display(ActionAskBack))
+	short := fmt.Sprintf("%s send · %s copy · %s back",
+		km.Display(ActionAskSubmit),
+		km.Display(ActionAskCopy),
+		km.Display(ActionAskBack))
 
 	// Pick the widest variant that still fits inside the bar (the
 	// StatusBar style adds two columns of horizontal padding).

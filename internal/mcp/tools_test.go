@@ -467,11 +467,11 @@ func TestSessionList_DefaultLimit_Uses20(t *testing.T) {
 
 func TestMemoryRead_Success_ReturnsTitleAndBody(t *testing.T) {
 	mock := &mockAgentService{
-		memoryReadFn: func(_ context.Context, userID, category, name string) (string, string, error) {
+		memoryReadFn: func(_ context.Context, userID, category, name string) (string, string, string, error) {
 			require.Equal(t, toolTestUser, userID)
 			require.Equal(t, "architecture", category)
 			require.Equal(t, "overview", name)
-			return "Architecture Overview", "# Arch\nService-oriented design.", nil
+			return "Architecture Overview", "Service-oriented design summary", "# Arch\nService-oriented design.", nil
 		},
 	}
 	srv := newServer(mock)
@@ -486,6 +486,7 @@ func TestMemoryRead_Success_ReturnsTitleAndBody(t *testing.T) {
 	var parsed map[string]string
 	require.NoError(t, json.Unmarshal([]byte(text), &parsed))
 	require.Equal(t, "Architecture Overview", parsed["title"])
+	require.Equal(t, "Service-oriented design summary", parsed["description"])
 	require.Equal(t, "# Arch\nService-oriented design.", parsed["body"])
 }
 
@@ -501,8 +502,8 @@ func TestMemoryRead_MissingCategory_ReturnsError(t *testing.T) {
 
 func TestMemoryRead_NotFound_ReturnsError(t *testing.T) {
 	mock := &mockAgentService{
-		memoryReadFn: func(context.Context, string, string, string) (string, string, error) {
-			return "", "", agent.ErrNotFound
+		memoryReadFn: func(context.Context, string, string, string) (string, string, string, error) {
+			return "", "", "", agent.ErrNotFound
 		},
 	}
 	srv := newServer(mock)
@@ -520,22 +521,26 @@ func TestMemoryRead_NotFound_ReturnsError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMemoryWrite_Success_ReturnsNoteID(t *testing.T) {
-	var capturedCategory, capturedName, capturedContent string
+	var capturedCategory, capturedName, capturedContent, capturedDesc, capturedProject string
 	mock := &mockAgentService{
-		memoryWriteFn: func(_ context.Context, userID, category, name, content string) (string, error) {
+		memoryWriteFn: func(_ context.Context, userID, category, name, content, description, projectSlug string) (agent.MemoryWriteResult, error) {
 			require.Equal(t, toolTestUser, userID)
 			capturedCategory = category
 			capturedName = name
 			capturedContent = content
-			return "note-mem-001", nil
+			capturedDesc = description
+			capturedProject = projectSlug
+			return agent.MemoryWriteResult{NoteID: "note-mem-001"}, nil
 		},
 	}
 	srv := newServer(mock)
 
 	result := directCall(t, srv, "memory_write", map[string]any{
-		"category": "conventions",
-		"name":     "go-style",
-		"content":  "Use gofmt. No exceptions.",
+		"category":    "gotcha",
+		"name":        "go-style",
+		"description": "Always run gofmt",
+		"content":     "Use gofmt. No exceptions.",
+		"project":     "seam",
 	})
 	require.False(t, result.IsError)
 
@@ -543,9 +548,52 @@ func TestMemoryWrite_Success_ReturnsNoteID(t *testing.T) {
 	var parsed map[string]string
 	require.NoError(t, json.Unmarshal([]byte(text), &parsed))
 	require.Equal(t, "note-mem-001", parsed["note_id"])
-	require.Equal(t, "conventions", capturedCategory)
+	require.Equal(t, "gotcha", capturedCategory)
 	require.Equal(t, "go-style", capturedName)
 	require.Equal(t, "Use gofmt. No exceptions.", capturedContent)
+	require.Equal(t, "Always run gofmt", capturedDesc)
+	require.Equal(t, "seam", capturedProject)
+}
+
+func TestMemoryWrite_WithSimilar_IncludesHint(t *testing.T) {
+	mock := &mockAgentService{
+		memoryWriteFn: func(_ context.Context, _, _, _, _, _, _ string) (agent.MemoryWriteResult, error) {
+			return agent.MemoryWriteResult{
+				NoteID:  "note-mem-002",
+				Similar: &agent.MemoryRef{Category: "protocol", Name: "jwt-auth", Score: 0.87},
+			}, nil
+		},
+	}
+	srv := newServer(mock)
+
+	result := directCall(t, srv, "memory_write", map[string]any{
+		"category":    "protocol",
+		"name":        "auth-tokens",
+		"description": "jwt token handling",
+		"content":     "JWT handling notes.",
+	})
+	require.False(t, result.IsError)
+
+	var parsed struct {
+		NoteID  string           `json:"note_id"`
+		Similar *agent.MemoryRef `json:"similar"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(textOf(t, result)), &parsed))
+	require.Equal(t, "note-mem-002", parsed.NoteID)
+	require.NotNil(t, parsed.Similar)
+	require.Equal(t, "jwt-auth", parsed.Similar.Name)
+}
+
+func TestMemoryWrite_MissingDescription_ReturnsError(t *testing.T) {
+	srv := newServer(&mockAgentService{})
+
+	result := directCall(t, srv, "memory_write", map[string]any{
+		"category": "protocol",
+		"name":     "go-style",
+		"content":  "Use gofmt.",
+	})
+	require.True(t, result.IsError)
+	require.Contains(t, textOf(t, result), "description")
 }
 
 func TestMemoryWrite_MissingContent_ReturnsError(t *testing.T) {

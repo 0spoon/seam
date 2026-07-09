@@ -173,7 +173,7 @@ func sessionListTool() mcp.Tool {
 
 func memoryReadTool() mcp.Tool {
 	return mcp.NewTool("memory_read",
-		mcp.WithDescription("Read a knowledge note by category and name."),
+		mcp.WithDescription("Read a knowledge memory by category and name. If the exact category is not found, a unique name match across any category is returned."),
 		mcp.WithString("category", mcp.Required(), mcp.Description("Knowledge category")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Knowledge name")),
 	)
@@ -181,10 +181,14 @@ func memoryReadTool() mcp.Tool {
 
 func memoryWriteTool() mcp.Tool {
 	return mcp.NewTool("memory_write",
-		mcp.WithDescription("Create or update a knowledge note."),
-		mcp.WithString("category", mcp.Required(), mcp.Description("Knowledge category")),
-		mcp.WithString("name", mcp.Required(), mcp.Description("Knowledge name")),
-		mcp.WithString("content", mcp.Required(), mcp.Description("Note content")),
+		mcp.WithDescription("Create or update a knowledge memory. Requires a one-line description used for recall indexes -- write it for a future agent deciding whether to read this memory."),
+		mcp.WithString("category", mcp.Required(),
+			mcp.Enum("constraint", "runbook", "protocol", "gotcha", "decision", "refuted", "reference"),
+			mcp.Description("Memory category. 'constraint' memories are pinned into every session briefing; 'refuted' records claims that were investigated and found false.")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Short kebab-case memory name, unique within the category")),
+		mcp.WithString("description", mcp.Required(), mcp.Description("One line (<=150 chars): what this memory contains and when to read it")),
+		mcp.WithString("content", mcp.Required(), mcp.Description("Memory body (markdown)")),
+		mcp.WithString("project", mcp.Description("Seam project slug this memory belongs to (scopes recall and briefings)")),
 	)
 }
 
@@ -421,12 +425,12 @@ func (s *Server) handleMemoryRead(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(errMsg), nil
 	}
 
-	title, body, err := s.cfg.AgentService.MemoryRead(ctx, userID, category, name)
+	title, description, body, err := s.cfg.AgentService.MemoryRead(ctx, userID, category, name)
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("memory_read", err)), nil
 	}
 
-	result := map[string]string{"title": title, "body": body}
+	result := map[string]string{"title": title, "description": description, "body": body}
 	data, jsonErr := json.Marshal(result)
 	if jsonErr != nil {
 		return mcp.NewToolResultError("failed to marshal result"), nil
@@ -454,13 +458,18 @@ func (s *Server) handleMemoryWrite(ctx context.Context, req mcp.CallToolRequest)
 	if len(content) > maxContentLen {
 		return mcp.NewToolResultError(fmt.Sprintf("content too long: %d bytes exceeds limit of %d", len(content), maxContentLen)), nil
 	}
+	description, err := req.RequireString("description")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: description"), nil
+	}
+	projectSlug := req.GetString("project", "")
 
-	noteID, err := s.cfg.AgentService.MemoryWrite(ctx, userID, category, name, content)
+	res, err := s.cfg.AgentService.MemoryWrite(ctx, userID, category, name, content, description, projectSlug)
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("memory_write", err)), nil
 	}
 
-	data, _ := json.Marshal(map[string]string{"note_id": noteID})
+	data, _ := json.Marshal(res)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
@@ -597,10 +606,11 @@ func (s *Server) handleNotesRead(ctx context.Context, req mcp.CallToolRequest) (
 	}
 
 	result := map[string]interface{}{
-		"id":    n.ID,
-		"title": n.Title,
-		"body":  n.Body,
-		"tags":  n.Tags,
+		"id":          n.ID,
+		"title":       n.Title,
+		"description": n.Description,
+		"body":        n.Body,
+		"tags":        n.Tags,
 	}
 	data, jsonErr := json.Marshal(result)
 	if jsonErr != nil {
@@ -625,18 +635,20 @@ func (s *Server) handleNotesList(ctx context.Context, req mcp.CallToolRequest) (
 
 	// Return summaries (not full bodies) to keep response compact.
 	type noteSummary struct {
-		ID        string   `json:"id"`
-		Title     string   `json:"title"`
-		Tags      []string `json:"tags,omitempty"`
-		UpdatedAt string   `json:"updated_at"`
+		ID          string   `json:"id"`
+		Title       string   `json:"title"`
+		Description string   `json:"description,omitempty"`
+		Tags        []string `json:"tags,omitempty"`
+		UpdatedAt   string   `json:"updated_at"`
 	}
 	summaries := make([]noteSummary, 0, len(notes))
 	for _, n := range notes {
 		summaries = append(summaries, noteSummary{
-			ID:        n.ID,
-			Title:     n.Title,
-			Tags:      n.Tags,
-			UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			ID:          n.ID,
+			Title:       n.Title,
+			Description: n.Description,
+			Tags:        n.Tags,
+			UpdatedAt:   n.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
 
@@ -740,6 +752,7 @@ func notesUpdateTool() mcp.Tool {
 		mcp.WithDescription("Update an existing note. Only provided fields are changed; omitted fields are left as-is."),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Note ID")),
 		mcp.WithString("title", mcp.Description("New title (omit to keep current)")),
+		mcp.WithString("description", mcp.Description("New one-line description (omit to keep current)")),
 		mcp.WithString("body", mcp.Description("New body content in markdown (omit to keep current)")),
 		mcp.WithString("project", mcp.Description("Project slug to move note to (empty string = inbox, omit to keep current)")),
 		mcp.WithString("tags", mcp.Description("Comma-separated tags, replaces all existing tags (omit to keep current)")),
@@ -803,12 +816,17 @@ func (s *Server) handleNotesUpdate(ctx context.Context, req mcp.CallToolRequest)
 
 	// Build update params: only set fields that were explicitly provided.
 	args := req.GetArguments()
-	var title, body, projectSlug *string
+	var title, description, body, projectSlug *string
 	var tags *[]string
 
 	if v, ok := args["title"]; ok {
 		if s, ok := v.(string); ok {
 			title = &s
+		}
+	}
+	if v, ok := args["description"]; ok {
+		if s, ok := v.(string); ok {
+			description = &s
 		}
 	}
 	if v, ok := args["body"]; ok {
@@ -832,11 +850,11 @@ func (s *Server) handleNotesUpdate(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	// At least one field must be provided.
-	if title == nil && body == nil && projectSlug == nil && tags == nil {
-		return mcp.NewToolResultError("at least one field (title, body, project, tags) must be provided"), nil
+	if title == nil && description == nil && body == nil && projectSlug == nil && tags == nil {
+		return mcp.NewToolResultError("at least one field (title, description, body, project, tags) must be provided"), nil
 	}
 
-	n, err := s.cfg.AgentService.NotesUpdate(ctx, userID, noteID, title, body, projectSlug, tags)
+	n, err := s.cfg.AgentService.NotesUpdate(ctx, userID, noteID, title, description, body, projectSlug, tags)
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("notes_update", err)), nil
 	}

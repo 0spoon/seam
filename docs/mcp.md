@@ -84,14 +84,16 @@ Track agent working sessions with plans, progress, and findings. Sessions form h
 
 Persistent knowledge that survives across sessions. Your agent's long-term memory.
 
-| Tool            | What it does                                           |
-| --------------- | ------------------------------------------------------ |
-| `memory_write`  | Create or update a knowledge note by category and name |
-| `memory_read`   | Read a knowledge note                                  |
-| `memory_append` | Append to an existing note                             |
-| `memory_list`   | List notes, optionally by category                     |
-| `memory_delete` | Delete a knowledge note                                |
-| `memory_search` | FTS + semantic search scoped to agent memory           |
+| Tool            | What it does                                                                 |
+| --------------- | --------------------------------------------------------------------------- |
+| `memory_write`  | Create or update a memory. Requires `category` (enum), `name`, `description` (one line, <=150 chars), `content`; optional `project` slug. Returns `note_id` and, on create, an advisory `similar` dedup hint. |
+| `memory_read`   | Read a memory by `category` + `name`; returns `title`, `description`, `body`. Falls back to a unique name-only match across categories. |
+| `memory_append` | Append to an existing memory                                                 |
+| `memory_list`   | List memories, optionally by category (items include `note_id`, `description`, `project`) |
+| `memory_delete` | Delete a memory                                                             |
+| `memory_search` | FTS + semantic search scoped to agent memory                                |
+
+**Memory categories** (enum, required for new writes): `constraint` (standing rules, pinned into every session briefing), `runbook` (repeatable procedures), `protocol` (verified wire/hardware/API facts), `gotcha` (pitfalls + workarounds), `decision` (decisions with rationale), `refuted` (claims investigated and found false), `reference` (pointers to external resources). Legacy freeform categories remain readable via `memory_read`/`memory_list`/`memory_append`.
 
 ### User Notes
 
@@ -103,7 +105,7 @@ Read, search, create, update, and delete user-facing notes.
 | `notes_read`   | Read a note by ID                                    |
 | `notes_list`   | List notes with project/tag filtering                |
 | `notes_create` | Create a user note (auto-tagged `created-by:agent`)  |
-| `notes_update` | Update a note's title, body, tags, or project        |
+| `notes_update` | Update a note's title, description, body, tags, or project |
 | `notes_delete` | Permanently delete a note by ID                      |
 | `notes_tags`   | List all tags in use with counts                     |
 | `notes_daily`  | Get or create today's daily note                     |

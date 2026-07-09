@@ -378,20 +378,48 @@ func (s *Service) SessionContextSet(ctx context.Context, userID, sessionName, co
 
 // --- Knowledge (Memory) CRUD ---
 
-// MemoryWrite creates or updates a knowledge note.
-func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, content string) (string, error) {
-	title := KnowledgeNoteTitle(category, name)
-	tags := KnowledgeTags(category)
+// MemoryWrite creates or updates a knowledge note. The category must be one of
+// MemoryCategories. When description is empty it is derived from the content.
+// When projectSlug is non-empty it is validated and applied as a "project:" tag
+// so the memory is scoped to that project for briefings and recall. On the
+// create path, a dedup hint (Similar) is returned when a semantically close
+// existing memory is found; the write always proceeds regardless.
+func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, content, description, projectSlug string) (MemoryWriteResult, error) {
+	if !IsValidMemoryCategory(category) {
+		return MemoryWriteResult{}, fmt.Errorf("agent.Service.MemoryWrite: %q: %w", category, ErrInvalidCategory)
+	}
 
-	// Try to find existing.
+	if description == "" {
+		description = deriveDescription(content)
+	}
+
+	tags := KnowledgeTags(category)
+	if projectSlug != "" {
+		if _, err := s.cfg.ProjectService.GetBySlug(ctx, userID, projectSlug); err != nil {
+			if errors.Is(err, project.ErrNotFound) {
+				return MemoryWriteResult{}, fmt.Errorf("agent.Service.MemoryWrite: %q: %w", projectSlug, ErrUnknownProject)
+			}
+			return MemoryWriteResult{}, fmt.Errorf("agent.Service.MemoryWrite: resolve project: %w", err)
+		}
+		tags = append(tags, "project:"+projectSlug)
+	}
+
+	title := KnowledgeNoteTitle(category, name)
+
+	// Try to find existing (exact category+name).
 	noteID, err := s.findKnowledgeNote(ctx, userID, category, name)
 	if err == nil {
-		// Update existing.
+		// Update existing. Always refresh body + description; refresh tags
+		// (re-scoping the project) only when a project was explicitly passed.
 		body := content
-		if _, updateErr := s.cfg.NoteService.Update(ctx, userID, noteID, note.UpdateNoteReq{
-			Body: &body,
-		}); updateErr != nil {
-			return "", fmt.Errorf("agent.Service.MemoryWrite: update: %w", updateErr)
+		desc := description
+		req := note.UpdateNoteReq{Body: &body, Description: &desc}
+		if projectSlug != "" {
+			t := tags
+			req.Tags = &t
+		}
+		if _, updateErr := s.cfg.NoteService.Update(ctx, userID, noteID, req); updateErr != nil {
+			return MemoryWriteResult{}, fmt.Errorf("agent.Service.MemoryWrite: update: %w", updateErr)
 		}
 		s.enqueueEmbed(ctx, userID, noteID)
 		s.notifyWS(userID, "agent.memory_changed", map[string]string{
@@ -399,26 +427,29 @@ func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, conte
 			"category": category,
 			"name":     name,
 		})
-		return noteID, nil
+		return MemoryWriteResult{NoteID: noteID}, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
-		return "", fmt.Errorf("agent.Service.MemoryWrite: find: %w", err)
+		return MemoryWriteResult{}, fmt.Errorf("agent.Service.MemoryWrite: find: %w", err)
 	}
 
-	// Create new.
+	// Create path: compute an advisory dedup hint before creating.
+	similar := s.dedupHint(ctx, userID, name, description)
+
 	projectID, projErr := s.ensureAgentMemoryProject(ctx, userID)
 	if projErr != nil {
-		return "", fmt.Errorf("agent.Service.MemoryWrite: %w", projErr)
+		return MemoryWriteResult{}, fmt.Errorf("agent.Service.MemoryWrite: %w", projErr)
 	}
 
 	n, createErr := s.cfg.NoteService.Create(ctx, userID, note.CreateNoteReq{
-		Title:     title,
-		Body:      content,
-		ProjectID: projectID,
-		Tags:      tags,
+		Title:       title,
+		Description: description,
+		Body:        content,
+		ProjectID:   projectID,
+		Tags:        tags,
 	})
 	if createErr != nil {
-		return "", fmt.Errorf("agent.Service.MemoryWrite: create: %w", createErr)
+		return MemoryWriteResult{}, fmt.Errorf("agent.Service.MemoryWrite: create: %w", createErr)
 	}
 	s.enqueueEmbed(ctx, userID, n.ID)
 
@@ -428,21 +459,101 @@ func (s *Service) MemoryWrite(ctx context.Context, userID, category, name, conte
 		"name":     name,
 	})
 
-	return n.ID, nil
+	return MemoryWriteResult{NoteID: n.ID, Similar: similar}, nil
 }
 
-// MemoryRead reads a knowledge note by category and name.
-func (s *Service) MemoryRead(ctx context.Context, userID, category, name string) (string, string, error) {
+// deriveDescription extracts a one-line description from memory content: the
+// first non-empty line, stripped of leading markdown heading markers and
+// truncated to 150 runes.
+func deriveDescription(content string) string {
+	line := ""
+	for _, l := range strings.Split(content, "\n") {
+		if strings.TrimSpace(l) != "" {
+			line = l
+			break
+		}
+	}
+	line = strings.TrimSpace(line)
+	line = strings.TrimSpace(strings.TrimLeft(line, "#"))
+	if utf8.RuneCountInString(line) > 150 {
+		r := []rune(line)
+		line = strings.TrimSpace(string(r[:150]))
+	}
+	return line
+}
+
+// dedupHint returns a reference to a semantically similar existing memory, or
+// nil. It considers only agent-scope knowledge notes (title prefix "Knowledge: ")
+// found via semantic search above the similarity threshold. Advisory only.
+func (s *Service) dedupHint(ctx context.Context, userID, name, description string) *MemoryRef {
+	const minScore = 0.83
+	query := strings.TrimSpace(name + " " + description)
+	hits := s.searchKnowledgeScoped(ctx, userID, query, "agent", 3, 0)
+	var best *MemoryRef
+	for _, h := range hits {
+		if h.Source != "semantic" || !strings.HasPrefix(h.Title, "Knowledge: ") || h.Score < minScore {
+			continue
+		}
+		if best != nil && h.Score <= best.Score {
+			continue
+		}
+		cat, nm := parseKnowledgeTitle(h.Title)
+		best = &MemoryRef{Category: cat, Name: nm, Score: h.Score}
+	}
+	return best
+}
+
+// projectTag returns the project slug from a "project:<slug>" tag, or "".
+func projectTag(tags []string) string {
+	for _, t := range tags {
+		if v, ok := strings.CutPrefix(t, "project:"); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// MemoryRead reads a knowledge note by category and name, returning its title,
+// description, and body. If the exact (category, name) is not found, it falls
+// back to a name-only lookup across all categories: a unique name match is
+// returned; multiple matches return ErrNotFound with the candidate categories.
+func (s *Service) MemoryRead(ctx context.Context, userID, category, name string) (string, string, string, error) {
 	noteID, err := s.findKnowledgeNote(ctx, userID, category, name)
 	if err != nil {
-		return "", "", err
+		if !errors.Is(err, ErrNotFound) {
+			return "", "", "", err
+		}
+		// Name-only fallback across all categories.
+		items, listErr := s.MemoryList(ctx, userID, "")
+		if listErr != nil {
+			return "", "", "", err
+		}
+		var matches []MemoryItem
+		for _, it := range items {
+			if it.Name == name {
+				matches = append(matches, it)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return "", "", "", err
+		case 1:
+			noteID = matches[0].NoteID
+		default:
+			cats := make([]string, 0, len(matches))
+			for _, m := range matches {
+				cats = append(cats, m.Category)
+			}
+			return "", "", "", fmt.Errorf("agent.Service.MemoryRead: name %q is ambiguous across categories [%s]: %w",
+				name, strings.Join(cats, ", "), ErrNotFound)
+		}
 	}
 
 	n, err := s.cfg.NoteService.Get(ctx, userID, noteID)
 	if err != nil {
-		return "", "", fmt.Errorf("agent.Service.MemoryRead: %w", err)
+		return "", "", "", fmt.Errorf("agent.Service.MemoryRead: %w", err)
 	}
-	return n.Title, n.Body, nil
+	return n.Title, n.Description, n.Body, nil
 }
 
 // MemoryAppend appends content to an existing knowledge note.
@@ -502,10 +613,13 @@ func (s *Service) MemoryList(ctx context.Context, userID, category string) ([]Me
 	for _, n := range notes {
 		cat, name := parseKnowledgeTitle(n.Title)
 		items = append(items, MemoryItem{
-			Category:  cat,
-			Name:      name,
-			Title:     n.Title,
-			UpdatedAt: n.UpdatedAt,
+			Category:    cat,
+			Name:        name,
+			Title:       n.Title,
+			NoteID:      n.ID,
+			Description: n.Description,
+			Project:     projectTag(n.Tags),
+			UpdatedAt:   n.UpdatedAt,
 		})
 	}
 	return items, nil
@@ -625,11 +739,12 @@ func (s *Service) NotesCreate(ctx context.Context, userID, title, body, projectS
 
 // NotesUpdate updates a user note. Accepts a project slug (resolved to ID internally).
 // Pass nil pointers for fields that should not change.
-func (s *Service) NotesUpdate(ctx context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error) {
+func (s *Service) NotesUpdate(ctx context.Context, userID, noteID string, title, description, body, projectSlug *string, tags *[]string) (*note.Note, error) {
 	req := note.UpdateNoteReq{
-		Title: title,
-		Body:  body,
-		Tags:  tags,
+		Title:       title,
+		Description: description,
+		Body:        body,
+		Tags:        tags,
 	}
 
 	// Resolve project slug to ID if provided.

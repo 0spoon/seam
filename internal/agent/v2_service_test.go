@@ -15,10 +15,10 @@ func TestService_MemorySearch_ReturnsResults(t *testing.T) {
 	ctx := context.Background()
 
 	// Write some knowledge.
-	_, err := svc.MemoryWrite(ctx, testUserID, "patterns", "auth", "JWT authentication patterns and best practices")
+	_, err := svc.MemoryWrite(ctx, testUserID, "protocol", "auth", "JWT authentication patterns and best practices", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.MemoryWrite(ctx, testUserID, "patterns", "caching", "Redis caching strategies and TTL patterns")
+	_, err = svc.MemoryWrite(ctx, testUserID, "protocol", "caching", "Redis caching strategies and TTL patterns", "", "")
 	require.NoError(t, err)
 
 	// Search for auth-related knowledge via FTS.
@@ -105,7 +105,7 @@ func TestService_ContextGather_ScopeAll(t *testing.T) {
 	ctx := context.Background()
 
 	// Write agent knowledge.
-	_, err := svc.MemoryWrite(ctx, testUserID, "test", "data", "agent knowledge content about testing")
+	_, err := svc.MemoryWrite(ctx, testUserID, "reference", "data", "agent knowledge content about testing", "", "")
 	require.NoError(t, err)
 
 	// Gather with "all" scope should find agent knowledge.
@@ -120,7 +120,7 @@ func TestService_ContextGather_ScopeAgent(t *testing.T) {
 	ctx := context.Background()
 
 	// Write agent knowledge.
-	_, err := svc.MemoryWrite(ctx, testUserID, "patterns", "scope-test", "agent-only searchable content xyz")
+	_, err := svc.MemoryWrite(ctx, testUserID, "protocol", "scope-test", "agent-only searchable content xyz", "", "")
 	require.NoError(t, err)
 
 	// Gather with "agent" scope.
@@ -194,7 +194,7 @@ func TestService_MemoryWrite_EmitsWSEvent(t *testing.T) {
 	notifier := &mockWSNotifier{}
 	svc.cfg.WSNotifier = notifier
 
-	_, err := svc.MemoryWrite(ctx, testUserID, "test-cat", "test-name", "content")
+	_, err := svc.MemoryWrite(ctx, testUserID, "gotcha", "test-name", "content", "", "")
 	require.NoError(t, err)
 
 	require.Len(t, notifier.events, 1)
@@ -206,13 +206,13 @@ func TestService_MemoryDelete_EmitsWSEvent(t *testing.T) {
 	ctx := context.Background()
 
 	// Write first.
-	_, err := svc.MemoryWrite(ctx, testUserID, "del-cat", "del-name", "to delete")
+	_, err := svc.MemoryWrite(ctx, testUserID, "decision", "del-name", "to delete", "", "")
 	require.NoError(t, err)
 
 	notifier := &mockWSNotifier{}
 	svc.cfg.WSNotifier = notifier
 
-	err = svc.MemoryDelete(ctx, testUserID, "del-cat", "del-name")
+	err = svc.MemoryDelete(ctx, testUserID, "decision", "del-name")
 	require.NoError(t, err)
 
 	require.Len(t, notifier.events, 1)

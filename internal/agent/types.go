@@ -41,7 +41,27 @@ var (
 	ErrFindingsTooLong    = errors.New("findings exceed maximum length")
 	ErrFindingsRequired   = errors.New("findings are required")
 	ErrInvalidSessionName = errors.New("invalid session name")
+	ErrInvalidCategory    = errors.New("invalid memory category")
+	ErrUnknownProject     = errors.New("unknown project slug")
 )
+
+// MemoryCategories are the allowed categories for NEW memory writes.
+// Legacy freeform categories remain readable via memory_read/list/append.
+var MemoryCategories = []string{
+	"constraint", // standing rules the agent must never violate (pinned into briefings)
+	"runbook",    // repeatable procedures (release, deploy, flash)
+	"protocol",   // verified wire/hardware/API facts
+	"gotcha",     // pitfalls and their workarounds
+	"decision",   // decisions with rationale
+	"refuted",    // claims investigated and found FALSE
+	"reference",  // pointers to external resources
+}
+
+// IsValidMemoryCategory reports whether c is one of the allowed categories
+// for new memory writes.
+func IsValidMemoryCategory(c string) bool {
+	return slices.Contains(MemoryCategories, c)
+}
 
 // Session represents an agent working session.
 // Sessions form a tree via ParentSessionID (derived from "/" in the name).
@@ -100,10 +120,28 @@ type ToolCallRecord struct {
 
 // MemoryItem is a summary of a knowledge note for listing.
 type MemoryItem struct {
-	Category  string    `json:"category"`
-	Name      string    `json:"name"`
-	Title     string    `json:"title"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Category    string    `json:"category"`
+	Name        string    `json:"name"`
+	Title       string    `json:"title"`
+	NoteID      string    `json:"note_id"`
+	Description string    `json:"description,omitempty"`
+	Project     string    `json:"project,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// MemoryRef is a lightweight reference to a memory, used for dedup hints.
+type MemoryRef struct {
+	Category string  `json:"category"`
+	Name     string  `json:"name"`
+	Score    float64 `json:"score"`
+}
+
+// MemoryWriteResult is returned by MemoryWrite. Similar is a non-nil dedup
+// hint when a semantically close existing memory was found on the create path;
+// the write always proceeds regardless.
+type MemoryWriteResult struct {
+	NoteID  string     `json:"note_id"`
+	Similar *MemoryRef `json:"similar,omitempty"`
 }
 
 // SessionMetrics holds aggregate statistics for a session.

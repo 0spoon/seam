@@ -317,39 +317,39 @@ func TestE2E_MemoryCRUDLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 1: Write knowledge notes.
-	noteID1, err := svc.MemoryWrite(ctx, userID, "go", "error-handling", "Use fmt.Errorf with %%w for wrapping errors.")
+	res1, err := svc.MemoryWrite(ctx, userID, "protocol", "error-handling", "Use fmt.Errorf with %%w for wrapping errors.", "", "")
 	require.NoError(t, err)
-	require.NotEmpty(t, noteID1)
+	require.NotEmpty(t, res1.NoteID)
 
-	noteID2, err := svc.MemoryWrite(ctx, userID, "go", "testing-patterns", "Use testify/require for fail-fast assertions.")
+	res2, err := svc.MemoryWrite(ctx, userID, "protocol", "testing-patterns", "Use testify/require for fail-fast assertions.", "", "")
 	require.NoError(t, err)
-	require.NotEmpty(t, noteID2)
+	require.NotEmpty(t, res2.NoteID)
 
-	noteID3, err := svc.MemoryWrite(ctx, userID, "python", "virtual-envs", "Always use venv for project isolation.")
+	res3, err := svc.MemoryWrite(ctx, userID, "reference", "virtual-envs", "Always use venv for project isolation.", "", "")
 	require.NoError(t, err)
-	require.NotEmpty(t, noteID3)
+	require.NotEmpty(t, res3.NoteID)
 
 	// Step 2: Read a note.
-	title, body, err := svc.MemoryRead(ctx, userID, "go", "error-handling")
+	title, _, body, err := svc.MemoryRead(ctx, userID, "protocol", "error-handling")
 	require.NoError(t, err)
-	require.Equal(t, "Knowledge: go - error-handling", title)
+	require.Equal(t, "Knowledge: protocol - error-handling", title)
 	require.Contains(t, body, "fmt.Errorf")
 
 	// Step 3: Update existing note via MemoryWrite (upsert).
-	noteID1b, err := svc.MemoryWrite(ctx, userID, "go", "error-handling", "Updated: Use errors.Is and errors.As for unwrapping.")
+	res1b, err := svc.MemoryWrite(ctx, userID, "protocol", "error-handling", "Updated: Use errors.Is and errors.As for unwrapping.", "", "")
 	require.NoError(t, err)
-	require.Equal(t, noteID1, noteID1b, "should update existing note, not create new")
+	require.Equal(t, res1.NoteID, res1b.NoteID, "should update existing note, not create new")
 
 	// Verify update.
-	_, body, err = svc.MemoryRead(ctx, userID, "go", "error-handling")
+	_, _, body, err = svc.MemoryRead(ctx, userID, "protocol", "error-handling")
 	require.NoError(t, err)
 	require.Contains(t, body, "errors.Is")
 
 	// Step 4: Append to a note.
-	err = svc.MemoryAppend(ctx, userID, "go", "testing-patterns", "\nAlso use table-driven tests for multiple inputs.")
+	err = svc.MemoryAppend(ctx, userID, "protocol", "testing-patterns", "\nAlso use table-driven tests for multiple inputs.")
 	require.NoError(t, err)
 
-	_, body, err = svc.MemoryRead(ctx, userID, "go", "testing-patterns")
+	_, _, body, err = svc.MemoryRead(ctx, userID, "protocol", "testing-patterns")
 	require.NoError(t, err)
 	require.Contains(t, body, "testify/require")
 	require.Contains(t, body, "table-driven tests")
@@ -360,23 +360,23 @@ func TestE2E_MemoryCRUDLifecycle(t *testing.T) {
 	require.Len(t, allItems, 3)
 
 	// Step 6: List by category.
-	goItems, err := svc.MemoryList(ctx, userID, "go")
+	goItems, err := svc.MemoryList(ctx, userID, "protocol")
 	require.NoError(t, err)
 	require.Len(t, goItems, 2)
 	for _, item := range goItems {
-		require.Equal(t, "go", item.Category)
+		require.Equal(t, "protocol", item.Category)
 	}
 
-	pythonItems, err := svc.MemoryList(ctx, userID, "python")
+	pythonItems, err := svc.MemoryList(ctx, userID, "reference")
 	require.NoError(t, err)
 	require.Len(t, pythonItems, 1)
 
 	// Step 7: Delete a note.
-	err = svc.MemoryDelete(ctx, userID, "python", "virtual-envs")
+	err = svc.MemoryDelete(ctx, userID, "reference", "virtual-envs")
 	require.NoError(t, err)
 
 	// Verify deletion.
-	_, _, err = svc.MemoryRead(ctx, userID, "python", "virtual-envs")
+	_, _, _, err = svc.MemoryRead(ctx, userID, "reference", "virtual-envs")
 	require.Error(t, err)
 	require.ErrorIs(t, err, agent.ErrNotFound)
 
@@ -395,12 +395,12 @@ func TestE2E_ContextGather_WithRealFTS(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create agent knowledge notes.
-	_, err = svc.MemoryWrite(ctx, userID, "architecture", "middleware-patterns",
-		"Go middleware uses the chain-of-responsibility pattern. Each middleware wraps the next handler.")
+	_, err = svc.MemoryWrite(ctx, userID, "gotcha", "middleware-patterns",
+		"Go middleware uses the chain-of-responsibility pattern. Each middleware wraps the next handler.", "", "")
 	require.NoError(t, err)
 
-	_, err = svc.MemoryWrite(ctx, userID, "architecture", "database-access",
-		"SQLite with WAL mode for concurrent reads. Use named in-memory databases for test isolation.")
+	_, err = svc.MemoryWrite(ctx, userID, "gotcha", "database-access",
+		"SQLite with WAL mode for concurrent reads. Use named in-memory databases for test isolation.", "", "")
 	require.NoError(t, err)
 
 	// ContextGather should find relevant notes via FTS.
@@ -431,7 +431,7 @@ func TestE2E_ContextGather_BudgetTruncation(t *testing.T) {
 			"chain-of-responsibility, decorator pattern, and functional composition. " +
 			"The middleware validates JWT tokens, checks rate limits, and logs requests. " +
 			"Each middleware function wraps the next handler in the chain."
-		_, err = svc.MemoryWrite(ctx, userID, "patterns", fmt.Sprintf("middleware-note-%d", i), largeBody)
+		_, err = svc.MemoryWrite(ctx, userID, "protocol", fmt.Sprintf("middleware-note-%d", i), largeBody, "", "")
 		require.NoError(t, err)
 	}
 
@@ -457,8 +457,8 @@ func TestE2E_MixedSessionAndMemory(t *testing.T) {
 	require.NoError(t, err)
 
 	// Store domain knowledge first.
-	_, err = svc.MemoryWrite(ctx, userID, "go", "concurrency",
-		"Use sync.WaitGroup for goroutine coordination. Never use time.Sleep for synchronization.")
+	_, err = svc.MemoryWrite(ctx, userID, "protocol", "concurrency",
+		"Use sync.WaitGroup for goroutine coordination. Never use time.Sleep for synchronization.", "", "")
 	require.NoError(t, err)
 
 	// Start a session.
@@ -477,8 +477,8 @@ func TestE2E_MixedSessionAndMemory(t *testing.T) {
 	require.NoError(t, err)
 
 	// Store what we learned as persistent knowledge.
-	_, err = svc.MemoryWrite(ctx, userID, "go", "race-conditions",
-		"Maps are not safe for concurrent use. Protect with sync.RWMutex or sync.Map.")
+	_, err = svc.MemoryWrite(ctx, userID, "protocol", "race-conditions",
+		"Maps are not safe for concurrent use. Protect with sync.RWMutex or sync.Map.", "", "")
 	require.NoError(t, err)
 
 	// End session.
@@ -487,12 +487,12 @@ func TestE2E_MixedSessionAndMemory(t *testing.T) {
 	require.NoError(t, err)
 
 	// Knowledge persists after session ends.
-	_, body, err := svc.MemoryRead(ctx, userID, "go", "race-conditions")
+	_, _, body, err := svc.MemoryRead(ctx, userID, "protocol", "race-conditions")
 	require.NoError(t, err)
 	require.Contains(t, body, "sync.RWMutex")
 
 	// Both knowledge items are listed.
-	items, err := svc.MemoryList(ctx, userID, "go")
+	items, err := svc.MemoryList(ctx, userID, "protocol")
 	require.NoError(t, err)
 	require.Len(t, items, 2)
 }
@@ -508,7 +508,7 @@ func TestE2E_SingleDB_SharedAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Write knowledge via user1.
-	_, err = svc.MemoryWrite(ctx, user1, "secrets", "api-key", "sk-shared-secret-key")
+	_, err = svc.MemoryWrite(ctx, user1, "reference", "api-key", "sk-shared-secret-key", "", "")
 	require.NoError(t, err)
 
 	// Start a session via user1.
@@ -516,7 +516,7 @@ func TestE2E_SingleDB_SharedAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// user2 can read user1's knowledge (single DB).
-	_, body, err := svc.MemoryRead(ctx, user2, "secrets", "api-key")
+	_, _, body, err := svc.MemoryRead(ctx, user2, "reference", "api-key")
 	require.NoError(t, err)
 	require.Contains(t, body, "sk-shared-secret-key")
 

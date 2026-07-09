@@ -20,7 +20,7 @@ import (
 
 func TestNotesUpdate_Success(t *testing.T) {
 	mock := &mockAgentService{
-		notesUpdateFn: func(_ context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error) {
+		notesUpdateFn: func(_ context.Context, userID, noteID string, title, description, body, projectSlug *string, tags *[]string) (*note.Note, error) {
 			require.Equal(t, toolTestUser, userID)
 			require.Equal(t, "note-123", noteID)
 			require.NotNil(t, title)
@@ -50,7 +50,7 @@ func TestNotesUpdate_Success(t *testing.T) {
 
 func TestNotesUpdate_WithTags(t *testing.T) {
 	mock := &mockAgentService{
-		notesUpdateFn: func(_ context.Context, _, _ string, _, _, _ *string, tags *[]string) (*note.Note, error) {
+		notesUpdateFn: func(_ context.Context, _, _ string, _, _, _, _ *string, tags *[]string) (*note.Note, error) {
 			require.NotNil(t, tags)
 			require.Equal(t, []string{"go", "refactor"}, *tags)
 			return &note.Note{ID: "n1", Title: "T"}, nil
@@ -67,7 +67,7 @@ func TestNotesUpdate_WithTags(t *testing.T) {
 
 func TestNotesUpdate_WithProject(t *testing.T) {
 	mock := &mockAgentService{
-		notesUpdateFn: func(_ context.Context, _, _ string, _, _, projectSlug *string, _ *[]string) (*note.Note, error) {
+		notesUpdateFn: func(_ context.Context, _, _ string, _, _, _, projectSlug *string, _ *[]string) (*note.Note, error) {
 			require.NotNil(t, projectSlug)
 			require.Equal(t, "my-project", *projectSlug)
 			return &note.Note{ID: "n1", Title: "T"}, nil
@@ -102,7 +102,7 @@ func TestNotesUpdate_NoFieldsProvided(t *testing.T) {
 
 func TestNotesUpdate_NotFound(t *testing.T) {
 	mock := &mockAgentService{
-		notesUpdateFn: func(context.Context, string, string, *string, *string, *string, *[]string) (*note.Note, error) {
+		notesUpdateFn: func(context.Context, string, string, *string, *string, *string, *string, *[]string) (*note.Note, error) {
 			return nil, note.ErrNotFound
 		},
 	}

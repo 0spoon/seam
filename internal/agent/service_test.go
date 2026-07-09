@@ -280,16 +280,16 @@ func TestService_MemoryWrite_CreatesNote(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	noteID, err := svc.MemoryWrite(ctx, testUserID, "go", "middleware-patterns",
-		"## Middleware Patterns\n\n- Chain of responsibility")
+	res, err := svc.MemoryWrite(ctx, testUserID, "protocol", "middleware-patterns",
+		"## Middleware Patterns\n\n- Chain of responsibility", "", "")
 	require.NoError(t, err)
-	require.NotEmpty(t, noteID)
+	require.NotEmpty(t, res.NoteID)
 
-	n, err := svc.cfg.NoteService.Get(ctx, testUserID, noteID)
+	n, err := svc.cfg.NoteService.Get(ctx, testUserID, res.NoteID)
 	require.NoError(t, err)
-	require.Equal(t, KnowledgeNoteTitle("go", "middleware-patterns"), n.Title)
+	require.Equal(t, KnowledgeNoteTitle("protocol", "middleware-patterns"), n.Title)
 	require.Contains(t, n.Tags, "type:knowledge")
-	require.Contains(t, n.Tags, "domain:go")
+	require.Contains(t, n.Tags, "domain:protocol")
 	require.Contains(t, n.Tags, TagCreatedByAgent)
 }
 
@@ -297,14 +297,14 @@ func TestService_MemoryWrite_UpdatesExisting(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	id1, err := svc.MemoryWrite(ctx, testUserID, "go", "patterns", "Original")
+	res1, err := svc.MemoryWrite(ctx, testUserID, "protocol", "patterns", "Original", "", "")
 	require.NoError(t, err)
 
-	id2, err := svc.MemoryWrite(ctx, testUserID, "go", "patterns", "Updated")
+	res2, err := svc.MemoryWrite(ctx, testUserID, "protocol", "patterns", "Updated", "", "")
 	require.NoError(t, err)
-	require.Equal(t, id1, id2)
+	require.Equal(t, res1.NoteID, res2.NoteID)
 
-	n, err := svc.cfg.NoteService.Get(ctx, testUserID, id1)
+	n, err := svc.cfg.NoteService.Get(ctx, testUserID, res1.NoteID)
 	require.NoError(t, err)
 	require.Contains(t, n.Body, "Updated")
 }
@@ -313,12 +313,12 @@ func TestService_MemoryRead_Success(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.MemoryWrite(ctx, testUserID, "rust", "ownership", "Borrow checker rules")
+	_, err := svc.MemoryWrite(ctx, testUserID, "runbook", "ownership", "Borrow checker rules", "", "")
 	require.NoError(t, err)
 
-	title, body, err := svc.MemoryRead(ctx, testUserID, "rust", "ownership")
+	title, _, body, err := svc.MemoryRead(ctx, testUserID, "runbook", "ownership")
 	require.NoError(t, err)
-	require.Equal(t, KnowledgeNoteTitle("rust", "ownership"), title)
+	require.Equal(t, KnowledgeNoteTitle("runbook", "ownership"), title)
 	require.Contains(t, body, "Borrow checker")
 }
 
@@ -327,10 +327,10 @@ func TestService_MemoryRead_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	// Ensure the agent-memory project exists.
-	_, err := svc.MemoryWrite(ctx, testUserID, "x", "y", "z")
+	_, err := svc.MemoryWrite(ctx, testUserID, "gotcha", "y", "z", "", "")
 	require.NoError(t, err)
 
-	_, _, err = svc.MemoryRead(ctx, testUserID, "nonexistent", "nope")
+	_, _, _, err = svc.MemoryRead(ctx, testUserID, "nonexistent", "nope")
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
@@ -338,13 +338,13 @@ func TestService_MemoryAppend_Success(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.MemoryWrite(ctx, testUserID, "go", "tips", "Tip 1: use interfaces")
+	_, err := svc.MemoryWrite(ctx, testUserID, "protocol", "tips", "Tip 1: use interfaces", "", "")
 	require.NoError(t, err)
 
-	err = svc.MemoryAppend(ctx, testUserID, "go", "tips", "\nTip 2: prefer composition")
+	err = svc.MemoryAppend(ctx, testUserID, "protocol", "tips", "\nTip 2: prefer composition")
 	require.NoError(t, err)
 
-	_, body, err := svc.MemoryRead(ctx, testUserID, "go", "tips")
+	_, _, body, err := svc.MemoryRead(ctx, testUserID, "protocol", "tips")
 	require.NoError(t, err)
 	require.Contains(t, body, "Tip 1")
 	require.Contains(t, body, "Tip 2")
@@ -355,7 +355,7 @@ func TestService_MemoryAppend_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	// Ensure project exists.
-	_, err := svc.MemoryWrite(ctx, testUserID, "x", "y", "z")
+	_, err := svc.MemoryWrite(ctx, testUserID, "gotcha", "y", "z", "", "")
 	require.NoError(t, err)
 
 	err = svc.MemoryAppend(ctx, testUserID, "nonexistent", "nope", "data")
@@ -366,11 +366,11 @@ func TestService_MemoryList(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.MemoryWrite(ctx, testUserID, "go", "patterns", "content")
+	_, err := svc.MemoryWrite(ctx, testUserID, "protocol", "patterns", "content", "", "")
 	require.NoError(t, err)
-	_, err = svc.MemoryWrite(ctx, testUserID, "go", "testing", "content")
+	_, err = svc.MemoryWrite(ctx, testUserID, "protocol", "testing", "content", "", "")
 	require.NoError(t, err)
-	_, err = svc.MemoryWrite(ctx, testUserID, "rust", "ownership", "content")
+	_, err = svc.MemoryWrite(ctx, testUserID, "runbook", "ownership", "content", "", "")
 	require.NoError(t, err)
 
 	// List all knowledge.
@@ -379,7 +379,7 @@ func TestService_MemoryList(t *testing.T) {
 	require.Len(t, items, 3)
 
 	// List by category.
-	items, err = svc.MemoryList(ctx, testUserID, "go")
+	items, err = svc.MemoryList(ctx, testUserID, "protocol")
 	require.NoError(t, err)
 	require.Len(t, items, 2)
 }
@@ -388,14 +388,14 @@ func TestService_MemoryDelete_Success(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	noteID, err := svc.MemoryWrite(ctx, testUserID, "go", "delete-me", "content")
+	res, err := svc.MemoryWrite(ctx, testUserID, "protocol", "delete-me", "content", "", "")
 	require.NoError(t, err)
 
-	err = svc.MemoryDelete(ctx, testUserID, "go", "delete-me")
+	err = svc.MemoryDelete(ctx, testUserID, "protocol", "delete-me")
 	require.NoError(t, err)
 
 	// Verify it is gone.
-	_, err = svc.cfg.NoteService.Get(ctx, testUserID, noteID)
+	_, err = svc.cfg.NoteService.Get(ctx, testUserID, res.NoteID)
 	require.ErrorIs(t, err, note.ErrNotFound)
 }
 
@@ -404,7 +404,7 @@ func TestService_MemoryDelete_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	// Ensure project exists.
-	_, err := svc.MemoryWrite(ctx, testUserID, "x", "y", "z")
+	_, err := svc.MemoryWrite(ctx, testUserID, "gotcha", "y", "z", "", "")
 	require.NoError(t, err)
 
 	err = svc.MemoryDelete(ctx, testUserID, "nonexistent", "nope")
@@ -653,16 +653,16 @@ func TestService_MemoryAppend_MultipleAppends(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.MemoryWrite(ctx, testUserID, "go", "guidelines", "Rule 1: format with gofmt")
+	_, err := svc.MemoryWrite(ctx, testUserID, "protocol", "guidelines", "Rule 1: format with gofmt", "", "")
 	require.NoError(t, err)
 
-	err = svc.MemoryAppend(ctx, testUserID, "go", "guidelines", "\nRule 2: no global state")
+	err = svc.MemoryAppend(ctx, testUserID, "protocol", "guidelines", "\nRule 2: no global state")
 	require.NoError(t, err)
 
-	err = svc.MemoryAppend(ctx, testUserID, "go", "guidelines", "\nRule 3: wrap errors")
+	err = svc.MemoryAppend(ctx, testUserID, "protocol", "guidelines", "\nRule 3: wrap errors")
 	require.NoError(t, err)
 
-	_, body, err := svc.MemoryRead(ctx, testUserID, "go", "guidelines")
+	_, _, body, err := svc.MemoryRead(ctx, testUserID, "protocol", "guidelines")
 	require.NoError(t, err)
 	require.Contains(t, body, "Rule 1: format with gofmt")
 	require.Contains(t, body, "Rule 2: no global state")
@@ -680,34 +680,34 @@ func TestService_MemoryWrite_DifferentCategories(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.MemoryWrite(ctx, testUserID, "go", "concurrency", "goroutines and channels")
+	_, err := svc.MemoryWrite(ctx, testUserID, "protocol", "concurrency", "goroutines and channels", "", "")
 	require.NoError(t, err)
-	_, err = svc.MemoryWrite(ctx, testUserID, "go", "testing", "table-driven tests")
+	_, err = svc.MemoryWrite(ctx, testUserID, "protocol", "testing", "table-driven tests", "", "")
 	require.NoError(t, err)
-	_, err = svc.MemoryWrite(ctx, testUserID, "python", "typing", "use type hints")
+	_, err = svc.MemoryWrite(ctx, testUserID, "reference", "typing", "use type hints", "", "")
 	require.NoError(t, err)
-	_, err = svc.MemoryWrite(ctx, testUserID, "rust", "ownership", "borrow checker")
+	_, err = svc.MemoryWrite(ctx, testUserID, "runbook", "ownership", "borrow checker", "", "")
 	require.NoError(t, err)
 
-	// List by "go" category.
-	goItems, err := svc.MemoryList(ctx, testUserID, "go")
+	// List by "protocol" category.
+	goItems, err := svc.MemoryList(ctx, testUserID, "protocol")
 	require.NoError(t, err)
 	require.Len(t, goItems, 2)
 	for _, item := range goItems {
-		require.Equal(t, "go", item.Category)
+		require.Equal(t, "protocol", item.Category)
 	}
 
-	// List by "python" category.
-	pyItems, err := svc.MemoryList(ctx, testUserID, "python")
+	// List by "reference" category.
+	pyItems, err := svc.MemoryList(ctx, testUserID, "reference")
 	require.NoError(t, err)
 	require.Len(t, pyItems, 1)
-	require.Equal(t, "python", pyItems[0].Category)
+	require.Equal(t, "reference", pyItems[0].Category)
 
-	// List by "rust" category.
-	rsItems, err := svc.MemoryList(ctx, testUserID, "rust")
+	// List by "runbook" category.
+	rsItems, err := svc.MemoryList(ctx, testUserID, "runbook")
 	require.NoError(t, err)
 	require.Len(t, rsItems, 1)
-	require.Equal(t, "rust", rsItems[0].Category)
+	require.Equal(t, "runbook", rsItems[0].Category)
 
 	// List all.
 	allItems, err := svc.MemoryList(ctx, testUserID, "")
@@ -832,11 +832,11 @@ func TestService_MemoryWrite_EmptyContent(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	noteID, err := svc.MemoryWrite(ctx, testUserID, "misc", "empty-note", "")
+	res, err := svc.MemoryWrite(ctx, testUserID, "decision", "empty-note", "", "", "")
 	require.NoError(t, err)
-	require.NotEmpty(t, noteID)
+	require.NotEmpty(t, res.NoteID)
 
-	_, body, err := svc.MemoryRead(ctx, testUserID, "misc", "empty-note")
+	_, _, body, err := svc.MemoryRead(ctx, testUserID, "decision", "empty-note")
 	require.NoError(t, err)
 	require.Empty(t, body)
 }
@@ -850,20 +850,20 @@ func TestService_SingleDB_SharedData(t *testing.T) {
 	userB := "user-b-002"
 
 	// Write knowledge via one userID.
-	_, err := svc.MemoryWrite(ctx, userA, "go", "error-handling", "Wrap errors with context")
+	_, err := svc.MemoryWrite(ctx, userA, "protocol", "error-handling", "Wrap errors with context", "", "")
 	require.NoError(t, err)
 
 	// Read via same userID.
-	title, body, err := svc.MemoryRead(ctx, userA, "go", "error-handling")
+	title, _, body, err := svc.MemoryRead(ctx, userA, "protocol", "error-handling")
 	require.NoError(t, err)
-	require.Equal(t, KnowledgeNoteTitle("go", "error-handling"), title)
+	require.Equal(t, KnowledgeNoteTitle("protocol", "error-handling"), title)
 	require.Contains(t, body, "Wrap errors")
 
 	// Same data is accessible via a different userID (single DB).
 	_, err = svc.ensureAgentMemoryProject(ctx, userB)
 	require.NoError(t, err)
 
-	title2, body2, err := svc.MemoryRead(ctx, userB, "go", "error-handling")
+	title2, _, body2, err := svc.MemoryRead(ctx, userB, "protocol", "error-handling")
 	require.NoError(t, err)
 	require.Equal(t, title, title2)
 	require.Equal(t, body, body2)

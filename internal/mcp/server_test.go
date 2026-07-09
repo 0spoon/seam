@@ -33,8 +33,8 @@ type mockAgentService struct {
 	sessionPlanSetFn        func(ctx context.Context, userID, sessionName, content string) (string, error)
 	sessionProgressUpdateFn func(ctx context.Context, userID, sessionName, task, status, notes string) (string, error)
 	sessionContextSetFn     func(ctx context.Context, userID, sessionName, content string) (string, error)
-	memoryReadFn            func(ctx context.Context, userID, category, name string) (string, string, error)
-	memoryWriteFn           func(ctx context.Context, userID, category, name, content string) (string, error)
+	memoryReadFn            func(ctx context.Context, userID, category, name string) (string, string, string, error)
+	memoryWriteFn           func(ctx context.Context, userID, category, name, content, description, projectSlug string) (agent.MemoryWriteResult, error)
 	memoryAppendFn          func(ctx context.Context, userID, category, name, content string) error
 	memoryListFn            func(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	memoryDeleteFn          func(ctx context.Context, userID, category, name string) error
@@ -45,7 +45,7 @@ type mockAgentService struct {
 	notesCreateFn           func(ctx context.Context, userID, title, body, projectSlug string, tags []string) (*note.Note, error)
 	memorySearchFn          func(ctx context.Context, userID, query string, limit int) ([]agent.KnowledgeHit, error)
 	sessionMetricsFn        func(ctx context.Context, userID, sessionName string) (*agent.SessionMetrics, error)
-	notesUpdateFn           func(ctx context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error)
+	notesUpdateFn           func(ctx context.Context, userID, noteID string, title, description, body, projectSlug *string, tags *[]string) (*note.Note, error)
 	notesDeleteFn           func(ctx context.Context, userID, noteID string) error
 	notesTagsFn             func(ctx context.Context, userID string) ([]note.TagCount, error)
 	notesDailyFn            func(ctx context.Context, userID string, date time.Time) (*note.Note, error)
@@ -104,18 +104,18 @@ func (m *mockAgentService) SessionContextSet(ctx context.Context, userID, sessio
 	return m.sessionContextSetFn(ctx, userID, sessionName, content)
 }
 
-func (m *mockAgentService) MemoryRead(ctx context.Context, userID, category, name string) (string, string, error) {
+func (m *mockAgentService) MemoryRead(ctx context.Context, userID, category, name string) (string, string, string, error) {
 	if m.memoryReadFn == nil {
 		panic("mockAgentService.MemoryRead not implemented")
 	}
 	return m.memoryReadFn(ctx, userID, category, name)
 }
 
-func (m *mockAgentService) MemoryWrite(ctx context.Context, userID, category, name, content string) (string, error) {
+func (m *mockAgentService) MemoryWrite(ctx context.Context, userID, category, name, content, description, projectSlug string) (agent.MemoryWriteResult, error) {
 	if m.memoryWriteFn == nil {
 		panic("mockAgentService.MemoryWrite not implemented")
 	}
-	return m.memoryWriteFn(ctx, userID, category, name, content)
+	return m.memoryWriteFn(ctx, userID, category, name, content, description, projectSlug)
 }
 
 func (m *mockAgentService) MemoryAppend(ctx context.Context, userID, category, name, content string) error {
@@ -188,11 +188,11 @@ func (m *mockAgentService) SessionMetrics(ctx context.Context, userID, sessionNa
 	return m.sessionMetricsFn(ctx, userID, sessionName)
 }
 
-func (m *mockAgentService) NotesUpdate(ctx context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error) {
+func (m *mockAgentService) NotesUpdate(ctx context.Context, userID, noteID string, title, description, body, projectSlug *string, tags *[]string) (*note.Note, error) {
 	if m.notesUpdateFn == nil {
 		panic("mockAgentService.NotesUpdate not implemented")
 	}
-	return m.notesUpdateFn(ctx, userID, noteID, title, body, projectSlug, tags)
+	return m.notesUpdateFn(ctx, userID, noteID, title, description, body, projectSlug, tags)
 }
 
 func (m *mockAgentService) NotesDelete(ctx context.Context, userID, noteID string) error {

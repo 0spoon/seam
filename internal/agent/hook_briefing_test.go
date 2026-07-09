@@ -194,14 +194,14 @@ func TestService_HookBriefing_PopulatedFromLiveStore(t *testing.T) {
 	require.NoError(t, err)
 
 	// Write a memory note.
-	_, err = svc.MemoryWrite(ctx, testUserID, "feedback", "live-pref", "be terse")
+	_, err = svc.MemoryWrite(ctx, testUserID, "decision", "live-pref", "be terse", "", "")
 	require.NoError(t, err)
 
 	out, err := svc.HookBriefing(ctx, testUserID, HookPayload{Source: "startup"}, 500, 3)
 	require.NoError(t, err)
 
 	require.Contains(t, out, "live-session")
-	require.Contains(t, out, "feedback/live-pref")
+	require.Contains(t, out, "decision/live-pref")
 	require.Contains(t, out, "3 open tasks")
 }
 

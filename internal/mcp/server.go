@@ -36,8 +36,8 @@ type AgentService interface {
 	SessionProgressUpdate(ctx context.Context, userID, sessionName, task, status, notes string) (string, error)
 	SessionContextSet(ctx context.Context, userID, sessionName, content string) (string, error)
 
-	MemoryRead(ctx context.Context, userID, category, name string) (string, string, error)
-	MemoryWrite(ctx context.Context, userID, category, name, content string) (string, error)
+	MemoryRead(ctx context.Context, userID, category, name string) (string, string, string, error)
+	MemoryWrite(ctx context.Context, userID, category, name, content, description, projectSlug string) (agent.MemoryWriteResult, error)
 	MemoryAppend(ctx context.Context, userID, category, name, content string) error
 	MemoryList(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	MemoryDelete(ctx context.Context, userID, category, name string) error
@@ -55,7 +55,7 @@ type AgentService interface {
 	SessionMetrics(ctx context.Context, userID, sessionName string) (*agent.SessionMetrics, error)
 
 	// V3: Note update/delete, tags, daily, project management.
-	NotesUpdate(ctx context.Context, userID, noteID string, title, body, projectSlug *string, tags *[]string) (*note.Note, error)
+	NotesUpdate(ctx context.Context, userID, noteID string, title, description, body, projectSlug *string, tags *[]string) (*note.Note, error)
 	NotesDelete(ctx context.Context, userID, noteID string) error
 	NotesTags(ctx context.Context, userID string) ([]note.TagCount, error)
 	NotesDaily(ctx context.Context, userID string, date time.Time) (*note.Note, error)

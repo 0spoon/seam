@@ -114,8 +114,8 @@ func TestLoggingMiddleware_LogsUserID(t *testing.T) {
 
 func TestLoggingMiddleware_LogsErrorFromService(t *testing.T) {
 	mock := &mockAgentService{
-		memoryReadFn: func(_ context.Context, _, _, _ string) (string, string, error) {
-			return "", "", fmt.Errorf("memory_read: %w", agent.ErrNotFound)
+		memoryReadFn: func(_ context.Context, _, _, _ string) (string, string, string, error) {
+			return "", "", "", fmt.Errorf("memory_read: %w", agent.ErrNotFound)
 		},
 	}
 	srv, buf := newTestServerWithBuffer(t, mock)

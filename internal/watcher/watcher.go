@@ -98,6 +98,10 @@ func (w *Watcher) Watch(userID, notesDir string) error {
 			return walkErr
 		}
 		if d.IsDir() {
+			// Skip symlinked directories to prevent watching outside notes dir.
+			if d.Type()&os.ModeSymlink != 0 {
+				return filepath.SkipDir
+			}
 			if addErr := w.fsWatcher.Add(path); addErr != nil {
 				return fmt.Errorf("watcher.Watch: add %s: %w", path, addErr)
 			}

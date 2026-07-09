@@ -28,6 +28,7 @@ internal/           Core domain packages (strict layering, no circular imports)
   note/             Note CRUD, frontmatter, wikilinks, tags, versions, daily
   project/          Project CRUD, slug generation
   reqctx/           Request-scoped context (user ID, request ID)
+  reqlimits/        Request body size caps (single-user, generous limits)
   review/           Knowledge gardening queue
   scheduler/        Cron-based scheduler for proactive jobs (daily briefing)
   search/           FTS5 + semantic search
@@ -57,6 +58,8 @@ data/templates/     Built-in note templates
 ```bash
 # Build & Run
 make build              # Build server + TUI + reindex tool to ./bin/
+make build-web          # Install web deps and build the React SPA to web/dist
+make build-all          # Build Go binaries and the React SPA
 make dev                # Run seamd + Vite + Chroma in parallel (Ctrl-C to stop)
 make run                # Build and run seamd alone (no Vite, no Chroma)
 make dev-web            # Vite dev server only (:5173, proxies /api to :8080)
@@ -67,12 +70,14 @@ make test-integration   # Integration tests (real filesystem, on-disk SQLite)
 make test-race          # Go unit tests with race detector
 make test-web           # Frontend tests (Vitest, single run)
 make test-web-watch     # Frontend tests in watch mode
+make bench              # Performance-tagged benchmarks with memory stats
 
 # Quality
 make lint               # golangci-lint + eslint
 make fmt                # gofmt + prettier
 make vet                # go vet
 make typecheck          # TypeScript typecheck (no emit)
+make tidy               # go mod tidy
 make coverage           # Go tests with coverage report (coverage.html)
 
 # Single test
@@ -90,6 +95,7 @@ make service-status     # Show service status
 make service-start      # Start seamd service
 make service-stop       # Stop seamd service
 make service-restart    # Restart seamd service
+make service-logs       # Tail seamd (+ Chroma supervisor) logs via service.sh
 make logs               # Tail seamd + Chroma logs
 make kill-stale         # Kill stale seamd listener on configured port
 
@@ -183,7 +189,9 @@ Seam exposes an MCP server at `/api/mcp` that gives you persistent memory and ac
 - For ephemeral scratch work -- just think in-context.
 - For things the user just told you -- don't parrot it back into memory.
 
-**Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), webhooks (`webhook_*`), research lab (`lab_open`, `trial_*`, `decision_*`), context search (`context_gather`). Full reference: `docs/mcp.md`.
+**Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), projects (`project_*`), knowledge graph (`graph_neighbors`), review queue (`review_queue`), webhooks (`webhook_*`), research lab (`lab_open`, `trial_*`, `decision_*`), context search (`context_gather`). Full reference: `docs/mcp.md`.
+
+**Not reachable over MCP** (HTTP/UI only, as of 2026-07): scheduler + daily briefing management, librarian (off by default via the `librarian_enabled` setting), usage dashboard API, capture (URL fetch / voice), and the built-in assistant.
 
 ## Coding Rules
 

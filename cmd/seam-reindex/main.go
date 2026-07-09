@@ -118,18 +118,18 @@ func run() error {
 		return fmt.Errorf("open user db: %w", err)
 	}
 
-	rows, err := db.QueryContext(ctx, `SELECT id, title, body FROM notes ORDER BY created_at ASC`)
+	rows, err := db.QueryContext(ctx, `SELECT id, title, description, body FROM notes ORDER BY created_at ASC`)
 	if err != nil {
 		return fmt.Errorf("query notes: %w", err)
 	}
 
 	type note struct {
-		id, title, body string
+		id, title, description, body string
 	}
 	var notes []note
 	for rows.Next() {
 		var n note
-		if err := rows.Scan(&n.id, &n.title, &n.body); err != nil {
+		if err := rows.Scan(&n.id, &n.title, &n.description, &n.body); err != nil {
 			rows.Close()
 			return fmt.Errorf("scan note: %w", err)
 		}
@@ -154,7 +154,12 @@ func run() error {
 
 	succ, fail := 0, 0
 	for i, n := range notes {
-		if err := embedder.EmbedNote(ctx, userdb.DefaultUserID, n.id, n.title, n.body); err != nil {
+		// Mirror HandleEmbedTask: fold the description into the embedded text.
+		body := n.body
+		if n.description != "" {
+			body = n.description + "\n\n" + n.body
+		}
+		if err := embedder.EmbedNote(ctx, userdb.DefaultUserID, n.id, n.title, body); err != nil {
 			logger.Warn("seam-reindex: embed failed", "note_id", n.id, "error", err)
 			fail++
 			continue

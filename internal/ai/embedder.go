@@ -175,12 +175,18 @@ func (e *Embedder) HandleEmbedTask(ctx context.Context, task *Task) (json.RawMes
 		return nil, fmt.Errorf("ai.Embedder.HandleEmbedTask: open db: %w", err)
 	}
 
-	var title, body string
+	var title, description, body string
 	err = db.QueryRowContext(ctx,
-		`SELECT title, body FROM notes WHERE id = ?`, payload.NoteID,
-	).Scan(&title, &body)
+		`SELECT title, description, body FROM notes WHERE id = ?`, payload.NoteID,
+	).Scan(&title, &description, &body)
 	if err != nil {
 		return nil, fmt.Errorf("ai.Embedder.HandleEmbedTask: query note: %w", err)
+	}
+
+	// Fold the one-line description into the embedded text so recall search
+	// matches on it. EmbedNote's signature is intentionally unchanged.
+	if description != "" {
+		body = description + "\n\n" + body
 	}
 
 	var extra map[string]string

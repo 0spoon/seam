@@ -59,6 +59,31 @@ func TestValidateSetting_InvalidValue(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidValue)
 }
 
+func TestValidateSetting_RepoProjectMap(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"empty object", "{}", false},
+		{"populated object", `{"/Users/x/repos/seam":"seam","/Users/x/repos/pm":"pass-mgr"}`, false},
+		{"not json", "not json", true},
+		{"json array", "[]", true},
+		{"non-string values", `{"/a":1}`, true},
+		{"json string", `"hello"`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSetting("repo_project_map", tt.value)
+			if tt.wantErr {
+				require.ErrorIs(t, err, ErrInvalidValue)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestDefaultValues_AllKeysPresent(t *testing.T) {
 	// Every allowed key should have a default value.
 	for key := range allowedKeys {

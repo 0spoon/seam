@@ -46,12 +46,12 @@ type Config struct {
 // dominating the agent's system context.
 type HooksConfig struct {
 	// MaxBriefingChars is the soft target for the hook briefing in characters.
-	// Default: 500. The handler aims to assemble a response under this length.
+	// Default: 2000. The handler aims to assemble a response under this length.
 	// env: SEAM_HOOKS_MAX_BRIEFING_CHARS
 	MaxBriefingChars int `yaml:"max_briefing_chars"`
 
 	// BriefingCap is the hard maximum for the hook briefing in characters.
-	// Default: 1500. Anything longer is truncated with an ellipsis.
+	// Default: 6000. Anything longer is truncated with an ellipsis.
 	// env: SEAM_HOOKS_BRIEFING_CAP
 	BriefingCap int `yaml:"briefing_cap"`
 }
@@ -428,10 +428,10 @@ func applyDefaults(cfg *Config) {
 		cfg.Watcher.DebounceInterval.Duration = 200 * time.Millisecond
 	}
 	if cfg.Hooks.MaxBriefingChars <= 0 {
-		cfg.Hooks.MaxBriefingChars = 500
+		cfg.Hooks.MaxBriefingChars = 2000
 	}
 	if cfg.Hooks.BriefingCap <= 0 {
-		cfg.Hooks.BriefingCap = 1500
+		cfg.Hooks.BriefingCap = 6000
 	}
 	// Cap can never be smaller than the soft target.
 	if cfg.Hooks.BriefingCap < cfg.Hooks.MaxBriefingChars {

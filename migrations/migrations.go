@@ -18,6 +18,9 @@ var InitialSQL string
 //go:embed 002_token_usage.sql
 var tokenUsageSQL string
 
+//go:embed 003_retrieval.sql
+var retrievalSQL string
+
 // Migration represents a single numbered migration step.
 type Migration struct {
 	Version int
@@ -33,5 +36,6 @@ func Migrations() []Migration {
 	return []Migration{
 		{Version: 1, SQL: InitialSQL},
 		{Version: 2, SQL: tokenUsageSQL},
+		{Version: 3, SQL: retrievalSQL},
 	}
 }

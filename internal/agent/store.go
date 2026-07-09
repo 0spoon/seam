@@ -27,11 +27,11 @@ func (s *SQLStore) CreateSession(ctx context.Context, db DBTX, sess *Session) er
 	}
 
 	_, err = db.ExecContext(ctx,
-		`INSERT INTO agent_sessions (id, name, parent_session_id, status, findings, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO agent_sessions (id, name, parent_session_id, status, findings, metadata, project_slug, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.Name, nullString(sess.ParentSessionID),
 		sess.Status, nullString(sess.Findings),
-		string(metaJSON),
+		string(metaJSON), sess.ProjectSlug,
 		sess.CreatedAt.Format(time.RFC3339), sess.UpdatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
@@ -43,7 +43,7 @@ func (s *SQLStore) CreateSession(ctx context.Context, db DBTX, sess *Session) er
 // GetSession retrieves a session by ID.
 func (s *SQLStore) GetSession(ctx context.Context, db DBTX, id string) (*Session, error) {
 	return s.scanSession(db.QueryRowContext(ctx,
-		`SELECT id, name, parent_session_id, status, findings, metadata, created_at, updated_at
+		`SELECT id, name, parent_session_id, status, findings, metadata, project_slug, created_at, updated_at
 		 FROM agent_sessions WHERE id = ?`, id,
 	))
 }
@@ -51,7 +51,7 @@ func (s *SQLStore) GetSession(ctx context.Context, db DBTX, id string) (*Session
 // GetSessionByName retrieves a session by its unique name.
 func (s *SQLStore) GetSessionByName(ctx context.Context, db DBTX, name string) (*Session, error) {
 	return s.scanSession(db.QueryRowContext(ctx,
-		`SELECT id, name, parent_session_id, status, findings, metadata, created_at, updated_at
+		`SELECT id, name, parent_session_id, status, findings, metadata, project_slug, created_at, updated_at
 		 FROM agent_sessions WHERE name = ?`, name,
 	))
 }
@@ -64,10 +64,10 @@ func (s *SQLStore) UpdateSession(ctx context.Context, db DBTX, sess *Session) er
 	}
 
 	result, err := db.ExecContext(ctx,
-		`UPDATE agent_sessions SET status = ?, findings = ?, metadata = ?, updated_at = ?
+		`UPDATE agent_sessions SET status = ?, findings = ?, metadata = ?, project_slug = ?, updated_at = ?
 		 WHERE id = ?`,
 		sess.Status, nullString(sess.Findings),
-		string(metaJSON),
+		string(metaJSON), sess.ProjectSlug,
 		sess.UpdatedAt.Format(time.RFC3339), sess.ID,
 	)
 	if err != nil {
@@ -86,7 +86,7 @@ func (s *SQLStore) UpdateSession(ctx context.Context, db DBTX, sess *Session) er
 // ListSessions returns sessions filtered by status, ordered by updated_at DESC.
 // If status is empty, all sessions are returned.
 func (s *SQLStore) ListSessions(ctx context.Context, db DBTX, status string, limit, offset int) ([]*Session, error) {
-	query := `SELECT id, name, parent_session_id, status, findings, metadata, created_at, updated_at
+	query := `SELECT id, name, parent_session_id, status, findings, metadata, project_slug, created_at, updated_at
 		 FROM agent_sessions`
 	var args []interface{}
 
@@ -109,10 +109,32 @@ func (s *SQLStore) ListSessions(ctx context.Context, db DBTX, status string, lim
 	return s.querySessionRows(ctx, db, query, args...)
 }
 
+// ListSessionsByProject returns sessions scoped to a project slug, filtered by
+// status and ordered by updated_at DESC. If status is empty, sessions of any
+// status are returned.
+func (s *SQLStore) ListSessionsByProject(ctx context.Context, db DBTX, status, projectSlug string, limit int) ([]*Session, error) {
+	query := `SELECT id, name, parent_session_id, status, findings, metadata, project_slug, created_at, updated_at
+		 FROM agent_sessions WHERE project_slug = ?`
+	args := []interface{}{projectSlug}
+
+	if status != "" {
+		query += " AND status = ?"
+		args = append(args, status)
+	}
+	query += " ORDER BY updated_at DESC"
+
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	return s.querySessionRows(ctx, db, query, args...)
+}
+
 // ListChildSessions returns all sessions whose parent_session_id matches parentID.
 func (s *SQLStore) ListChildSessions(ctx context.Context, db DBTX, parentID string) ([]*Session, error) {
 	return s.querySessionRows(ctx, db,
-		`SELECT id, name, parent_session_id, status, findings, metadata, created_at, updated_at
+		`SELECT id, name, parent_session_id, status, findings, metadata, project_slug, created_at, updated_at
 		 FROM agent_sessions WHERE parent_session_id = ? ORDER BY created_at ASC`,
 		parentID,
 	)
@@ -253,7 +275,7 @@ func (s *SQLStore) scanSession(row *sql.Row) (*Session, error) {
 	var createdAt, updatedAt string
 
 	err := row.Scan(&sess.ID, &sess.Name, &parentID, &sess.Status,
-		&findings, &metaJSON, &createdAt, &updatedAt)
+		&findings, &metaJSON, &sess.ProjectSlug, &createdAt, &updatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("agent.SQLStore: %w", ErrNotFound)
@@ -302,7 +324,7 @@ func (s *SQLStore) querySessionRows(ctx context.Context, db DBTX, query string, 
 		var createdAt, updatedAt string
 
 		if err := rows.Scan(&sess.ID, &sess.Name, &parentID, &sess.Status,
-			&findings, &metaJSON, &createdAt, &updatedAt); err != nil {
+			&findings, &metaJSON, &sess.ProjectSlug, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("agent.SQLStore: scan: %w", err)
 		}
 

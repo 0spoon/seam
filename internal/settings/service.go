@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ var allowedKeys = map[string][]string{
 	"usage_budget_period":       {"daily", "monthly"},
 	"usage_budget_max_tokens":   nil, // any numeric string
 	"usage_budget_gate_local":   {"true", "false"},
+	"repo_project_map":          nil, // JSON object: absolute repo path -> project slug
 }
 
 // defaultValues maps setting keys to their default values. These are
@@ -39,6 +41,7 @@ var defaultValues = map[string]string{
 	"usage_budget_period":       "monthly",
 	"usage_budget_max_tokens":   "0",
 	"usage_budget_gate_local":   "false",
+	"repo_project_map":          "{}",
 }
 
 // ErrInvalidKey is returned when a setting key is not in the allowlist.
@@ -154,6 +157,16 @@ func validateSetting(key, value string) error {
 	allowed, ok := allowedKeys[key]
 	if !ok {
 		return ErrInvalidKey
+	}
+	// JSON-valued settings accept any well-formed JSON of the expected shape
+	// rather than a fixed enum. repo_project_map must be a JSON object mapping
+	// absolute repo paths to Seam project slugs (string -> string).
+	if key == "repo_project_map" {
+		var m map[string]string
+		if err := json.Unmarshal([]byte(value), &m); err != nil {
+			return fmt.Errorf("%w: repo_project_map must be a JSON object of string to string", ErrInvalidValue)
+		}
+		return nil
 	}
 	if allowed == nil {
 		return nil

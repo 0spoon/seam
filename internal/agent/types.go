@@ -51,6 +51,7 @@ type Session struct {
 	ParentSessionID string   // ULID of parent, empty for root sessions
 	Status          string   // "active", "completed", "archived"
 	Findings        string   // compact summary (max 1500 chars), set on session_end
+	ProjectSlug     string   // Seam project slug resolved from the agent's cwd (may be empty)
 	Metadata        Metadata // agent identity, config
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -132,6 +133,7 @@ type Store interface {
 	GetSessionByName(ctx context.Context, db DBTX, name string) (*Session, error)
 	UpdateSession(ctx context.Context, db DBTX, s *Session) error
 	ListSessions(ctx context.Context, db DBTX, status string, limit, offset int) ([]*Session, error)
+	ListSessionsByProject(ctx context.Context, db DBTX, status, projectSlug string, limit int) ([]*Session, error)
 	ListChildSessions(ctx context.Context, db DBTX, parentID string) ([]*Session, error)
 	ReconcileChildren(ctx context.Context, db DBTX, parentID, parentName string) (int64, error)
 	LogToolCall(ctx context.Context, db DBTX, tc *ToolCallRecord) error

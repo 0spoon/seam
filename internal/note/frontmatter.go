@@ -14,6 +14,7 @@ import (
 var knownFrontmatterKeys = map[string]bool{
 	"id":                true,
 	"title":             true,
+	"description":       true,
 	"project":           true,
 	"tags":              true,
 	"created":           true,
@@ -28,6 +29,7 @@ var knownFrontmatterKeys = map[string]bool{
 type Frontmatter struct {
 	ID               string                 `yaml:"id"`
 	Title            string                 `yaml:"title"`
+	Description      string                 `yaml:"description,omitempty"`
 	Project          string                 `yaml:"project,omitempty"`
 	Tags             []string               `yaml:"tags,omitempty"`
 	Created          time.Time              `yaml:"created"`
@@ -84,6 +86,7 @@ func (fm *Frontmatter) MarshalYAML() (interface{}, error) {
 
 	addField("id", fm.ID)
 	addField("title", fm.Title)
+	addField("description", fm.Description)
 	addField("project", fm.Project)
 
 	// Tags.

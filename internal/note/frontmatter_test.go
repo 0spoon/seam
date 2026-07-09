@@ -93,6 +93,31 @@ func TestSerializeFrontmatter_RoundTrip(t *testing.T) {
 	require.Equal(t, body, body2)
 }
 
+func TestSerializeFrontmatter_DescriptionRoundTrip(t *testing.T) {
+	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	fm := &Frontmatter{
+		ID:          "01HTEST000000000000000001",
+		Title:       "Test Note",
+		Description: "One-line summary the agent reads to decide relevance",
+		Project:     "seam",
+		Created:     now,
+		Modified:    now,
+	}
+	body := "Some content.\n"
+
+	serialized, err := SerializeFrontmatter(fm, body)
+	require.NoError(t, err)
+	require.Contains(t, serialized, "description: One-line summary")
+
+	fm2, body2, err := ParseFrontmatter(serialized)
+	require.NoError(t, err)
+	require.Equal(t, fm.Description, fm2.Description)
+	require.Equal(t, body, body2)
+	// Description must not leak into the Extra map (it is a known key).
+	_, inExtra := fm2.Extra["description"]
+	require.False(t, inExtra)
+}
+
 func TestSerializeFrontmatter_EmptyBody(t *testing.T) {
 	fm := &Frontmatter{
 		ID:       "01HTEST000000000000000001",

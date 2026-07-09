@@ -52,7 +52,12 @@ func (m *mockDBManager) Open(_ context.Context, userID string) (*sql.DB, error) 
 	}
 	db.Exec("PRAGMA journal_mode=WAL")
 	db.Exec("PRAGMA foreign_keys=ON")
-	db.Exec(migrations.InitialSQL)
+	// Apply the full migration set (not just InitialSQL) so the mock schema
+	// tracks columns added by later migrations, e.g. notes.description.
+	if err := migrations.Run(db, migrations.Migrations()); err != nil {
+		db.Close()
+		return nil, err
+	}
 
 	m.dbs[userID] = db
 	return db, nil

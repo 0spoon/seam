@@ -17,6 +17,7 @@ var ErrNotFound = errors.New("not found")
 type Note struct {
 	ID               string    `json:"id"`
 	Title            string    `json:"title"`
+	Description      string    `json:"description,omitempty"`
 	ProjectID        string    `json:"project_id,omitempty"`
 	FilePath         string    `json:"file_path"`
 	Body             string    `json:"body"`
@@ -70,10 +71,10 @@ func NewSQLStore() *SQLStore {
 // Accepts DBTX so it can participate in a transaction.
 func (s *SQLStore) Create(ctx context.Context, db DBTX, n *Note) error {
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO notes (id, title, project_id, file_path, body, content_hash,
+		`INSERT INTO notes (id, title, description, project_id, file_path, body, content_hash,
 		 source_url, transcript_source, slug, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.ID, n.Title, nullString(n.ProjectID), n.FilePath, n.Body, n.ContentHash,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID, n.Title, n.Description, nullString(n.ProjectID), n.FilePath, n.Body, n.ContentHash,
 		nullString(n.SourceURL), boolToInt(n.TranscriptSource),
 		slugify(n.Title),
 		n.CreatedAt.Format(time.RFC3339), n.UpdatedAt.Format(time.RFC3339),
@@ -87,7 +88,7 @@ func (s *SQLStore) Create(ctx context.Context, db DBTX, n *Note) error {
 // Get retrieves a note by ID, including its tags.
 func (s *SQLStore) Get(ctx context.Context, db DBTX, id string) (*Note, error) {
 	n, err := s.scanNote(db.QueryRowContext(ctx,
-		`SELECT id, title, project_id, file_path, body, content_hash,
+		`SELECT id, title, description, project_id, file_path, body, content_hash,
 		 source_url, transcript_source, created_at, updated_at
 		 FROM notes WHERE id = ?`, id,
 	))
@@ -109,7 +110,7 @@ func (s *SQLStore) Get(ctx context.Context, db DBTX, id string) (*Note, error) {
 // GetByFilePath retrieves a note by its file path.
 func (s *SQLStore) GetByFilePath(ctx context.Context, db DBTX, filePath string) (*Note, error) {
 	n, err := s.scanNote(db.QueryRowContext(ctx,
-		`SELECT id, title, project_id, file_path, body, content_hash,
+		`SELECT id, title, description, project_id, file_path, body, content_hash,
 		 source_url, transcript_source, created_at, updated_at
 		 FROM notes WHERE file_path = ?`, filePath,
 	))
@@ -187,7 +188,7 @@ func (s *SQLStore) List(ctx context.Context, db DBTX, filter NoteFilter) ([]*Not
 		bodyCol = "'' AS body"
 	}
 	query := fmt.Sprintf(
-		`SELECT n.id, n.title, n.project_id, n.file_path, %s, n.content_hash,
+		`SELECT n.id, n.title, n.description, n.project_id, n.file_path, %s, n.content_hash,
 		 n.source_url, n.transcript_source, n.created_at, n.updated_at
 		 FROM notes n%s ORDER BY %s %s`,
 		bodyCol, whereClause, sortCol, sortDir,
@@ -235,11 +236,11 @@ func (s *SQLStore) List(ctx context.Context, db DBTX, filter NoteFilter) ([]*Not
 // Accepts DBTX so it can participate in a transaction.
 func (s *SQLStore) Update(ctx context.Context, db DBTX, n *Note) error {
 	result, err := db.ExecContext(ctx,
-		`UPDATE notes SET title = ?, project_id = ?, file_path = ?, body = ?,
+		`UPDATE notes SET title = ?, description = ?, project_id = ?, file_path = ?, body = ?,
 		 content_hash = ?, source_url = ?, transcript_source = ?, slug = ?,
 		 updated_at = ?
 		 WHERE id = ?`,
-		n.Title, nullString(n.ProjectID), n.FilePath, n.Body,
+		n.Title, n.Description, nullString(n.ProjectID), n.FilePath, n.Body,
 		n.ContentHash, nullString(n.SourceURL), boolToInt(n.TranscriptSource),
 		slugify(n.Title),
 		n.UpdatedAt.Format(time.RFC3339), n.ID,
@@ -277,7 +278,7 @@ func (s *SQLStore) Delete(ctx context.Context, db DBTX, id string) error {
 // GetBacklinks returns all notes that link to the given note ID.
 func (s *SQLStore) GetBacklinks(ctx context.Context, db DBTX, noteID string) ([]*Note, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT n.id, n.title, n.project_id, n.file_path, n.body, n.content_hash,
+		`SELECT n.id, n.title, n.description, n.project_id, n.file_path, n.body, n.content_hash,
 		 n.source_url, n.transcript_source, n.created_at, n.updated_at
 		 FROM notes n
 		 JOIN links l ON l.source_note_id = n.id
@@ -553,7 +554,7 @@ func (s *SQLStore) scanNote(row *sql.Row) (*Note, error) {
 	var transcriptSource int
 	var createdAt, updatedAt string
 
-	err := row.Scan(&n.ID, &n.Title, &projectID, &n.FilePath, &n.Body,
+	err := row.Scan(&n.ID, &n.Title, &n.Description, &projectID, &n.FilePath, &n.Body,
 		&n.ContentHash, &sourceURL, &transcriptSource, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
@@ -584,7 +585,7 @@ func (s *SQLStore) scanNoteRow(rows *sql.Rows) (*Note, error) {
 	var transcriptSource int
 	var createdAt, updatedAt string
 
-	err := rows.Scan(&n.ID, &n.Title, &projectID, &n.FilePath, &n.Body,
+	err := rows.Scan(&n.ID, &n.Title, &n.Description, &projectID, &n.FilePath, &n.Body,
 		&n.ContentHash, &sourceURL, &transcriptSource, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
@@ -679,7 +680,7 @@ func (s *SQLStore) loadTags(ctx context.Context, db DBTX, noteID string) ([]stri
 // and has the given tag. Returns ErrNotFound if no match.
 func (s *SQLStore) FindByTitlePrefix(ctx context.Context, db DBTX, prefix string, tag string) (*Note, error) {
 	escaped := escapeLIKE(prefix)
-	query := `SELECT n.id, n.title, n.project_id, n.file_path, n.body, n.content_hash,
+	query := `SELECT n.id, n.title, n.description, n.project_id, n.file_path, n.body, n.content_hash,
 		 n.source_url, n.transcript_source, n.created_at, n.updated_at
 		 FROM notes n`
 	args := []interface{}{escaped + "%"}

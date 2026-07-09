@@ -30,6 +30,7 @@ type WriteSuppressor interface {
 // CreateNoteReq is the request payload for creating a note.
 type CreateNoteReq struct {
 	Title            string   `json:"title"`
+	Description      string   `json:"description,omitempty"`
 	Body             string   `json:"body"`
 	ProjectID        string   `json:"project_id,omitempty"`
 	Tags             []string `json:"tags,omitempty"`
@@ -40,10 +41,11 @@ type CreateNoteReq struct {
 
 // UpdateNoteReq is the request payload for updating a note.
 type UpdateNoteReq struct {
-	Title     *string   `json:"title,omitempty"`
-	Body      *string   `json:"body,omitempty"`
-	ProjectID *string   `json:"project_id,omitempty"`
-	Tags      *[]string `json:"tags,omitempty"`
+	Title       *string   `json:"title,omitempty"`
+	Description *string   `json:"description,omitempty"`
+	Body        *string   `json:"body,omitempty"`
+	ProjectID   *string   `json:"project_id,omitempty"`
+	Tags        *[]string `json:"tags,omitempty"`
 }
 
 // Service implements note business logic including filesystem operations.
@@ -148,6 +150,7 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 	fm := &Frontmatter{
 		ID:               id,
 		Title:            req.Title,
+		Description:      req.Description,
 		Project:          projectSlug,
 		Tags:             req.Tags,
 		Created:          now,
@@ -181,6 +184,7 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateNoteReq) 
 	n := &Note{
 		ID:               id,
 		Title:            req.Title,
+		Description:      req.Description,
 		ProjectID:        req.ProjectID,
 		FilePath:         relPath,
 		Body:             req.Body,
@@ -390,6 +394,9 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 	if req.Title != nil {
 		existing.Title = *req.Title
 	}
+	if req.Description != nil {
+		existing.Description = *req.Description
+	}
 	if req.Body != nil {
 		existing.Body = *req.Body
 	}
@@ -461,6 +468,7 @@ func (s *Service) Update(ctx context.Context, userID, noteID string, req UpdateN
 	fm := &Frontmatter{
 		ID:               existing.ID,
 		Title:            existing.Title,
+		Description:      existing.Description,
 		Project:          projectSlug,
 		Tags:             existing.Tags,
 		Created:          existing.CreatedAt,
@@ -932,6 +940,7 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 		}
 
 		existing.Title = fm.Title
+		existing.Description = fm.Description
 		existing.Body = body
 		existing.ContentHash = hash
 		// Use modified timestamp from frontmatter if available, else current time.
@@ -1033,6 +1042,7 @@ func (s *Service) Reindex(ctx context.Context, userID, filePath string) error {
 	n := &Note{
 		ID:               id,
 		Title:            title,
+		Description:      fm.Description,
 		FilePath:         filePath,
 		Body:             body,
 		ContentHash:      hash,

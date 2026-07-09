@@ -59,16 +59,24 @@ type WSNotifier interface {
 	SendAgentEvent(userID string, eventType string, payload interface{})
 }
 
+// SettingsReader reads owner settings. Defined locally (one method) so the
+// agent package does not depend on internal/settings. Used to resolve the
+// repo_project_map for repo-aware briefings.
+type SettingsReader interface {
+	GetAll(ctx context.Context, userID string) (map[string]string, error)
+}
+
 // ServiceConfig holds dependencies for the agent Service.
 type ServiceConfig struct {
-	Store          Store
-	NoteService    NoteCreator
-	ProjectService ProjectCreator
-	SearchService  Searcher
-	AIQueue        *ai.Queue  // may be nil if AI disabled; used to enqueue embed tasks
-	WSNotifier     WSNotifier // may be nil; used to push agent events via WebSocket
-	UserDBManager  userdb.Manager
-	Logger         *slog.Logger
+	Store           Store
+	NoteService     NoteCreator
+	ProjectService  ProjectCreator
+	SearchService   Searcher
+	SettingsService SettingsReader // may be nil; used to resolve repo->project
+	AIQueue         *ai.Queue      // may be nil if AI disabled; used to enqueue embed tasks
+	WSNotifier      WSNotifier     // may be nil; used to push agent events via WebSocket
+	UserDBManager   userdb.Manager
+	Logger          *slog.Logger
 }
 
 // Service implements agent business logic: session lifecycle, memory CRUD,
@@ -185,7 +193,7 @@ func (s *Service) ensureResearchProject(ctx context.Context, userID string) (str
 
 // SessionStart creates a new session or resumes an existing one.
 // Returns a Briefing with context assembled within the character budget.
-func (s *Service) SessionStart(ctx context.Context, userID, name string, maxContextChars int) (*Briefing, error) {
+func (s *Service) SessionStart(ctx context.Context, userID, name, cwd string, maxContextChars int) (*Briefing, error) {
 	if err := ValidateSessionName(name); err != nil {
 		return nil, err
 	}
@@ -193,6 +201,9 @@ func (s *Service) SessionStart(ctx context.Context, userID, name string, maxCont
 	if maxContextChars <= 0 {
 		maxContextChars = DefaultMaxContextChars
 	}
+
+	// Resolve the repo working directory to a Seam project (best-effort, "").
+	projectSlug := s.ResolveProjectForCWD(ctx, userID, cwd)
 
 	// Ensure agent-memory project exists.
 	if _, err := s.ensureAgentMemoryProject(ctx, userID); err != nil {
@@ -214,6 +225,16 @@ func (s *Service) SessionStart(ctx context.Context, userID, name string, maxCont
 			s.cfg.Logger.Info("resuming non-active session",
 				"session", name, "status", existing.Status)
 		}
+		// Backfill project_slug on resume so ListSessionsByProject and the
+		// scoped briefing see pre-migration and previously-unscoped rows.
+		if existing.ProjectSlug == "" && projectSlug != "" {
+			existing.ProjectSlug = projectSlug
+			existing.UpdatedAt = time.Now().UTC()
+			if err := s.cfg.Store.UpdateSession(ctx, db, existing); err != nil {
+				s.cfg.Logger.Warn("agent.Service.SessionStart: backfill project_slug failed",
+					"session", name, "error", err)
+			}
+		}
 		return s.assembleBriefing(ctx, userID, db, existing, maxContextChars)
 	}
 	if !errors.Is(getErr, ErrNotFound) {
@@ -227,11 +248,12 @@ func (s *Service) SessionStart(ctx context.Context, userID, name string, maxCont
 		return nil, fmt.Errorf("agent.Service.SessionStart: generate id: %w", idErr)
 	}
 	sess := &Session{
-		ID:        idVal.String(),
-		Name:      name,
-		Status:    StatusActive,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          idVal.String(),
+		Name:        name,
+		Status:      StatusActive,
+		ProjectSlug: projectSlug,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	// Resolve parent session from "/" naming convention.
@@ -1168,14 +1190,40 @@ func (s *Service) assembleBriefing(ctx context.Context, userID string, db DBTX, 
 	hasSession := plan != "" || lastProgress != ""
 	hasSiblings := len(siblings) > 0
 
-	// Search for relevant knowledge.
+	// Search for relevant knowledge. Keying on the resolved project slug (not
+	// just the agent-invented session name) is what makes recall relevant.
 	var knowledge []KnowledgeHit
 	searchQuery := sess.Name
+	if sess.ProjectSlug != "" {
+		searchQuery += " " + sess.ProjectSlug
+	}
 	if parentPlan != "" {
 		searchQuery += " " + parentPlan
 	}
 	knowledge = s.searchKnowledge(ctx, userID, searchQuery, 5)
 	hasKnowledge := len(knowledge) > 0
+
+	// When the session is project-scoped, pin the project's constraints and a
+	// compact memory index into the briefing (recognition over recall).
+	if sess.ProjectSlug != "" {
+		for _, c := range s.gatherConstraints(ctx, userID, db, sess.ProjectSlug) {
+			line := c.name
+			if c.description != "" {
+				line += ": " + c.description
+			}
+			briefing.Constraints = append(briefing.Constraints, line)
+		}
+		for _, m := range s.gatherProjectIndex(ctx, userID, db, sess.ProjectSlug) {
+			line := m.Category + "/" + m.Name
+			if m.Description != "" {
+				line += " -- " + m.Description
+			}
+			if m.Category == "refuted" {
+				line = "[REFUTED] " + line
+			}
+			briefing.MemoryIndex = append(briefing.MemoryIndex, line)
+		}
+	}
 
 	// Allocate budget.
 	budget := allocateBudget(maxChars, hasSession, hasParent, hasSiblings, hasKnowledge)
@@ -1494,8 +1542,9 @@ func (s *Service) LabOpen(ctx context.Context, userID, name, problem, domain str
 		s.enqueueEmbedWithScope(ctx, userID, n.ID, "user")
 	}
 
-	// Start or resume the parent session for briefing context.
-	briefing, sessErr := s.SessionStart(ctx, userID, sessionName, DefaultMaxContextChars)
+	// Start or resume the parent session for briefing context. Labs inherit
+	// no repo working directory.
+	briefing, sessErr := s.SessionStart(ctx, userID, sessionName, "", DefaultMaxContextChars)
 	if sessErr != nil {
 		return nil, fmt.Errorf("agent.Service.LabOpen: session: %w", sessErr)
 	}
@@ -1598,8 +1647,8 @@ func (s *Service) TrialRecord(ctx context.Context, userID, lab, title, changes, 
 		}
 	} else {
 		// Create new trial.
-		// Start child session under the lab.
-		if _, sessErr := s.SessionStart(ctx, userID, trialSession, DefaultMaxContextChars); sessErr != nil {
+		// Start child session under the lab (no repo working directory).
+		if _, sessErr := s.SessionStart(ctx, userID, trialSession, "", DefaultMaxContextChars); sessErr != nil {
 			s.cfg.Logger.Warn("agent: failed to start trial session", "session", trialSession, "error", sessErr)
 		}
 

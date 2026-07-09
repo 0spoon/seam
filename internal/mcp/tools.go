@@ -125,6 +125,7 @@ func sessionStartTool() mcp.Tool {
 	return mcp.NewTool("session_start",
 		mcp.WithDescription("Start or resume a named agent session. Returns a briefing with context."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Session name (e.g. 'refactor-auth' or 'refactor-auth/analyze')")),
+		mcp.WithString("cwd", mcp.Description("Absolute working directory of the agent; used to scope the briefing to the repo's Seam project")),
 		mcp.WithNumber("max_context_chars", mcp.Description("Maximum characters for briefing context (default: 4000)")),
 	)
 }
@@ -285,9 +286,10 @@ func (s *Server) handleSessionStart(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError("missing required parameter: name"), nil
 	}
 
+	cwd := req.GetString("cwd", "")
 	maxChars := req.GetInt("max_context_chars", agent.DefaultMaxContextChars)
 
-	briefing, err := s.cfg.AgentService.SessionStart(ctx, userID, name, maxChars)
+	briefing, err := s.cfg.AgentService.SessionStart(ctx, userID, name, cwd, maxChars)
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("session_start", err)), nil
 	}

@@ -93,7 +93,7 @@ func textOf(t *testing.T, r *mcp.CallToolResult) string {
 
 func TestSessionStart_Success_ReturnsBriefingJSON(t *testing.T) {
 	mock := &mockAgentService{
-		sessionStartFn: func(_ context.Context, userID, name string, maxContextChars int) (*agent.Briefing, error) {
+		sessionStartFn: func(_ context.Context, userID, name, cwd string, maxContextChars int) (*agent.Briefing, error) {
 			require.Equal(t, toolTestUser, userID)
 			require.Equal(t, "my-session", name)
 			return &agent.Briefing{
@@ -132,7 +132,7 @@ func TestSessionStart_MissingName_ReturnsError(t *testing.T) {
 
 func TestSessionStart_ServiceError_ReturnsError(t *testing.T) {
 	mock := &mockAgentService{
-		sessionStartFn: func(context.Context, string, string, int) (*agent.Briefing, error) {
+		sessionStartFn: func(context.Context, string, string, string, int) (*agent.Briefing, error) {
 			return nil, errors.New("database connection lost")
 		},
 	}
@@ -148,7 +148,7 @@ func TestSessionStart_ServiceError_ReturnsError(t *testing.T) {
 func TestSessionStart_CustomMaxContextChars_PassedToService(t *testing.T) {
 	var captured int
 	mock := &mockAgentService{
-		sessionStartFn: func(_ context.Context, _, _ string, maxContextChars int) (*agent.Briefing, error) {
+		sessionStartFn: func(_ context.Context, _, _, _ string, maxContextChars int) (*agent.Briefing, error) {
 			captured = maxContextChars
 			return &agent.Briefing{Session: &agent.Session{ID: "s1", Name: "x", Status: agent.StatusActive}}, nil
 		},
@@ -166,7 +166,7 @@ func TestSessionStart_CustomMaxContextChars_PassedToService(t *testing.T) {
 func TestSessionStart_DefaultMaxContextChars_Uses4000(t *testing.T) {
 	var captured int
 	mock := &mockAgentService{
-		sessionStartFn: func(_ context.Context, _, _ string, maxContextChars int) (*agent.Briefing, error) {
+		sessionStartFn: func(_ context.Context, _, _, _ string, maxContextChars int) (*agent.Briefing, error) {
 			captured = maxContextChars
 			return &agent.Briefing{Session: &agent.Session{ID: "s2", Name: "y", Status: agent.StatusActive}}, nil
 		},

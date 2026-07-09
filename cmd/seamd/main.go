@@ -876,14 +876,15 @@ func run() error {
 	agentStore := agent.NewSQLStore()
 	agentWSNotifier := agent.NewHubWSNotifier(hub, logger)
 	agentSvc := agent.NewService(agent.ServiceConfig{
-		Store:          agentStore,
-		NoteService:    noteSvc,
-		ProjectService: projectSvc,
-		SearchService:  searchSvc,
-		AIQueue:        aiQueue,
-		WSNotifier:     agentWSNotifier,
-		UserDBManager:  userDBMgr,
-		Logger:         logger,
+		Store:           agentStore,
+		NoteService:     noteSvc,
+		ProjectService:  projectSvc,
+		SearchService:   searchSvc,
+		SettingsService: settingsSvc,
+		AIQueue:         aiQueue,
+		WSNotifier:      agentWSNotifier,
+		UserDBManager:   userDBMgr,
+		Logger:          logger,
 	})
 	mcpSrv := seamMCP.New(seamMCP.Config{
 		AgentService:    agentSvc,
@@ -908,6 +909,7 @@ func run() error {
 		cfg.MCP.APIKey,
 		logger,
 		cfg.Hooks.MaxBriefingChars,
+		cfg.Hooks.BriefingCap,
 	)
 
 	// Create assistant (agentic AI with tool use).

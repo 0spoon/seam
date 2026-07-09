@@ -27,7 +27,7 @@ import (
 // Each method delegates to a corresponding Fn field when non-nil, otherwise panics
 // to catch unexpected calls in tests.
 type mockAgentService struct {
-	sessionStartFn          func(ctx context.Context, userID, name string, maxContextChars int) (*agent.Briefing, error)
+	sessionStartFn          func(ctx context.Context, userID, name, cwd string, maxContextChars int) (*agent.Briefing, error)
 	sessionEndFn            func(ctx context.Context, userID, sessionName, findings string) error
 	sessionListFn           func(ctx context.Context, userID, status string, limit int) ([]*agent.Session, error)
 	sessionPlanSetFn        func(ctx context.Context, userID, sessionName, content string) (string, error)
@@ -62,11 +62,11 @@ type mockAgentService struct {
 	trialQueryFn            func(ctx context.Context, userID, lab, query, outcome string, limit int) ([]agent.TrialSummary, error)
 }
 
-func (m *mockAgentService) SessionStart(ctx context.Context, userID, name string, maxContextChars int) (*agent.Briefing, error) {
+func (m *mockAgentService) SessionStart(ctx context.Context, userID, name, cwd string, maxContextChars int) (*agent.Briefing, error) {
 	if m.sessionStartFn == nil {
 		panic("mockAgentService.SessionStart not implemented")
 	}
-	return m.sessionStartFn(ctx, userID, name, maxContextChars)
+	return m.sessionStartFn(ctx, userID, name, cwd, maxContextChars)
 }
 
 func (m *mockAgentService) SessionEnd(ctx context.Context, userID, sessionName, findings string) error {

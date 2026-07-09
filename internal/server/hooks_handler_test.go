@@ -20,14 +20,14 @@ import (
 const testAPIKey = "secret-key-1234567890"
 
 type mockBriefingService struct {
-	hookBriefingFn func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error)
+	hookBriefingFn func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error)
 }
 
-func (m *mockBriefingService) HookBriefing(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error) {
+func (m *mockBriefingService) HookBriefing(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 	if m.hookBriefingFn == nil {
 		return "<seam-briefing>stub</seam-briefing>", nil
 	}
-	return m.hookBriefingFn(ctx, userID, payload, maxChars, openTaskCount)
+	return m.hookBriefingFn(ctx, userID, payload, maxChars, hardCap, openTaskCount)
 }
 
 type mockTaskCounter struct {
@@ -43,7 +43,7 @@ func (m *mockTaskCounter) Summary(ctx context.Context, userID string, filter tas
 
 func newTestHooksHandler(t *testing.T, agentSvc HookBriefingService, taskSvc HookTaskCounter) *httptest.Server {
 	t.Helper()
-	h := NewHooksHandler(agentSvc, taskSvc, testAPIKey, nil, 500)
+	h := NewHooksHandler(agentSvc, taskSvc, testAPIKey, nil, 2000, 6000)
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
 	return srv
@@ -91,7 +91,7 @@ func TestHooksHandler_ValidBearerEmptyStore(t *testing.T) {
 	t.Parallel()
 
 	mock := &mockBriefingService{
-		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error) {
+		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 			return "<seam-briefing>\nSeam: no open sessions, no recent memories.\n</seam-briefing>", nil
 		},
 	}
@@ -138,7 +138,7 @@ func TestHooksHandler_BriefingErrorReturnsEmptyContext(t *testing.T) {
 	t.Parallel()
 
 	mock := &mockBriefingService{
-		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error) {
+		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 			return "", errors.New("boom")
 		},
 	}
@@ -157,7 +157,7 @@ func TestHooksHandler_TimeoutReturnsBeforeBlocking(t *testing.T) {
 	t.Parallel()
 
 	mock := &mockBriefingService{
-		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error) {
+		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 			// Simulate a hung downstream by waiting on the context.
 			<-ctx.Done()
 			return "", ctx.Err()
@@ -182,7 +182,7 @@ func TestHooksHandler_CompactSourcePassedThrough(t *testing.T) {
 
 	var seenSource string
 	mock := &mockBriefingService{
-		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error) {
+		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 			seenSource = payload.Source
 			return "<seam-briefing>compact mode</seam-briefing>", nil
 		},
@@ -203,7 +203,7 @@ func TestHooksHandler_TaskCounterUsedWhenAvailable(t *testing.T) {
 
 	var seenCount int = -100
 	briefingMock := &mockBriefingService{
-		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error) {
+		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 			seenCount = openTaskCount
 			return "<seam-briefing>ok</seam-briefing>", nil
 		},
@@ -228,7 +228,7 @@ func TestHooksHandler_TaskCounterErrorPassesNegativeCount(t *testing.T) {
 
 	var seenCount int = -100
 	briefingMock := &mockBriefingService{
-		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error) {
+		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 			seenCount = openTaskCount
 			return "<seam-briefing>ok</seam-briefing>", nil
 		},
@@ -250,7 +250,7 @@ func TestHooksHandler_NoTaskCounterMeansNegativeCount(t *testing.T) {
 
 	var seenCount int = -100
 	briefingMock := &mockBriefingService{
-		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error) {
+		hookBriefingFn: func(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 			seenCount = openTaskCount
 			return "<seam-briefing>ok</seam-briefing>", nil
 		},
@@ -265,7 +265,7 @@ func TestHooksHandler_NoTaskCounterMeansNegativeCount(t *testing.T) {
 func TestHooksHandler_EmptyAPIKeyRejectsAll(t *testing.T) {
 	t.Parallel()
 
-	h := NewHooksHandler(&mockBriefingService{}, nil, "" /* apiKey */, nil, 500)
+	h := NewHooksHandler(&mockBriefingService{}, nil, "" /* apiKey */, nil, 2000, 6000)
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
 

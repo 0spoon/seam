@@ -29,7 +29,7 @@ import (
 // AgentService defines the interface for the agent service used by MCP tools.
 // This allows mocking in tests.
 type AgentService interface {
-	SessionStart(ctx context.Context, userID, name string, maxContextChars int) (*agent.Briefing, error)
+	SessionStart(ctx context.Context, userID, name, cwd string, maxContextChars int) (*agent.Briefing, error)
 	SessionEnd(ctx context.Context, userID, sessionName, findings string) error
 	SessionList(ctx context.Context, userID, status string, limit int) ([]*agent.Session, error)
 	SessionPlanSet(ctx context.Context, userID, sessionName, content string) (string, error)

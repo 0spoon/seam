@@ -53,7 +53,7 @@ func TestService_SessionMetrics_ActiveSession(t *testing.T) {
 	ctx := context.Background()
 
 	// Start a session.
-	_, err := svc.SessionStart(ctx, testUserID, "metrics-test", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "metrics-test", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// Set a plan (creates a note).
@@ -78,7 +78,7 @@ func TestService_SessionMetrics_CompletedSession(t *testing.T) {
 	ctx := context.Background()
 
 	// Start and end a session.
-	_, err := svc.SessionStart(ctx, testUserID, "done-session", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "done-session", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	err = svc.SessionEnd(ctx, testUserID, "done-session", "Session complete.")
@@ -161,7 +161,7 @@ func TestService_SessionStart_EmitsWSEvent(t *testing.T) {
 	notifier := &mockWSNotifier{}
 	svc.cfg.WSNotifier = notifier
 
-	_, err := svc.SessionStart(ctx, testUserID, "ws-test", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "ws-test", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	require.Len(t, notifier.events, 1)
@@ -176,7 +176,7 @@ func TestService_SessionEnd_EmitsWSEvent(t *testing.T) {
 	notifier := &mockWSNotifier{}
 	svc.cfg.WSNotifier = notifier
 
-	_, err := svc.SessionStart(ctx, testUserID, "ws-end-test", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "ws-end-test", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	err = svc.SessionEnd(ctx, testUserID, "ws-end-test", "Findings here.")

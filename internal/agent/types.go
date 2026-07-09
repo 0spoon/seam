@@ -90,6 +90,11 @@ type Briefing struct {
 	ParentPlan      string           `json:"parent_plan,omitempty"`
 	SiblingFindings []SiblingFinding `json:"sibling_findings,omitempty"`
 	Knowledge       []KnowledgeHit   `json:"knowledge,omitempty"`
+	// Constraints and MemoryIndex are populated when the session resolves to a
+	// project (via cwd -> repo_project_map). Constraints are pinned rules;
+	// MemoryIndex is a compact one-line-per-memory catalog for the project.
+	Constraints []string `json:"constraints,omitempty"`
+	MemoryIndex []string `json:"memory_index,omitempty"`
 }
 
 // SiblingFinding holds a completed sibling session's findings.

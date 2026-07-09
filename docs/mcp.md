@@ -72,7 +72,7 @@ Track agent working sessions with plans, progress, and findings. Sessions form h
 
 | Tool                      | What it does                                                     |
 | ------------------------- | ---------------------------------------------------------------- |
-| `session_start`           | Start or resume a named session. Returns a briefing with context |
+| `session_start`           | Start or resume a named session. Pass `cwd` (absolute working dir) to scope the briefing to the repo's Seam project. Returns a briefing with context (incl. project constraints + memory index when scoped) |
 | `session_plan_set`        | Set the session plan                                             |
 | `session_progress_update` | Log task progress (pending/in_progress/completed/blocked)        |
 | `session_context_set`     | Set session context notes                                        |

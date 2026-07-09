@@ -55,7 +55,7 @@ func TestService_SessionStart_CreatesNewSession(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	briefing, err := svc.SessionStart(ctx, testUserID, "new-session", DefaultMaxContextChars)
+	briefing, err := svc.SessionStart(ctx, testUserID, "new-session", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.NotNil(t, briefing)
 	require.NotNil(t, briefing.Session)
@@ -69,12 +69,12 @@ func TestService_SessionStart_ResumesExisting(t *testing.T) {
 	ctx := context.Background()
 
 	// Start a session.
-	b1, err := svc.SessionStart(ctx, testUserID, "resume-me", DefaultMaxContextChars)
+	b1, err := svc.SessionStart(ctx, testUserID, "resume-me", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	sessionID := b1.Session.ID
 
 	// Start the same session again -- should resume, not create new.
-	b2, err := svc.SessionStart(ctx, testUserID, "resume-me", DefaultMaxContextChars)
+	b2, err := svc.SessionStart(ctx, testUserID, "resume-me", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Equal(t, sessionID, b2.Session.ID)
 }
@@ -84,11 +84,11 @@ func TestService_SessionStart_ResolvesParent(t *testing.T) {
 	ctx := context.Background()
 
 	// Start parent.
-	parentBriefing, err := svc.SessionStart(ctx, testUserID, "parent", DefaultMaxContextChars)
+	parentBriefing, err := svc.SessionStart(ctx, testUserID, "parent", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// Start child.
-	childBriefing, err := svc.SessionStart(ctx, testUserID, "parent/child", DefaultMaxContextChars)
+	childBriefing, err := svc.SessionStart(ctx, testUserID, "parent/child", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Equal(t, parentBriefing.Session.ID, childBriefing.Session.ParentSessionID)
 }
@@ -98,12 +98,12 @@ func TestService_SessionStart_ReconcileOrphans(t *testing.T) {
 	ctx := context.Background()
 
 	// Start child before parent (orphan).
-	childBriefing, err := svc.SessionStart(ctx, testUserID, "late-parent/early-child", DefaultMaxContextChars)
+	childBriefing, err := svc.SessionStart(ctx, testUserID, "late-parent/early-child", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Empty(t, childBriefing.Session.ParentSessionID)
 
 	// Now start the parent -- should reconcile the child.
-	parentBriefing, err := svc.SessionStart(ctx, testUserID, "late-parent", DefaultMaxContextChars)
+	parentBriefing, err := svc.SessionStart(ctx, testUserID, "late-parent", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// Re-fetch the child to verify reconciliation.
@@ -118,13 +118,13 @@ func TestService_SessionStart_InvalidName(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "", "", DefaultMaxContextChars)
 	require.ErrorIs(t, err, ErrInvalidSessionName)
 
-	_, err = svc.SessionStart(ctx, testUserID, "/leading-slash", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "/leading-slash", "", DefaultMaxContextChars)
 	require.ErrorIs(t, err, ErrInvalidSessionName)
 
-	_, err = svc.SessionStart(ctx, testUserID, "has spaces", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "has spaces", "", DefaultMaxContextChars)
 	require.ErrorIs(t, err, ErrInvalidSessionName)
 }
 
@@ -132,7 +132,7 @@ func TestService_SessionEnd_Success(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "end-me", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "end-me", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	err = svc.SessionEnd(ctx, testUserID, "end-me", "Completed the refactoring.")
@@ -151,7 +151,7 @@ func TestService_SessionEnd_EmptyFindings(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "no-findings", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "no-findings", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	err = svc.SessionEnd(ctx, testUserID, "no-findings", "")
@@ -162,7 +162,7 @@ func TestService_SessionEnd_FindingsTooLong(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "verbose", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "verbose", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	longFindings := make([]byte, MaxFindingsChars+1)
@@ -185,9 +185,9 @@ func TestService_SessionList(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "list-a", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "list-a", "", DefaultMaxContextChars)
 	require.NoError(t, err)
-	_, err = svc.SessionStart(ctx, testUserID, "list-b", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "list-b", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	sessions, err := svc.SessionList(ctx, testUserID, StatusActive, 20)
@@ -201,7 +201,7 @@ func TestService_SessionPlanSet_CreatesNote(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "plan-test", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "plan-test", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	noteID, err := svc.SessionPlanSet(ctx, testUserID, "plan-test", "## Goals\n- Refactor auth")
@@ -222,7 +222,7 @@ func TestService_SessionPlanSet_UpdatesExistingNote(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "plan-update", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "plan-update", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	noteID1, err := svc.SessionPlanSet(ctx, testUserID, "plan-update", "## Original Plan")
@@ -242,7 +242,7 @@ func TestService_SessionProgressUpdate(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "progress-test", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "progress-test", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	noteID, err := svc.SessionProgressUpdate(ctx, testUserID, "progress-test",
@@ -261,7 +261,7 @@ func TestService_SessionContextSet(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "context-test", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "context-test", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	noteID, err := svc.SessionContextSet(ctx, testUserID, "context-test", "Key decisions: use JWT for auth")
@@ -425,7 +425,7 @@ func TestService_AutoCreatesAgentMemoryProject(t *testing.T) {
 	require.ErrorIs(t, err, project.ErrNotFound)
 
 	// SessionStart should auto-create the project.
-	_, err = svc.SessionStart(ctx, testUserID, "auto-create-test", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "auto-create-test", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// Verify project exists now.
@@ -441,17 +441,17 @@ func TestService_SiblingFindings_FlowToNewChild(t *testing.T) {
 	ctx := context.Background()
 
 	// Start parent.
-	_, err := svc.SessionStart(ctx, testUserID, "main-task", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "main-task", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// Start child A and complete it with findings.
-	_, err = svc.SessionStart(ctx, testUserID, "main-task/child-a", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "main-task/child-a", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	err = svc.SessionEnd(ctx, testUserID, "main-task/child-a", "Child A found X and Y")
 	require.NoError(t, err)
 
 	// Start child B -- its briefing should contain child A's findings.
-	briefing, err := svc.SessionStart(ctx, testUserID, "main-task/child-b", DefaultMaxContextChars)
+	briefing, err := svc.SessionStart(ctx, testUserID, "main-task/child-b", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.NotEmpty(t, briefing.SiblingFindings)
 	require.Equal(t, "main-task/child-a", briefing.SiblingFindings[0].SessionName)
@@ -464,7 +464,7 @@ func TestService_SessionEnd_AlreadyCompleted(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "double-end", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "double-end", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	err = svc.SessionEnd(ctx, testUserID, "double-end", "First end")
 	require.NoError(t, err)
@@ -483,7 +483,7 @@ func TestService_SessionEnd_UpdatesNoteStatusTags(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "tag-update", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "tag-update", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	planID, err := svc.SessionPlanSet(ctx, testUserID, "tag-update", "The plan")
@@ -516,7 +516,7 @@ func TestService_SessionStart_WithCustomMaxContextChars(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	briefing, err := svc.SessionStart(ctx, testUserID, "small-budget", 100)
+	briefing, err := svc.SessionStart(ctx, testUserID, "small-budget", "", 100)
 	require.NoError(t, err)
 	require.NotNil(t, briefing)
 	require.NotNil(t, briefing.Session)
@@ -529,7 +529,7 @@ func TestService_SessionStart_ZeroMaxContextChars(t *testing.T) {
 	ctx := context.Background()
 
 	// maxContextChars=0 should fall back to DefaultMaxContextChars.
-	briefing, err := svc.SessionStart(ctx, testUserID, "zero-budget", 0)
+	briefing, err := svc.SessionStart(ctx, testUserID, "zero-budget", "", 0)
 	require.NoError(t, err)
 	require.NotNil(t, briefing)
 	require.Equal(t, "zero-budget", briefing.Session.Name)
@@ -540,7 +540,7 @@ func TestService_SessionStart_NegativeMaxContextChars(t *testing.T) {
 	ctx := context.Background()
 
 	// maxContextChars=-1 should fall back to DefaultMaxContextChars.
-	briefing, err := svc.SessionStart(ctx, testUserID, "negative-budget", -1)
+	briefing, err := svc.SessionStart(ctx, testUserID, "negative-budget", "", -1)
 	require.NoError(t, err)
 	require.NotNil(t, briefing)
 	require.Equal(t, "negative-budget", briefing.Session.Name)
@@ -566,7 +566,7 @@ func TestService_SessionProgressUpdate_MultipleEntries(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "multi-progress", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "multi-progress", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	noteID1, err := svc.SessionProgressUpdate(ctx, testUserID, "multi-progress",
@@ -598,11 +598,11 @@ func TestService_SessionList_All(t *testing.T) {
 	ctx := context.Background()
 
 	// Create sessions: 2 active, 1 completed.
-	_, err := svc.SessionStart(ctx, testUserID, "list-all-a", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "list-all-a", "", DefaultMaxContextChars)
 	require.NoError(t, err)
-	_, err = svc.SessionStart(ctx, testUserID, "list-all-b", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "list-all-b", "", DefaultMaxContextChars)
 	require.NoError(t, err)
-	_, err = svc.SessionStart(ctx, testUserID, "list-all-c", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "list-all-c", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	err = svc.SessionEnd(ctx, testUserID, "list-all-c", "Completed C")
 	require.NoError(t, err)
@@ -627,7 +627,7 @@ func TestService_SessionList_LimitWorks(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		name := fmt.Sprintf("limit-test-%d", i)
-		_, err := svc.SessionStart(ctx, testUserID, name, DefaultMaxContextChars)
+		_, err := svc.SessionStart(ctx, testUserID, name, "", DefaultMaxContextChars)
 		require.NoError(t, err)
 	}
 
@@ -742,15 +742,15 @@ func TestService_HierarchicalSession_DeepNesting(t *testing.T) {
 	ctx := context.Background()
 
 	// Create 3 levels: a -> a/b -> a/b/c.
-	bA, err := svc.SessionStart(ctx, testUserID, "a", DefaultMaxContextChars)
+	bA, err := svc.SessionStart(ctx, testUserID, "a", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Empty(t, bA.Session.ParentSessionID, "root session has no parent")
 
-	bAB, err := svc.SessionStart(ctx, testUserID, "a/b", DefaultMaxContextChars)
+	bAB, err := svc.SessionStart(ctx, testUserID, "a/b", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Equal(t, bA.Session.ID, bAB.Session.ParentSessionID, "a/b parent should be a")
 
-	bABC, err := svc.SessionStart(ctx, testUserID, "a/b/c", DefaultMaxContextChars)
+	bABC, err := svc.SessionStart(ctx, testUserID, "a/b/c", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Equal(t, bAB.Session.ID, bABC.Session.ParentSessionID, "a/b/c parent should be a/b")
 
@@ -765,21 +765,21 @@ func TestService_SiblingFindings_OnlyCompletedSiblingsIncluded(t *testing.T) {
 	ctx := context.Background()
 
 	// Start parent.
-	_, err := svc.SessionStart(ctx, testUserID, "parent", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "parent", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// Start child-1 and complete it with findings.
-	_, err = svc.SessionStart(ctx, testUserID, "parent/child-1", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "parent/child-1", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	err = svc.SessionEnd(ctx, testUserID, "parent/child-1", "child-1 findings here")
 	require.NoError(t, err)
 
 	// Start child-2 but leave it active (no findings).
-	_, err = svc.SessionStart(ctx, testUserID, "parent/child-2", DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, testUserID, "parent/child-2", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// Start child-3 -- briefing should only contain child-1's findings.
-	briefing, err := svc.SessionStart(ctx, testUserID, "parent/child-3", DefaultMaxContextChars)
+	briefing, err := svc.SessionStart(ctx, testUserID, "parent/child-3", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Len(t, briefing.SiblingFindings, 1, "only completed siblings should appear")
 	require.Equal(t, "parent/child-1", briefing.SiblingFindings[0].SessionName)
@@ -790,7 +790,7 @@ func TestService_SessionStart_BriefingContainsPlan(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "plan-briefing", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "plan-briefing", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	_, err = svc.SessionPlanSet(ctx, testUserID, "plan-briefing",
@@ -798,7 +798,7 @@ func TestService_SessionStart_BriefingContainsPlan(t *testing.T) {
 	require.NoError(t, err)
 
 	// Resume the session to get a briefing that includes the plan.
-	briefing, err := svc.SessionStart(ctx, testUserID, "plan-briefing", DefaultMaxContextChars)
+	briefing, err := svc.SessionStart(ctx, testUserID, "plan-briefing", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Contains(t, briefing.Plan, "Analyze the auth module")
 	require.Contains(t, briefing.Plan, "Refactor middleware")
@@ -808,7 +808,7 @@ func TestService_FindSessionNote_NonexistentType(t *testing.T) {
 	svc, _ := setupTestService(t)
 	ctx := context.Background()
 
-	_, err := svc.SessionStart(ctx, testUserID, "find-note-test", DefaultMaxContextChars)
+	_, err := svc.SessionStart(ctx, testUserID, "find-note-test", "", DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// The session exists but has no notes (no plan, progress, or context set).

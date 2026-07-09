@@ -158,7 +158,7 @@ func TestE2E_AgentSessionLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 1: session_start -- creates a new session.
-	briefing, err := svc.SessionStart(ctx, userID, "build-feature", agent.DefaultMaxContextChars)
+	briefing, err := svc.SessionStart(ctx, userID, "build-feature", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.NotNil(t, briefing)
 	require.NotNil(t, briefing.Session)
@@ -197,7 +197,7 @@ func TestE2E_AgentSessionLifecycle(t *testing.T) {
 	require.Equal(t, ctxNoteID, ctxNoteID2, "should update existing context note")
 
 	// Step 5: Resume session -- verify full briefing.
-	resumed, err := svc.SessionStart(ctx, userID, "build-feature", agent.DefaultMaxContextChars)
+	resumed, err := svc.SessionStart(ctx, userID, "build-feature", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Equal(t, briefing.Session.ID, resumed.Session.ID, "should resume same session")
 	require.NotEmpty(t, resumed.Plan, "briefing should contain the plan")
@@ -236,7 +236,7 @@ func TestE2E_HierarchicalSessions(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 1: Start parent session.
-	parentBriefing, err := svc.SessionStart(ctx, userID, "refactor-auth", agent.DefaultMaxContextChars)
+	parentBriefing, err := svc.SessionStart(ctx, userID, "refactor-auth", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	parentID := parentBriefing.Session.ID
 
@@ -245,7 +245,7 @@ func TestE2E_HierarchicalSessions(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 2: Start child-a (subagent A).
-	childA, err := svc.SessionStart(ctx, userID, "refactor-auth/analyze", agent.DefaultMaxContextChars)
+	childA, err := svc.SessionStart(ctx, userID, "refactor-auth/analyze", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Equal(t, parentID, childA.Session.ParentSessionID, "child should reference parent")
 	require.NotEmpty(t, childA.ParentPlan, "child briefing should contain parent plan")
@@ -256,7 +256,7 @@ func TestE2E_HierarchicalSessions(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 3: Start child-b (subagent B) -- should see sibling findings.
-	childB, err := svc.SessionStart(ctx, userID, "refactor-auth/implement", agent.DefaultMaxContextChars)
+	childB, err := svc.SessionStart(ctx, userID, "refactor-auth/implement", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Equal(t, parentID, childB.Session.ParentSessionID, "child-b should reference parent")
 	require.NotEmpty(t, childB.ParentPlan, "child-b should see parent plan")
@@ -292,17 +292,17 @@ func TestE2E_OrphanChildReconciliation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 1: Start child BEFORE parent (orphan scenario).
-	childBriefing, err := svc.SessionStart(ctx, userID, "project-x/task-a", agent.DefaultMaxContextChars)
+	childBriefing, err := svc.SessionStart(ctx, userID, "project-x/task-a", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Empty(t, childBriefing.Session.ParentSessionID, "no parent yet")
 
 	// Step 2: Start parent -- should reconcile orphan child.
-	parentBriefing, err := svc.SessionStart(ctx, userID, "project-x", agent.DefaultMaxContextChars)
+	parentBriefing, err := svc.SessionStart(ctx, userID, "project-x", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	parentID := parentBriefing.Session.ID
 
 	// Step 3: Resume child -- should now have parent linked.
-	childResumed, err := svc.SessionStart(ctx, userID, "project-x/task-a", agent.DefaultMaxContextChars)
+	childResumed, err := svc.SessionStart(ctx, userID, "project-x/task-a", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.Equal(t, parentID, childResumed.Session.ParentSessionID,
 		"orphan child should be reconciled to parent")
@@ -462,7 +462,7 @@ func TestE2E_MixedSessionAndMemory(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start a session.
-	briefing, err := svc.SessionStart(ctx, userID, "fix-race-condition", agent.DefaultMaxContextChars)
+	briefing, err := svc.SessionStart(ctx, userID, "fix-race-condition", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 	require.NotNil(t, briefing)
 
@@ -512,7 +512,7 @@ func TestE2E_SingleDB_SharedAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start a session via user1.
-	_, err = svc.SessionStart(ctx, user1, "shared-session", agent.DefaultMaxContextChars)
+	_, err = svc.SessionStart(ctx, user1, "shared-session", "", agent.DefaultMaxContextChars)
 	require.NoError(t, err)
 
 	// user2 can read user1's knowledge (single DB).

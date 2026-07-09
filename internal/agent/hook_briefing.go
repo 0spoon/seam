@@ -7,6 +7,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/katata/seam/internal/note"
 )
 
 // HookPayload mirrors the JSON Claude Code POSTs to a SessionStart HTTP hook.
@@ -18,6 +21,10 @@ type HookPayload struct {
 	TranscriptPath string `json:"transcript_path"`
 	CWD            string `json:"cwd"`
 	Source         string `json:"source"`
+	// AgentType is set for subagent SessionStart events. When non-empty the
+	// briefing is trimmed to constraints only (subagents inherit task context
+	// from their parent but must still see never-violate constraints).
+	AgentType string `json:"agent_type"`
 }
 
 // HookSourceCompact is the value Claude Code sends in HookPayload.Source after
@@ -47,17 +54,18 @@ var hookBriefingPromptInjectionRe = regexp.MustCompile(
 // handler holds the task service). Pass -1 to omit task counts from the
 // briefing entirely; pass 0 for "no open tasks".
 //
-// maxChars is the soft target length. The output is hard-capped at
-// approximately maxChars*3 (or maxChars+1000, whichever is larger) so a
-// pathological input cannot blow past the configured budget.
-func (s *Service) HookBriefing(ctx context.Context, userID string, payload HookPayload, maxChars, openTaskCount int) (string, error) {
+// maxChars is the soft target length; hardCap is the absolute ceiling (a
+// pathological input cannot blow past it). When payload.CWD resolves to a Seam
+// project via repo_project_map, the briefing is repo-scoped: pinned
+// constraints first, then a per-project memory index, recent findings, and the
+// open-task count. Otherwise it falls back to recent sessions + memories with
+// a hint that the cwd is unmapped.
+func (s *Service) HookBriefing(ctx context.Context, userID string, payload HookPayload, maxChars, hardCap, openTaskCount int) (string, error) {
 	if maxChars <= 0 {
-		maxChars = 500
+		maxChars = 2000
 	}
-
-	hardCap := maxChars * 3
-	if minCap := maxChars + 1000; minCap > hardCap {
-		hardCap = minCap
+	if hardCap < maxChars {
+		hardCap = maxChars
 	}
 
 	db, err := s.cfg.UserDBManager.Open(ctx, userID)
@@ -65,14 +73,268 @@ func (s *Service) HookBriefing(ctx context.Context, userID string, payload HookP
 		return "", fmt.Errorf("agent.Service.HookBriefing: open db: %w", err)
 	}
 
-	// Sessions: last 3 active sessions, most recently touched first.
+	project := s.ResolveProjectForCWD(ctx, userID, payload.CWD)
+
+	// Unmapped cwd: fall back to the recent-activity briefing.
+	if project == "" {
+		return s.assembleFallbackBriefing(ctx, userID, db, payload, maxChars, hardCap, openTaskCount), nil
+	}
+
+	constraints := s.gatherConstraints(ctx, userID, db, project)
+
+	// Subagents get a constraints-only briefing: they inherit task context
+	// from their parent but must still never violate standing constraints.
+	if payload.AgentType != "" {
+		return assembleSubagentBriefing(project, constraints, hardCap), nil
+	}
+
+	index := s.gatherProjectIndex(ctx, userID, db, project)
+	findings := s.gatherProjectFindings(ctx, db, project)
+	return assembleProjectBriefing(payload, project, constraints, index, findings, openTaskCount, maxChars, hardCap), nil
+}
+
+// constraintLine is a pinned standing rule rendered at the top of a briefing.
+type constraintLine struct {
+	name        string
+	description string
+}
+
+// findingLine summarizes a completed session's findings.
+type findingLine struct {
+	name    string
+	age     string
+	snippet string
+}
+
+// agentMemoryProjectID returns the agent-memory project ID without creating it
+// (read-only, so HookBriefing stays side-effect free). Returns false when the
+// project does not exist yet.
+func (s *Service) agentMemoryProjectID(ctx context.Context, userID string) (string, bool) {
+	s.projectCacheMu.RLock()
+	if id, ok := s.projectCache[userID]; ok {
+		s.projectCacheMu.RUnlock()
+		return id, true
+	}
+	s.projectCacheMu.RUnlock()
+
+	p, err := s.cfg.ProjectService.GetBySlug(ctx, userID, AgentMemoryProject)
+	if err != nil {
+		return "", false
+	}
+	s.projectCacheMu.Lock()
+	s.projectCache[userID] = p.ID
+	s.projectCacheMu.Unlock()
+	return p.ID, true
+}
+
+// gatherConstraints collects constraint memories relevant to a project: the
+// project's own constraints plus global (unscoped) constraints that apply
+// everywhere. Deduplicated by note ID.
+func (s *Service) gatherConstraints(ctx context.Context, userID string, db DBTX, project string) []constraintLine {
+	memID, ok := s.agentMemoryProjectID(ctx, userID)
+	if !ok {
+		return nil
+	}
+
+	var out []constraintLine
+	seen := map[string]bool{}
+	add := func(n *note.Note) {
+		if seen[n.ID] {
+			return
+		}
+		cat, name := parseKnowledgeTitle(n.Title)
+		if cat != "constraint" {
+			return
+		}
+		seen[n.ID] = true
+		out = append(out, constraintLine{name: name, description: n.Description})
+	}
+
+	// Project-scoped constraints.
+	if notes, _, err := s.cfg.NoteService.List(ctx, userID, note.NoteFilter{
+		ProjectID: memID, Tag: "project:" + project, Limit: 200,
+	}); err == nil {
+		for _, n := range notes {
+			add(n)
+		}
+	}
+	// Global constraints: domain:constraint memories with no project tag.
+	if notes, _, err := s.cfg.NoteService.List(ctx, userID, note.NoteFilter{
+		ProjectID: memID, Tag: "domain:constraint", Limit: 200,
+	}); err == nil {
+		for _, n := range notes {
+			if projectTag(n.Tags) == "" {
+				add(n)
+			}
+		}
+	}
+	return out
+}
+
+// gatherProjectIndex returns the project's memories (excluding constraints,
+// which are rendered separately) sorted newest first.
+func (s *Service) gatherProjectIndex(ctx context.Context, userID string, db DBTX, project string) []MemoryItem {
+	memID, ok := s.agentMemoryProjectID(ctx, userID)
+	if !ok {
+		return nil
+	}
+	notes, _, err := s.cfg.NoteService.List(ctx, userID, note.NoteFilter{
+		ProjectID: memID, Tag: "project:" + project, Limit: 200,
+	})
+	if err != nil {
+		return nil
+	}
+	items := make([]MemoryItem, 0, len(notes))
+	for _, n := range notes {
+		cat, name := parseKnowledgeTitle(n.Title)
+		if cat == "" || cat == "constraint" {
+			continue
+		}
+		items = append(items, MemoryItem{
+			Category:    cat,
+			Name:        name,
+			Description: n.Description,
+			UpdatedAt:   n.UpdatedAt,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+	return items
+}
+
+// gatherProjectFindings returns up to 3 recent completed-session findings.
+func (s *Service) gatherProjectFindings(ctx context.Context, db DBTX, project string) []findingLine {
+	sessions, err := s.cfg.Store.ListSessionsByProject(ctx, db, StatusCompleted, project, 3)
+	if err != nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	out := make([]findingLine, 0, len(sessions))
+	for _, sess := range sessions {
+		if strings.TrimSpace(sess.Findings) == "" {
+			continue
+		}
+		snippet := sess.Findings
+		if r := []rune(snippet); len(r) > 200 {
+			snippet = string(r[:200])
+		}
+		out = append(out, findingLine{
+			name:    sess.Name,
+			age:     humanizeAge(now.Sub(sess.UpdatedAt)),
+			snippet: snippet,
+		})
+	}
+	return out
+}
+
+// assembleProjectBriefing renders the repo-scoped briefing. Constraints are
+// never dropped; the memory index is trimmed (newest kept) to fit the soft
+// budget, then findings, and hardCap is the absolute ceiling.
+func assembleProjectBriefing(payload HookPayload, project string, constraints []constraintLine, index []MemoryItem, findings []findingLine, openTaskCount, maxChars, hardCap int) string {
+	var head strings.Builder
+	head.WriteString("<seam-briefing>\n")
+	head.WriteString(fmt.Sprintf("Seam project: %s -- %s, %s, %s",
+		sanitizeHookField(project),
+		pluralize(len(constraints), "constraint", "constraints"),
+		pluralize(len(index), "memory", "memories"),
+		pluralize(len(findings), "recent finding", "recent findings")))
+	if openTaskCount >= 0 {
+		head.WriteString(", " + pluralize(openTaskCount, "open task", "open tasks"))
+	}
+	head.WriteString(".\n")
+
+	// Constraints (always included in full).
+	for _, c := range constraints {
+		head.WriteString(renderConstraintLine(c))
+		head.WriteByte('\n')
+	}
+
+	// Fixed trailer sections.
+	var tail strings.Builder
+	if openTaskCount > 0 {
+		tail.WriteString("\n")
+		tail.WriteString(fmt.Sprintf("%s. Read tasks with mcp__seam__tasks_list.\n",
+			pluralize(openTaskCount, "open task", "open tasks")))
+	}
+	tail.WriteString("\nRecall on demand with mcp__seam__recall; read a memory with mcp__seam__memory_read.")
+	if t := buildHookTrailer(payload, nil); t != "" {
+		tail.WriteString("\n" + t)
+	}
+	tail.WriteString("\n</seam-briefing>")
+
+	// Budget the variable sections (index, findings) against the soft target.
+	used := head.Len() + tail.Len()
+	var body strings.Builder
+
+	// Memory index, newest first, dropping the tail when over budget.
+	dropped := 0
+	if len(index) > 0 {
+		body.WriteString("\nMemories (" + sanitizeHookField(project) + "):\n")
+		used += body.Len()
+		for i, m := range index {
+			line := renderIndexLine(m) + "\n"
+			if used+len(line) > maxChars && i > 0 {
+				dropped = len(index) - i
+				break
+			}
+			body.WriteString(line)
+			used += len(line)
+		}
+		if dropped > 0 {
+			extra := fmt.Sprintf("- (+%d older -- use mcp__seam__recall)\n", dropped)
+			body.WriteString(extra)
+			used += len(extra)
+		}
+	}
+
+	// Recent findings.
+	if len(findings) > 0 {
+		fhead := "\nRecent findings:\n"
+		if used+len(fhead) <= maxChars {
+			body.WriteString(fhead)
+			used += len(fhead)
+			for _, f := range findings {
+				line := renderFindingLine(f) + "\n"
+				if used+len(line) > maxChars {
+					break
+				}
+				body.WriteString(line)
+				used += len(line)
+			}
+		}
+	}
+
+	out := head.String() + body.String() + tail.String()
+	return hardTruncateBriefing(out, hardCap)
+}
+
+// assembleSubagentBriefing renders a constraints-only briefing for subagents.
+func assembleSubagentBriefing(project string, constraints []constraintLine, hardCap int) string {
+	var b strings.Builder
+	b.WriteString("<seam-briefing>\n")
+	if len(constraints) == 0 {
+		b.WriteString(fmt.Sprintf("Seam project: %s -- no constraints on record.\n", sanitizeHookField(project)))
+	} else {
+		b.WriteString(fmt.Sprintf("Seam project: %s -- %s (must not be violated):\n",
+			sanitizeHookField(project), pluralize(len(constraints), "constraint", "constraints")))
+		for _, c := range constraints {
+			b.WriteString(renderConstraintLine(c))
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString("</seam-briefing>")
+	return hardTruncateBriefing(b.String(), hardCap)
+}
+
+// assembleFallbackBriefing is used when the cwd does not map to a project. It
+// mirrors the pre-v2 recent-activity briefing and adds a hint that the cwd is
+// unmapped (only when a cwd was actually provided).
+func (s *Service) assembleFallbackBriefing(ctx context.Context, userID string, db DBTX, payload HookPayload, maxChars, hardCap, openTaskCount int) string {
 	var sessions []*Session
 	if list, err := s.cfg.Store.ListSessions(ctx, db, StatusActive, 3, 0); err == nil {
 		sessions = list
 	}
-
-	// Memories: 3 most recent, any category. MemoryList may return them in
-	// any order, so we sort by UpdatedAt DESC and slice to 3.
 	var memories []MemoryItem
 	if items, err := s.MemoryList(ctx, userID, ""); err == nil {
 		sort.Slice(items, func(i, j int) bool {
@@ -84,21 +346,18 @@ func (s *Service) HookBriefing(ctx context.Context, userID string, payload HookP
 		memories = items
 	}
 
-	out := assembleHookBriefing(payload, sessions, memories, openTaskCount, maxChars, hardCap)
-	return out, nil
+	_ = maxChars
+	return renderFallbackBriefing(payload, sessions, memories, openTaskCount, hardCap)
 }
 
-// assembleHookBriefing is the pure-formatting half of HookBriefing, factored
-// out so unit tests can exercise it without spinning up a database. It is
-// safe to call with any combination of nil/empty inputs.
-func assembleHookBriefing(payload HookPayload, sessions []*Session, memories []MemoryItem, openTaskCount, maxChars, hardCap int) string {
+// renderFallbackBriefing is the pure-formatting half of the unmapped-cwd
+// briefing: recent sessions + memories, plus an unmapped-cwd hint when a cwd
+// was provided. Factored out so unit tests can exercise it without a database.
+func renderFallbackBriefing(payload HookPayload, sessions []*Session, memories []MemoryItem, openTaskCount, hardCap int) string {
 	var b strings.Builder
 	b.WriteString("<seam-briefing>\n")
-
-	header := buildHookHeader(sessions, memories, openTaskCount)
-	b.WriteString(header)
+	b.WriteString(buildHookHeader(sessions, memories, openTaskCount))
 	b.WriteByte('\n')
-
 	if line := buildHookSessionsLine(sessions); line != "" {
 		b.WriteString(line)
 		b.WriteByte('\n')
@@ -107,33 +366,64 @@ func assembleHookBriefing(payload HookPayload, sessions []*Session, memories []M
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}
-
+	if payload.CWD != "" {
+		b.WriteString(fmt.Sprintf(
+			"This repo (%s) has no repo_project_map entry, so the briefing is not project-scoped.\n",
+			sanitizeHookField(payload.CWD)))
+	}
 	b.WriteString(buildHookTrailer(payload, sessions))
 	b.WriteByte('\n')
 	b.WriteString("</seam-briefing>")
+	return hardTruncateBriefing(b.String(), hardCap)
+}
 
-	out := b.String()
-
-	if len(out) > hardCap {
-		// Truncate the body, keeping the closing tag intact.
-		const closing = "\n</seam-briefing>"
-		const ellipsis = "..."
-		bodyBudget := hardCap - len(closing) - len(ellipsis)
-		if bodyBudget < 0 {
-			bodyBudget = 0
-		}
-		body := out[:len(out)-len(closing)]
-		if bodyBudget < len(body) {
-			body = body[:bodyBudget]
-		}
-		out = body + ellipsis + closing
+func renderConstraintLine(c constraintLine) string {
+	name := sanitizeHookField(c.name)
+	desc := sanitizeHookFieldN(c.description, 160)
+	if desc == "" {
+		return "CONSTRAINT: " + name
 	}
+	return "CONSTRAINT: " + name + ": " + desc
+}
 
-	// maxChars is a soft target; we don't enforce it here unless it would
-	// shrink the output. The caller chose the soft/hard split.
-	_ = maxChars
+func renderIndexLine(m MemoryItem) string {
+	label := sanitizeHookField(m.Category + "/" + m.Name)
+	prefix := "- "
+	if m.Category == "refuted" {
+		prefix = "- [REFUTED] "
+	}
+	desc := sanitizeHookFieldN(m.Description, 160)
+	if desc == "" {
+		return prefix + label
+	}
+	return prefix + label + " -- " + desc
+}
 
-	return out
+func renderFindingLine(f findingLine) string {
+	name := sanitizeHookField(f.name)
+	snippet := sanitizeHookFieldN(f.snippet, 200)
+	return fmt.Sprintf("- %s (%s ago): %s", name, f.age, snippet)
+}
+
+// hardTruncateBriefing enforces the absolute ceiling, keeping the closing tag.
+func hardTruncateBriefing(out string, hardCap int) string {
+	if len(out) <= hardCap {
+		return out
+	}
+	const closing = "\n</seam-briefing>"
+	const ellipsis = "..."
+	bodyBudget := hardCap - len(closing) - len(ellipsis)
+	if bodyBudget < 0 {
+		bodyBudget = 0
+	}
+	body := out
+	if strings.HasSuffix(out, closing) {
+		body = out[:len(out)-len(closing)]
+	}
+	if bodyBudget < len(body) {
+		body = body[:bodyBudget]
+	}
+	return body + ellipsis + closing
 }
 
 func buildHookHeader(sessions []*Session, memories []MemoryItem, openTaskCount int) string {
@@ -172,8 +462,7 @@ func buildHookMemoriesLine(memories []MemoryItem) string {
 	}
 	parts := make([]string, 0, len(memories))
 	for _, m := range memories {
-		label := m.Category + "/" + m.Name
-		label = sanitizeHookField(label)
+		label := sanitizeHookField(m.Category + "/" + m.Name)
 		if label == "" {
 			continue
 		}
@@ -207,6 +496,13 @@ func buildHookTrailer(payload HookPayload, sessions []*Session) string {
 // not as prompt instructions: strip newlines and any imperative phrases that
 // look like attempts to override the system prompt.
 func sanitizeHookField(s string) string {
+	return sanitizeHookFieldN(s, 80)
+}
+
+// sanitizeHookFieldN is the rune-safe, length-parameterized scrubber. It strips
+// newlines and imperative injection phrases, collapses whitespace, and
+// truncates to maxRunes runes (never splitting a UTF-8 rune).
+func sanitizeHookFieldN(s string, maxRunes int) string {
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = hookBriefingPromptInjectionRe.ReplaceAllString(s, "")
@@ -214,8 +510,9 @@ func sanitizeHookField(s string) string {
 	// Collapse internal whitespace runs.
 	s = strings.Join(strings.Fields(s), " ")
 	// Avoid letting a single field bloat the briefing.
-	if len(s) > 80 {
-		s = s[:77] + "..."
+	if maxRunes > 3 && utf8.RuneCountInString(s) > maxRunes {
+		r := []rune(s)
+		s = string(r[:maxRunes-3]) + "..."
 	}
 	return s
 }

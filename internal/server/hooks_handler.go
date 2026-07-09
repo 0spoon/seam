@@ -21,7 +21,7 @@ import (
 // Defined as an interface so tests can stub the call without spinning up a
 // real Service.
 type HookBriefingService interface {
-	HookBriefing(ctx context.Context, userID string, payload agent.HookPayload, maxChars, openTaskCount int) (string, error)
+	HookBriefing(ctx context.Context, userID string, payload agent.HookPayload, maxChars, hardCap, openTaskCount int) (string, error)
 }
 
 // HookTaskCounter is the subset of task.Service we use to count open tasks
@@ -46,25 +46,31 @@ type HooksHandler struct {
 	apiKey       string
 	logger       *slog.Logger
 	maxChars     int
+	briefingCap  int
 }
 
 // NewHooksHandler builds a HooksHandler. apiKey is the static MCP bearer
 // token (typically cfg.MCP.APIKey). maxChars is the soft target for the
-// briefing (typically cfg.Hooks.MaxBriefingChars). When apiKey is empty,
-// every request is rejected with 401 — better to fail closed than to
-// expose a briefing endpoint to the network unauthenticated.
+// briefing (typically cfg.Hooks.MaxBriefingChars) and briefingCap is the hard
+// ceiling (typically cfg.Hooks.BriefingCap). When apiKey is empty, every
+// request is rejected with 401 — better to fail closed than to expose a
+// briefing endpoint to the network unauthenticated.
 func NewHooksHandler(
 	agentService HookBriefingService,
 	taskService HookTaskCounter,
 	apiKey string,
 	logger *slog.Logger,
 	maxChars int,
+	briefingCap int,
 ) *HooksHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if maxChars <= 0 {
-		maxChars = 500
+		maxChars = 2000
+	}
+	if briefingCap < maxChars {
+		briefingCap = maxChars * 3
 	}
 	return &HooksHandler{
 		agentService: agentService,
@@ -72,6 +78,7 @@ func NewHooksHandler(
 		apiKey:       apiKey,
 		logger:       logger,
 		maxChars:     maxChars,
+		briefingCap:  briefingCap,
 	}
 }
 
@@ -164,5 +171,5 @@ func (h *HooksHandler) assembleBriefing(ctx context.Context, payload agent.HookP
 		}
 	}
 
-	return h.agentService.HookBriefing(ctx, userdb.DefaultUserID, payload, h.maxChars, openTaskCount)
+	return h.agentService.HookBriefing(ctx, userdb.DefaultUserID, payload, h.maxChars, h.briefingCap, openTaskCount)
 }

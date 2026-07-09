@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
+	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/ai"
 	"github.com/katata/seam/internal/assistant"
 	"github.com/katata/seam/internal/auth"
@@ -65,6 +66,7 @@ type Config struct {
 	AssistantHandler *assistant.Handler
 	ScheduleHandler  *scheduler.Handler
 	UsageHandler     *usage.Handler
+	AgentHandler     *agent.Handler
 	WSMessageHandler ws.MessageHandler
 	MCPHandler       http.Handler  // MCP endpoint handler (optional, mounts at /api/mcp)
 	HooksHandler     *HooksHandler // Claude Code hooks (optional, mounts at /api/hooks)
@@ -169,6 +171,12 @@ func New(cfg Config) *Server {
 		if cfg.SettingsHandler != nil {
 			r.Route("/api/settings", func(r chi.Router) {
 				r.Mount("/", cfg.SettingsHandler.Routes())
+			})
+		}
+
+		if cfg.AgentHandler != nil {
+			r.Route("/api/agent", func(r chi.Router) {
+				r.Mount("/", cfg.AgentHandler.Routes())
 			})
 		}
 

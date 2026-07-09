@@ -1067,6 +1067,7 @@ func run() error {
 		AssistantHandler: assistantHandler,
 		ScheduleHandler:  scheduleHandler,
 		UsageHandler:     usageHandler,
+		AgentHandler:     agent.NewHandler(agentSvc, logger),
 		WSMessageHandler: wsHandler,
 		MCPHandler:       mcpHandler,
 		HooksHandler:     hooksHandler,

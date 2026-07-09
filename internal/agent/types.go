@@ -105,10 +105,12 @@ type SiblingFinding struct {
 
 // KnowledgeHit represents a search result from the knowledge base.
 type KnowledgeHit struct {
-	Title   string  `json:"title"`
-	Snippet string  `json:"snippet"`
-	Source  string  `json:"source"`
-	Score   float64 `json:"score"`
+	Title     string    `json:"title"`
+	Snippet   string    `json:"snippet"`
+	Source    string    `json:"source"`
+	Score     float64   `json:"score"`
+	NoteID    string    `json:"note_id,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // ToolCallRecord is an audit log entry for a single MCP tool invocation.

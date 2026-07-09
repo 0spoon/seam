@@ -189,7 +189,7 @@ Seam exposes an MCP server at `/api/mcp` that gives you persistent memory and ac
 - For ephemeral scratch work -- just think in-context.
 - For things the user just told you -- don't parrot it back into memory.
 
-**Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), projects (`project_*`), knowledge graph (`graph_neighbors`), review queue (`review_queue`), webhooks (`webhook_*`), research lab (`lab_open`, `trial_*`, `decision_*`), context search (`context_gather`). Full reference: `docs/mcp.md`.
+**Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), projects (`project_*`), knowledge graph (`graph_neighbors`), review queue (`review_queue`), webhooks (`webhook_*`), research lab (`lab_open`, `trial_*`, `decision_*`), context search (`recall`, `context_gather`). Full reference: `docs/mcp.md`.
 
 **Not reachable over MCP** (HTTP/UI only, as of 2026-07): scheduler + daily briefing management, librarian (off by default via the `librarian_enabled` setting), usage dashboard API, capture (URL fetch / voice), and the built-in assistant.
 

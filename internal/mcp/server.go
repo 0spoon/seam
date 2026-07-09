@@ -43,6 +43,7 @@ type AgentService interface {
 	MemoryDelete(ctx context.Context, userID, category, name string) error
 
 	ContextGather(ctx context.Context, userID, query, scope string, maxChars int, recencyBias float64) ([]agent.KnowledgeHit, error)
+	Recall(ctx context.Context, userID, query, scope, projectSlug string, maxChars int) ([]agent.RecallHit, error)
 
 	// User note access tools.
 	NotesSearch(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]search.FTSResult, error)

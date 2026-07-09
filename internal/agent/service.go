@@ -1302,6 +1302,7 @@ func (s *Service) searchKnowledgeScoped(ctx context.Context, userID, query, scop
 				Snippet: r.Snippet,
 				Source:  "semantic",
 				Score:   r.Score,
+				NoteID:  r.NoteID,
 			})
 		}
 		return hits
@@ -1322,10 +1323,12 @@ func (s *Service) searchKnowledgeScoped(ctx context.Context, userID, query, scop
 	hits := make([]KnowledgeHit, 0, len(ftsResults))
 	for _, r := range ftsResults {
 		hits = append(hits, KnowledgeHit{
-			Title:   r.Title,
-			Snippet: r.Snippet,
-			Source:  "fts",
-			Score:   float64(r.Rank),
+			Title:     r.Title,
+			Snippet:   r.Snippet,
+			Source:    "fts",
+			Score:     float64(r.Rank),
+			NoteID:    r.NoteID,
+			UpdatedAt: r.UpdatedAt,
 		})
 	}
 	return hits

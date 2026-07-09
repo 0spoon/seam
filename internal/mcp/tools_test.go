@@ -555,6 +555,56 @@ func TestMemoryWrite_Success_ReturnsNoteID(t *testing.T) {
 	require.Equal(t, "seam", capturedProject)
 }
 
+// ---------------------------------------------------------------------------
+// Recall
+// ---------------------------------------------------------------------------
+
+func TestRecall_Success_ReturnsHits(t *testing.T) {
+	var capturedScope, capturedProject string
+	mock := &mockAgentService{
+		recallFn: func(_ context.Context, userID, query, scope, project string, maxChars int) ([]agent.RecallHit, error) {
+			require.Equal(t, toolTestUser, userID)
+			require.Equal(t, "wire format", query)
+			capturedScope = scope
+			capturedProject = project
+			return []agent.RecallHit{
+				{Kind: "memory", Key: "protocol/wire-format", Title: "Knowledge: protocol - wire-format", Source: "semantic", Score: 0.9},
+			}, nil
+		},
+	}
+	srv := newServer(mock)
+
+	result := directCall(t, srv, "recall", map[string]any{
+		"query":   "wire format",
+		"scope":   "memories",
+		"project": "mw75-neuro",
+	})
+	require.False(t, result.IsError)
+
+	var parsed struct {
+		Hits []agent.RecallHit `json:"hits"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(textOf(t, result)), &parsed))
+	require.Len(t, parsed.Hits, 1)
+	require.Equal(t, "protocol/wire-format", parsed.Hits[0].Key)
+	require.Equal(t, "memories", capturedScope)
+	require.Equal(t, "mw75-neuro", capturedProject)
+}
+
+func TestRecall_EmptyQuery_ReturnsError(t *testing.T) {
+	srv := newServer(&mockAgentService{})
+	result := directCall(t, srv, "recall", map[string]any{"query": "   "})
+	require.True(t, result.IsError)
+	require.Contains(t, textOf(t, result), "empty")
+}
+
+func TestRecall_MissingQuery_ReturnsError(t *testing.T) {
+	srv := newServer(&mockAgentService{})
+	result := directCall(t, srv, "recall", map[string]any{"scope": "all"})
+	require.True(t, result.IsError)
+	require.Contains(t, textOf(t, result), "query")
+}
+
 func TestMemoryWrite_WithSimilar_IncludesHint(t *testing.T) {
 	mock := &mockAgentService{
 		memoryWriteFn: func(_ context.Context, _, _, _, _, _, _ string) (agent.MemoryWriteResult, error) {

@@ -148,6 +148,7 @@ Track tasks from your notes and register HTTP callbacks for events.
 | `tasks_list`       | List checkbox tasks from notes                    |
 | `tasks_summary`    | Aggregate task counts                             |
 | `tasks_toggle`     | Toggle a task's done status                       |
+| `recall`           | Unified discovery across agent memories, user notes, session findings, and lab trials. Returns per-hit provenance (`source`) and staleness (`age`). Prefer this over memory_search/notes_search/context_gather |
 | `context_gather`   | Budgeted search across notes with ranked snippets |
 | `webhook_register` | Register webhook for note/task events             |
 | `webhook_list`     | List registered webhooks                          |

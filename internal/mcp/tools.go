@@ -49,6 +49,7 @@ func (s *Server) registerTools() {
 		mcpserver.ServerTool{Tool: memoryDeleteTool(), Handler: s.handleMemoryDelete},
 
 		// Context gathering.
+		mcpserver.ServerTool{Tool: recallTool(), Handler: s.handleRecall},
 		mcpserver.ServerTool{Tool: contextGatherTool(), Handler: s.handleContextGather},
 
 		// User note access tools.
@@ -217,9 +218,19 @@ func memoryDeleteTool() mcp.Tool {
 	)
 }
 
+func recallTool() mcp.Tool {
+	return mcp.NewTool("recall",
+		mcp.WithDescription("Unified recall across agent memories, user notes, session findings, and lab trials. Prefer this over memory_search/notes_search/context_gather for discovery. Returns provenance (source) and staleness (age) per hit."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("What to recall")),
+		mcp.WithString("scope", mcp.Enum("all", "memories", "notes", "sessions"), mcp.Description("Recall scope (default: all)")),
+		mcp.WithString("project", mcp.Description("Optional Seam project slug to scope recall")),
+		mcp.WithNumber("max_context_chars", mcp.Description("Maximum characters for results (default: 3000)")),
+	)
+}
+
 func contextGatherTool() mcp.Tool {
 	return mcp.NewTool("context_gather",
-		mcp.WithDescription("Search for relevant context across notes, budgeted to a character limit."),
+		mcp.WithDescription("Search for relevant context across notes, budgeted to a character limit. Prefer mcp__seam__recall for discovery."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 		mcp.WithNumber("max_context_chars", mcp.Description("Maximum characters for results (default: 3000)")),
 		mcp.WithString("scope", mcp.Enum("agent", "user", "all"), mcp.Description("Search scope (default: all)")),
@@ -229,7 +240,7 @@ func contextGatherTool() mcp.Tool {
 
 func notesSearchTool() mcp.Tool {
 	return mcp.NewTool("notes_search",
-		mcp.WithDescription("Full-text search across user notes."),
+		mcp.WithDescription("Full-text search across user notes. Prefer mcp__seam__recall for discovery."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of results (default: 10)")),
 		mcp.WithNumber("recency_bias", mcp.Description("Recency bias (0.0-1.0). Higher values boost recent notes. Default: 0.0")),
@@ -264,7 +275,7 @@ func notesCreateTool() mcp.Tool {
 
 func memorySearchTool() mcp.Tool {
 	return mcp.NewTool("memory_search",
-		mcp.WithDescription("Search agent knowledge notes using FTS and semantic search. Returns results scoped to agent memory only."),
+		mcp.WithDescription("Search agent knowledge notes using FTS and semantic search. Returns results scoped to agent memory only. Prefer mcp__seam__recall for discovery."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of results (default: 10)")),
 	)
@@ -541,6 +552,34 @@ func (s *Server) handleMemoryDelete(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	return mcp.NewToolResultText(`{"status":"deleted"}`), nil
+}
+
+func (s *Server) handleRecall(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	userID := reqctx.UserIDFromContext(ctx)
+	query, err := req.RequireString("query")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: query"), nil
+	}
+	if strings.TrimSpace(query) == "" {
+		return mcp.NewToolResultError("query must not be empty"), nil
+	}
+	if len(query) > maxQueryLen {
+		return mcp.NewToolResultError(fmt.Sprintf("query too long: %d bytes exceeds limit of %d", len(query), maxQueryLen)), nil
+	}
+	scope := req.GetString("scope", "all")
+	project := req.GetString("project", "")
+	maxChars := req.GetInt("max_context_chars", 3000)
+
+	hits, err := s.cfg.AgentService.Recall(ctx, userID, query, scope, project, maxChars)
+	if err != nil {
+		return mcp.NewToolResultError(sanitizeError("recall", err)), nil
+	}
+
+	data, jsonErr := json.Marshal(map[string]any{"hits": hits})
+	if jsonErr != nil {
+		return mcp.NewToolResultError("failed to marshal results"), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (s *Server) handleContextGather(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

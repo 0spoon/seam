@@ -39,6 +39,7 @@ type mockAgentService struct {
 	memoryListFn            func(ctx context.Context, userID, category string) ([]agent.MemoryItem, error)
 	memoryDeleteFn          func(ctx context.Context, userID, category, name string) error
 	contextGatherFn         func(ctx context.Context, userID, query, scope string, maxChars int, recencyBias float64) ([]agent.KnowledgeHit, error)
+	recallFn                func(ctx context.Context, userID, query, scope, projectSlug string, maxChars int) ([]agent.RecallHit, error)
 	notesSearchFn           func(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]search.FTSResult, error)
 	notesReadFn             func(ctx context.Context, userID, noteID string) (*note.Note, error)
 	notesListFn             func(ctx context.Context, userID, projectSlug, tag string, limit int) ([]*note.Note, int, error)
@@ -144,6 +145,13 @@ func (m *mockAgentService) ContextGather(ctx context.Context, userID, query, sco
 		return []agent.KnowledgeHit{}, nil
 	}
 	return m.contextGatherFn(ctx, userID, query, scope, maxChars, recencyBias)
+}
+
+func (m *mockAgentService) Recall(ctx context.Context, userID, query, scope, projectSlug string, maxChars int) ([]agent.RecallHit, error) {
+	if m.recallFn == nil {
+		return []agent.RecallHit{}, nil
+	}
+	return m.recallFn(ctx, userID, query, scope, projectSlug, maxChars)
 }
 
 func (m *mockAgentService) NotesSearch(ctx context.Context, userID, query string, limit int, recencyBias float64) ([]search.FTSResult, error) {
@@ -415,6 +423,7 @@ func TestNew_RegistersAllTools(t *testing.T) {
 		"memory_list",
 		"memory_delete",
 		"context_gather",
+		"recall",
 		"notes_search",
 		"notes_read",
 		"notes_list",

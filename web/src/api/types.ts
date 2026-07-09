@@ -348,3 +348,137 @@ export interface ProjectSuggestion {
   name: string;
   confidence: number;
 }
+
+// WS6: Agent visibility types.
+//
+// AgentSession mirrors the Go `agent.Session` struct, which has NO json tags,
+// so its wire keys are PascalCase (unlike every other type in this file).
+export interface AgentSession {
+  ID: string;
+  Name: string;
+  ParentSessionID: string;
+  Status: string;
+  Findings: string;
+  ProjectSlug: string;
+  Metadata: { agent_name?: string };
+  CreatedAt: string;
+  UpdatedAt: string;
+}
+
+export interface AgentSessionDetail {
+  session: AgentSession;
+  plan_note_id?: string;
+  progress_note_id?: string;
+  context_note_id?: string;
+}
+
+// AgentMemory mirrors the Go `agent.MemoryItem` struct, which DOES use
+// snake_case json tags.
+export interface AgentMemory {
+  category: string;
+  name: string;
+  title: string;
+  note_id: string;
+  description?: string;
+  project?: string;
+  updated_at: string;
+}
+
+// WS6: Task tracking types.
+export interface Task {
+  id: string;
+  note_id: string;
+  line_number: number;
+  content: string;
+  done: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskSummary {
+  total: number;
+  done: number;
+  open: number;
+}
+
+export interface TaskFilter {
+  done?: boolean;
+  projectId?: string;
+  tag?: string;
+  noteId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// WS6: Usage dashboard types.
+export interface UsageSummary {
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  billed_tokens: number;
+  local_tokens: number;
+  call_count: number;
+}
+
+export interface FunctionUsage {
+  function: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  call_count: number;
+}
+
+export interface ProviderUsage {
+  provider: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  call_count: number;
+}
+
+export interface ModelUsage {
+  model: string;
+  provider: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  call_count: number;
+}
+
+export interface TimeSeriesPoint {
+  bucket: string;
+  total_tokens: number;
+  billed_tokens: number;
+  call_count: number;
+}
+
+export interface UsageBudget {
+  enabled: boolean;
+  period: string;
+  max_tokens: number;
+  used_tokens: number;
+  remaining_tokens: number;
+  gate_local: boolean;
+}
+
+export interface UsageBudgetUpdate {
+  enabled?: boolean;
+  period?: string;
+  max_tokens?: number;
+  gate_local?: boolean;
+}
+
+export interface RetrievalKindStat {
+  kind: string;
+  total: number;
+  hits: number;
+}
+
+export interface RetrievalSummary {
+  since: string;
+  total: number;
+  kinds: RetrievalKindStat[];
+  read_after_inject_rate: number;
+  injection_events: number;
+  read_followups: number;
+}

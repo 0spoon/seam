@@ -40,6 +40,20 @@ import type {
   AssistantMessage,
   AssistantStreamEvent,
   AssistantToolResult,
+  AgentSession,
+  AgentSessionDetail,
+  AgentMemory,
+  Task,
+  TaskSummary,
+  TaskFilter,
+  UsageSummary,
+  FunctionUsage,
+  ProviderUsage,
+  ModelUsage,
+  TimeSeriesPoint,
+  UsageBudget,
+  UsageBudgetUpdate,
+  RetrievalSummary,
 } from './types';
 
 const BASE_URL = '/api';
@@ -764,4 +778,120 @@ export async function suggestProject(noteId: string): Promise<{ projects: Projec
     method: 'POST',
     body: JSON.stringify({ note_id: noteId }),
   });
+}
+
+// Agent visibility endpoints (WS6). Read-only; mutations happen via the note
+// editor (memories are notes) and MCP tools.
+
+export async function getAgentSessions(
+  status: 'all' | 'active' | 'completed' = 'all',
+  project?: string,
+  limit = 50,
+): Promise<AgentSession[]> {
+  const params = new URLSearchParams({ status, limit: String(limit) });
+  if (project) params.set('project', project);
+  const data = await request<{ sessions: AgentSession[] }>(`/agent/sessions?${params}`);
+  return data.sessions ?? [];
+}
+
+export async function getAgentSession(name: string): Promise<AgentSessionDetail> {
+  return request<AgentSessionDetail>(`/agent/sessions/${encodeURIComponent(name)}`);
+}
+
+export async function getAgentMemories(
+  project?: string,
+  category?: string,
+): Promise<AgentMemory[]> {
+  const params = new URLSearchParams();
+  if (project) params.set('project', project);
+  if (category) params.set('category', category);
+  const qs = params.toString();
+  const data = await request<{ memories: AgentMemory[] }>(`/agent/memories${qs ? `?${qs}` : ''}`);
+  return data.memories ?? [];
+}
+
+// Task endpoints (WS6).
+
+export async function getTasks(filter: TaskFilter = {}): Promise<{ tasks: Task[]; total: number }> {
+  const params = new URLSearchParams();
+  if (filter.done !== undefined) params.set('done', String(filter.done));
+  if (filter.projectId) params.set('project_id', filter.projectId);
+  if (filter.tag) params.set('tag', filter.tag);
+  if (filter.noteId) params.set('note_id', filter.noteId);
+  if (filter.limit) params.set('limit', String(filter.limit));
+  if (filter.offset != null) params.set('offset', String(filter.offset));
+
+  const qs = params.toString();
+  const res = await requestRaw(`/tasks/${qs ? `?${qs}` : ''}`);
+  const tasks: Task[] = await res.json();
+  const total = parseInt(res.headers.get('X-Total-Count') ?? '0', 10);
+  return { tasks: tasks ?? [], total };
+}
+
+export async function getTaskSummary(projectId?: string): Promise<TaskSummary> {
+  const params = new URLSearchParams();
+  if (projectId) params.set('project_id', projectId);
+  const qs = params.toString();
+  return request<TaskSummary>(`/tasks/summary${qs ? `?${qs}` : ''}`);
+}
+
+export async function toggleTask(id: string, done: boolean): Promise<void> {
+  await request<void>(`/tasks/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ done }),
+  });
+}
+
+// Usage dashboard endpoints (WS6).
+
+function usageRangeParams(from?: string, to?: string): URLSearchParams {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  return params;
+}
+
+export async function getUsageSummary(from?: string, to?: string): Promise<UsageSummary> {
+  const qs = usageRangeParams(from, to).toString();
+  return request<UsageSummary>(`/usage/summary${qs ? `?${qs}` : ''}`);
+}
+
+export async function getUsageByFunction(from?: string, to?: string): Promise<FunctionUsage[]> {
+  const qs = usageRangeParams(from, to).toString();
+  return request<FunctionUsage[]>(`/usage/by-function${qs ? `?${qs}` : ''}`);
+}
+
+export async function getUsageByProvider(from?: string, to?: string): Promise<ProviderUsage[]> {
+  const qs = usageRangeParams(from, to).toString();
+  return request<ProviderUsage[]>(`/usage/by-provider${qs ? `?${qs}` : ''}`);
+}
+
+export async function getUsageByModel(from?: string, to?: string): Promise<ModelUsage[]> {
+  const qs = usageRangeParams(from, to).toString();
+  return request<ModelUsage[]>(`/usage/by-model${qs ? `?${qs}` : ''}`);
+}
+
+export async function getUsageTimeseries(
+  from?: string,
+  to?: string,
+  granularity: 'hour' | 'day' | 'month' = 'day',
+): Promise<TimeSeriesPoint[]> {
+  const params = usageRangeParams(from, to);
+  params.set('granularity', granularity);
+  return request<TimeSeriesPoint[]>(`/usage/timeseries?${params}`);
+}
+
+export async function getUsageBudget(): Promise<UsageBudget> {
+  return request<UsageBudget>('/usage/budget');
+}
+
+export async function putUsageBudget(update: UsageBudgetUpdate): Promise<void> {
+  await request<void>('/usage/budget', {
+    method: 'PUT',
+    body: JSON.stringify(update),
+  });
+}
+
+export async function getRetrievalSummary(days = 30): Promise<RetrievalSummary> {
+  return request<RetrievalSummary>(`/usage/retrieval?days=${days}`);
 }

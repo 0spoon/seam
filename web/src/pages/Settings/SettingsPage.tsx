@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Plus, X } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useProjectStore } from '../../stores/projectStore';
 import { useToastStore } from '../../components/Toast/ToastContainer';
 import { getMe, changePassword, updateEmail } from '../../api/client';
+import { parseRepoMap, serializeRepoMap, isAbsolutePath, type RepoMapRow } from '../../lib/repoMap';
 import styles from './SettingsPage.module.css';
 
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -27,6 +30,24 @@ export function SettingsPage() {
 
   const settings = useSettingsStore((s) => s.settings);
   const updateSetting = useSettingsStore((s) => s.updateSetting);
+  const projects = useProjectStore((s) => s.projects);
+
+  // Repo -> project map editor. Local rows are seeded from the persisted JSON
+  // string setting and only written back on save.
+  const [repoRows, setRepoRows] = useState<RepoMapRow[]>([]);
+  useEffect(() => {
+    setRepoRows(parseRepoMap(settings.repo_project_map));
+  }, [settings.repo_project_map]);
+
+  const handleSaveRepoMap = () => {
+    const invalid = repoRows.find((r) => r.path.trim() && !isAbsolutePath(r.path));
+    if (invalid) {
+      addToast('Repo paths must be absolute', 'error');
+      return;
+    }
+    updateSetting('repo_project_map', serializeRepoMap(repoRows));
+    addToast('Repo map saved', 'success');
+  };
 
   // Account info
   const [username, setUsername] = useState('');
@@ -253,6 +274,130 @@ export function SettingsPage() {
             <option value="false">Expanded</option>
             <option value="true">Collapsed</option>
           </select>
+        </div>
+      </section>
+
+      {/* Agents & AI */}
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>Agents & AI</h2>
+
+        <div className={styles.row}>
+          <div>
+            <div className={styles.rowLabel}>Librarian</div>
+            <div className={styles.rowDescription}>
+              Autonomous note organizer (scheduler-driven classification)
+            </div>
+          </div>
+          <select
+            className={styles.select}
+            value={settings.librarian_enabled ?? 'false'}
+            onChange={(e) => updateSetting('librarian_enabled', e.target.value)}
+          >
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select>
+        </div>
+
+        <div className={styles.row}>
+          <div>
+            <div className={styles.rowLabel}>Usage budget</div>
+            <div className={styles.rowDescription}>Cap token spend per period</div>
+          </div>
+          <select
+            className={styles.select}
+            value={settings.usage_budget_enabled ?? 'false'}
+            onChange={(e) => updateSetting('usage_budget_enabled', e.target.value)}
+          >
+            <option value="false">Off</option>
+            <option value="true">On</option>
+          </select>
+        </div>
+
+        <div className={styles.row}>
+          <div>
+            <div className={styles.rowLabel}>Budget period</div>
+            <div className={styles.rowDescription}>Window the token cap applies to</div>
+          </div>
+          <select
+            className={styles.select}
+            value={settings.usage_budget_period ?? 'monthly'}
+            onChange={(e) => updateSetting('usage_budget_period', e.target.value)}
+          >
+            <option value="daily">Daily</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+
+        <div className={styles.row}>
+          <div>
+            <div className={styles.rowLabel}>Max tokens</div>
+            <div className={styles.rowDescription}>Token limit for the selected period</div>
+          </div>
+          <input
+            type="number"
+            min={0}
+            className={styles.input}
+            style={{ width: 160 }}
+            value={settings.usage_budget_max_tokens ?? ''}
+            placeholder="0"
+            onChange={(e) => updateSetting('usage_budget_max_tokens', e.target.value)}
+          />
+        </div>
+
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          <h3 className={styles.formLabel}>Repo to project map</h3>
+          <div className={styles.rowDescription} style={{ marginBottom: 'var(--space-3)' }}>
+            Map absolute repo paths to a project so agent sessions resolve context
+          </div>
+          {repoRows.map((row, index) => (
+            <div key={index} className={styles.repoRow}>
+              <input
+                type="text"
+                className={styles.input}
+                placeholder="/absolute/path/to/repo"
+                value={row.path}
+                onChange={(e) =>
+                  setRepoRows((rows) =>
+                    rows.map((r, i) => (i === index ? { ...r, path: e.target.value } : r)),
+                  )
+                }
+              />
+              <select
+                className={styles.select}
+                value={row.project}
+                onChange={(e) =>
+                  setRepoRows((rows) =>
+                    rows.map((r, i) => (i === index ? { ...r, project: e.target.value } : r)),
+                  )
+                }
+              >
+                <option value="">Select project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.slug}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className={styles.repoRemove}
+                onClick={() => setRepoRows((rows) => rows.filter((_, i) => i !== index))}
+                aria-label="Remove row"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+          <div className={styles.buttonRow}>
+            <button
+              className={styles.secondaryButton}
+              onClick={() => setRepoRows((rows) => [...rows, { path: '', project: '' }])}
+            >
+              <Plus size={12} style={{ verticalAlign: 'text-bottom' }} /> Add mapping
+            </button>
+            <button className={styles.primaryButton} onClick={handleSaveRepoMap}>
+              Save map
+            </button>
+          </div>
         </div>
       </section>
 

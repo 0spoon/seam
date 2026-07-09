@@ -129,6 +129,58 @@
   cursor: not-allowed;
 }
 
+.secondaryButton {
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.secondaryButton:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.repoRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.repoRow .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.repoRemove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.repoRemove:hover {
+  color: var(--status-error);
+  border-color: var(--status-error);
+}
+
 .dangerButton {
   padding: var(--space-2) var(--space-4);
   background: transparent;

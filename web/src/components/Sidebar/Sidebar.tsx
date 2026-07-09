@@ -12,6 +12,9 @@ import {
   Calendar,
   CalendarDays,
   Sprout,
+  ListChecks,
+  Bot,
+  Gauge,
   Check,
   MoreHorizontal,
   Pencil,
@@ -465,6 +468,36 @@ export function Sidebar() {
             <span className={styles.fadeLabel}>Garden</span>
           </button>
 
+          {/* Tasks */}
+          <button
+            className={`${styles.navItem} ${isActive('/tasks') ? styles.active : ''}`}
+            onClick={() => navTo('/tasks')}
+            title="Tasks"
+          >
+            <ListChecks size={18} />
+            <span className={styles.fadeLabel}>Tasks</span>
+          </button>
+
+          {/* Agents */}
+          <button
+            className={`${styles.navItem} ${isActive('/agents') ? styles.active : ''}`}
+            onClick={() => navTo('/agents')}
+            title="Agents"
+          >
+            <Bot size={18} />
+            <span className={styles.fadeLabel}>Agents</span>
+          </button>
+
+          {/* Usage */}
+          <button
+            className={`${styles.navItem} ${isActive('/usage') ? styles.active : ''}`}
+            onClick={() => navTo('/usage')}
+            title="Usage"
+          >
+            <Gauge size={18} />
+            <span className={styles.fadeLabel}>Usage</span>
+          </button>
+
           {/* Projects */}
           <div className={styles.section}>
             {collapsed ? (
@@ -514,102 +547,106 @@ export function Sidebar() {
               </div>
             )}
             {(collapsed || projectsExpanded) &&
-              projects.map((project, index) => (
-                <div
-                  key={project.id}
-                  className={styles.projectRow}
-                  ref={contextMenuProjectId === project.id ? contextMenuRef : undefined}
-                >
-                  {renamingProjectId === project.id ? (
-                    <input
-                      className={styles.renameInput}
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleRenameProject(project.id, renameValue);
-                        if (e.key === 'Escape') setRenamingProjectId(null);
-                      }}
-                      onBlur={() => handleRenameProject(project.id, renameValue)}
-                      autoFocus
-                    />
-                  ) : (
-                    <button
-                      className={`${styles.navItem} ${isProjectActive(project.id) ? styles.active : ''}`}
-                      onClick={() => navTo(`/projects/${project.id}`)}
-                      onContextMenu={(e) => {
-                        if (collapsed) return;
-                        e.preventDefault();
-                        setContextMenuProjectId(project.id);
-                      }}
-                      title={project.name}
-                      style={{
-                        flex: 1,
-                        ...(isProjectActive(project.id)
-                          ? { borderLeftColor: getProjectColor(index) }
-                          : undefined),
-                      }}
-                    >
-                      <span
-                        className={styles.projectDot}
-                        style={{ backgroundColor: getProjectColor(index) }}
+              projects
+                // Hide the agent-memory project from the Projects list; it is
+                // surfaced via the Agents page instead. Render-only filter.
+                .filter((project) => project.slug !== 'agent-memory')
+                .map((project, index) => (
+                  <div
+                    key={project.id}
+                    className={styles.projectRow}
+                    ref={contextMenuProjectId === project.id ? contextMenuRef : undefined}
+                  >
+                    {renamingProjectId === project.id ? (
+                      <input
+                        className={styles.renameInput}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleRenameProject(project.id, renameValue);
+                          if (e.key === 'Escape') setRenamingProjectId(null);
+                        }}
+                        onBlur={() => handleRenameProject(project.id, renameValue)}
+                        autoFocus
                       />
-                      {!collapsed && <span className={styles.navLabel}>{project.name}</span>}
-                    </button>
-                  )}
-                  {!collapsed && !renamingProjectId && (
-                    <button
-                      className={styles.projectMenuTrigger}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setContextMenuProjectId(
-                          contextMenuProjectId === project.id ? null : project.id,
-                        );
-                      }}
-                      aria-label={`${project.name} options`}
-                    >
-                      <MoreHorizontal size={12} />
-                    </button>
-                  )}
-                  {contextMenuProjectId === project.id && (
-                    <div className={styles.contextMenu}>
+                    ) : (
                       <button
-                        className={styles.contextMenuItem}
-                        onClick={() => {
-                          setContextMenuProjectId(null);
-                          setRenamingProjectId(project.id);
-                          setRenameValue(project.name);
+                        className={`${styles.navItem} ${isProjectActive(project.id) ? styles.active : ''}`}
+                        onClick={() => navTo(`/projects/${project.id}`)}
+                        onContextMenu={(e) => {
+                          if (collapsed) return;
+                          e.preventDefault();
+                          setContextMenuProjectId(project.id);
+                        }}
+                        title={project.name}
+                        style={{
+                          flex: 1,
+                          ...(isProjectActive(project.id)
+                            ? { borderLeftColor: getProjectColor(index) }
+                            : undefined),
                         }}
                       >
-                        <Pencil size={12} />
-                        Rename
+                        <span
+                          className={styles.projectDot}
+                          style={{ backgroundColor: getProjectColor(index) }}
+                        />
+                        {!collapsed && <span className={styles.navLabel}>{project.name}</span>}
                       </button>
+                    )}
+                    {!collapsed && !renamingProjectId && (
                       <button
-                        className={styles.contextMenuItem}
-                        onClick={() => handleNewNoteInProject(project.id)}
-                      >
-                        <FilePlus size={12} />
-                        New note
-                      </button>
-                      <div className={styles.contextMenuDivider} />
-                      <button
-                        className={styles.contextMenuItemDanger}
-                        onClick={() => {
-                          setContextMenuProjectId(null);
-                          setDeleteConfirm({
-                            open: true,
-                            projectId: project.id,
-                            projectName: project.name,
-                          });
-                          setDeleteCascade('inbox');
+                        className={styles.projectMenuTrigger}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setContextMenuProjectId(
+                            contextMenuProjectId === project.id ? null : project.id,
+                          );
                         }}
+                        aria-label={`${project.name} options`}
                       >
-                        <Trash2 size={12} />
-                        Delete
+                        <MoreHorizontal size={12} />
                       </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+                    )}
+                    {contextMenuProjectId === project.id && (
+                      <div className={styles.contextMenu}>
+                        <button
+                          className={styles.contextMenuItem}
+                          onClick={() => {
+                            setContextMenuProjectId(null);
+                            setRenamingProjectId(project.id);
+                            setRenameValue(project.name);
+                          }}
+                        >
+                          <Pencil size={12} />
+                          Rename
+                        </button>
+                        <button
+                          className={styles.contextMenuItem}
+                          onClick={() => handleNewNoteInProject(project.id)}
+                        >
+                          <FilePlus size={12} />
+                          New note
+                        </button>
+                        <div className={styles.contextMenuDivider} />
+                        <button
+                          className={styles.contextMenuItemDanger}
+                          onClick={() => {
+                            setContextMenuProjectId(null);
+                            setDeleteConfirm({
+                              open: true,
+                              projectId: project.id,
+                              projectName: project.name,
+                            });
+                            setDeleteCascade('inbox');
+                          }}
+                        >
+                          <Trash2 size={12} />
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
           </div>
 
           {/* Tags */}

@@ -42,6 +42,15 @@ const ReviewPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import('./pages/Settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 );
+const TasksPage = lazy(() =>
+  import('./pages/Tasks/TasksPage').then((m) => ({ default: m.TasksPage })),
+);
+const AgentsPage = lazy(() =>
+  import('./pages/Agents/AgentsPage').then((m) => ({ default: m.AgentsPage })),
+);
+const UsagePage = lazy(() =>
+  import('./pages/Usage/UsagePage').then((m) => ({ default: m.UsagePage })),
+);
 
 function NoteListFallback() {
   return (
@@ -201,6 +210,30 @@ export function App() {
           element={
             <Suspense fallback={<GenericFallback />}>
               <ReviewPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="tasks"
+          element={
+            <Suspense fallback={<GenericFallback />}>
+              <TasksPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="agents"
+          element={
+            <Suspense fallback={<GenericFallback />}>
+              <AgentsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="usage"
+          element={
+            <Suspense fallback={<GenericFallback />}>
+              <UsagePage />
             </Suspense>
           }
         />

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,16 +16,28 @@ import (
 	"github.com/katata/seam/internal/config"
 )
 
-// Defaults for the SessionStart hook installer. The marker key lives inside
-// the matcher entry (which is a JSON object Claude Code only inspects shape
-// keys on) so we can find our entry on subsequent installs without false
-// matches against user-authored hooks.
-const (
-	hookMatcher       = "startup|resume|clear|compact"
-	hookSeamMarkerKey = "seam_managed"
-	hookEndpointPath  = "/api/hooks/session-start"
-	hookHTTPTimeoutMs = 3000
-)
+// hookSeamMarkerKey lives at the top level of each seam-managed hook entry so
+// we can find our entries on subsequent installs without false matches against
+// user-authored hooks.
+const hookSeamMarkerKey = "seam_managed"
+
+// seamHook describes one Claude Code hook that seam installs. TimeoutSecs is in
+// SECONDS (Claude Code's hook timeout unit) -- NOT milliseconds. An empty
+// Matcher means the event always fires and the "matcher" key is omitted
+// entirely (Claude Code does not support matchers for UserPromptSubmit).
+type seamHook struct {
+	EventKey     string
+	Matcher      string
+	EndpointPath string
+	TimeoutSecs  int
+}
+
+// seamHooks is the set of hooks install-hooks writes and uninstall-hooks/doctor
+// operate over.
+var seamHooks = []seamHook{
+	{EventKey: "SessionStart", Matcher: "startup|resume|clear|compact", EndpointPath: "/api/hooks/session-start", TimeoutSecs: 10},
+	{EventKey: "UserPromptSubmit", Matcher: "", EndpointPath: "/api/hooks/user-prompt-submit", TimeoutSecs: 5},
+}
 
 // runInstallHooks is the entry point for `seamd install-hooks`. It writes a
 // SessionStart entry into ~/.claude/settings.json that points at this
@@ -55,13 +68,13 @@ func runInstallHooks(args []string) error {
 		)
 	}
 
-	hookURL := *urlOverride
-	if hookURL == "" {
-		computed, err := computeHookURL(cfg.Listen)
+	base := ""
+	if *urlOverride != "" {
+		b, err := baseFromURL(*urlOverride)
 		if err != nil {
 			return fmt.Errorf("install-hooks: %w", err)
 		}
-		hookURL = computed
+		base = b
 	}
 
 	target, err := resolveSettingsPath(*settingsPath)
@@ -74,35 +87,66 @@ func runInstallHooks(args []string) error {
 		return fmt.Errorf("install-hooks: %w", err)
 	}
 
-	updated, action, err := mergeSeamHook(settings, hookURL, cfg.MCP.APIKey)
-	if err != nil {
-		return fmt.Errorf("install-hooks: %w", err)
+	color := newColorPrinter()
+	changed := false
+	for _, h := range seamHooks {
+		hookURL := ""
+		if base != "" {
+			hookURL = base + h.EndpointPath
+		} else {
+			computed, err := computeHookURL(cfg.Listen, h.EndpointPath)
+			if err != nil {
+				return fmt.Errorf("install-hooks: %w", err)
+			}
+			hookURL = computed
+		}
+
+		updated, action, err := mergeSeamHook(settings, h, hookURL, cfg.MCP.APIKey)
+		if err != nil {
+			return fmt.Errorf("install-hooks: %w", err)
+		}
+		settings = updated
+		if action != mergeActionUnchanged {
+			changed = true
+		}
+
+		actionMsg := "no change (entry already up to date)"
+		switch action {
+		case mergeActionAppended:
+			actionMsg = "appended new entry"
+		case mergeActionUpdated:
+			actionMsg = "updated existing entry in place"
+		}
+		color.ok(fmt.Sprintf("%s hook -> %s (%s)", h.EventKey, hookURL, actionMsg))
 	}
 
 	// Only touch disk when something actually changed; this keeps repeat
 	// runs from creating spurious backups and writing identical bytes.
-	if action != mergeActionUnchanged {
+	if changed {
 		if err := backupSettingsOnce(target, mode); err != nil {
 			return fmt.Errorf("install-hooks: %w", err)
 		}
-		if err := saveSettingsAtomic(target, updated, mode); err != nil {
+		if err := saveSettingsAtomic(target, settings, mode); err != nil {
 			return fmt.Errorf("install-hooks: %w", err)
 		}
 	}
 
-	color := newColorPrinter()
-	color.ok(fmt.Sprintf("Installed seam SessionStart hook at %s", target))
-	color.ok(fmt.Sprintf("URL:    %s", hookURL))
-	switch action {
-	case mergeActionAppended:
-		color.info("Action: appended new entry")
-	case mergeActionUpdated:
-		color.info("Action: updated existing entry in place")
-	case mergeActionUnchanged:
-		color.info("Action: no change (entry already up to date)")
-	}
-	color.info("'make install-service' does NOT install this hook; uninstall with 'make uninstall-claude-hooks'.")
+	color.ok(fmt.Sprintf("Wrote %d seam hooks to %s", len(seamHooks), target))
+	color.info("'make install-service' does NOT install these hooks; uninstall with 'make uninstall-claude-hooks'.")
 	return nil
+}
+
+// baseFromURL extracts scheme://host[:port] from a full URL override, dropping
+// any path so we can append each hook's endpoint path.
+func baseFromURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse url override %q: %w", raw, err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("url override %q must include scheme and host", raw)
+	}
+	return u.Scheme + "://" + u.Host, nil
 }
 
 // runUninstallHooks removes any seam-managed entries from the SessionStart
@@ -235,7 +279,7 @@ const (
 //
 // However, an existing seam_managed entry IS updated in place rather than
 // duplicated, because the URL or API key may have rotated.
-func mergeSeamHook(settings settingsFile, hookURL, apiKey string) (settingsFile, mergeAction, error) {
+func mergeSeamHook(settings settingsFile, h seamHook, hookURL, apiKey string) (settingsFile, mergeAction, error) {
 	hooksRaw, hasHooks := settings["hooks"]
 	hooksMap := map[string]json.RawMessage{}
 	if hasHooks {
@@ -244,18 +288,18 @@ func mergeSeamHook(settings settingsFile, hookURL, apiKey string) (settingsFile,
 		}
 	}
 
-	var sessionStart []json.RawMessage
-	if raw, ok := hooksMap["SessionStart"]; ok {
-		if err := json.Unmarshal(raw, &sessionStart); err != nil {
-			return nil, 0, fmt.Errorf("hooks.SessionStart must be an array: %w", err)
+	var entries []json.RawMessage
+	if raw, ok := hooksMap[h.EventKey]; ok {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, 0, fmt.Errorf("hooks.%s must be an array: %w", h.EventKey, err)
 		}
 	}
 
-	desired := newSeamHookEntryRaw(hookURL, apiKey)
+	desired := newSeamHookEntryRaw(h, hookURL, apiKey)
 
 	action := mergeActionAppended
 	replaced := false
-	for i, entry := range sessionStart {
+	for i, entry := range entries {
 		if !isSeamManaged(entry) {
 			continue
 		}
@@ -266,19 +310,19 @@ func mergeSeamHook(settings settingsFile, hookURL, apiKey string) (settingsFile,
 		} else {
 			action = mergeActionUpdated
 		}
-		sessionStart[i] = desired
+		entries[i] = desired
 		replaced = true
 		break
 	}
 	if !replaced {
-		sessionStart = append(sessionStart, desired)
+		entries = append(entries, desired)
 	}
 
-	newSessionStart, err := json.Marshal(sessionStart)
+	newEntries, err := json.Marshal(entries)
 	if err != nil {
-		return nil, 0, fmt.Errorf("marshal SessionStart: %w", err)
+		return nil, 0, fmt.Errorf("marshal %s: %w", h.EventKey, err)
 	}
-	hooksMap["SessionStart"] = newSessionStart
+	hooksMap[h.EventKey] = newEntries
 	newHooks, err := json.Marshal(hooksMap)
 	if err != nil {
 		return nil, 0, fmt.Errorf("marshal hooks: %w", err)
@@ -287,8 +331,8 @@ func mergeSeamHook(settings settingsFile, hookURL, apiKey string) (settingsFile,
 	return settings, action, nil
 }
 
-// removeSeamHook drops every seam-managed entry from
-// hooks.SessionStart and returns the new settings + the count removed.
+// removeSeamHook drops every seam-managed entry across all seam hook event
+// keys and returns the new settings + the total count removed.
 func removeSeamHook(settings settingsFile) (settingsFile, int) {
 	hooksRaw, hasHooks := settings["hooks"]
 	if !hasHooks {
@@ -298,34 +342,43 @@ func removeSeamHook(settings settingsFile) (settingsFile, int) {
 	if err := json.Unmarshal(hooksRaw, &hooksMap); err != nil {
 		return settings, 0
 	}
-	raw, ok := hooksMap["SessionStart"]
-	if !ok {
-		return settings, 0
-	}
-	var sessionStart []json.RawMessage
-	if err := json.Unmarshal(raw, &sessionStart); err != nil {
-		return settings, 0
-	}
-	kept := sessionStart[:0]
-	removed := 0
-	for _, entry := range sessionStart {
-		if isSeamManaged(entry) {
-			removed++
+
+	total := 0
+	for _, h := range seamHooks {
+		raw, ok := hooksMap[h.EventKey]
+		if !ok {
 			continue
 		}
-		kept = append(kept, entry)
-	}
-	if removed == 0 {
-		return settings, 0
-	}
-	if len(kept) == 0 {
-		delete(hooksMap, "SessionStart")
-	} else {
-		newSessionStart, err := json.Marshal(kept)
-		if err != nil {
-			return settings, 0
+		var entries []json.RawMessage
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			continue
 		}
-		hooksMap["SessionStart"] = newSessionStart
+		kept := entries[:0]
+		removed := 0
+		for _, entry := range entries {
+			if isSeamManaged(entry) {
+				removed++
+				continue
+			}
+			kept = append(kept, entry)
+		}
+		if removed == 0 {
+			continue
+		}
+		total += removed
+		if len(kept) == 0 {
+			delete(hooksMap, h.EventKey)
+		} else {
+			newEntries, err := json.Marshal(kept)
+			if err != nil {
+				continue
+			}
+			hooksMap[h.EventKey] = newEntries
+		}
+	}
+
+	if total == 0 {
+		return settings, 0
 	}
 	if len(hooksMap) == 0 {
 		delete(settings, "hooks")
@@ -336,7 +389,7 @@ func removeSeamHook(settings settingsFile) (settingsFile, int) {
 		}
 		settings["hooks"] = newHooks
 	}
-	return settings, removed
+	return settings, total
 }
 
 // isSeamManaged reports whether a single SessionStart entry was created by
@@ -357,20 +410,25 @@ func isSeamManaged(raw json.RawMessage) bool {
 // newSeamHookEntryRaw builds the canonical seam SessionStart entry as raw
 // JSON so it can sit alongside any other shape in the SessionStart array
 // without being normalized through a strict struct.
-func newSeamHookEntryRaw(hookURL, apiKey string) json.RawMessage {
+func newSeamHookEntryRaw(h seamHook, hookURL, apiKey string) json.RawMessage {
 	entry := map[string]any{
-		"matcher":         hookMatcher,
 		hookSeamMarkerKey: true,
 		"hooks": []map[string]any{
 			{
-				"type":    "http",
-				"url":     hookURL,
-				"timeout": hookHTTPTimeoutMs,
+				"type": "http",
+				"url":  hookURL,
+				// Claude Code's hook timeout is in SECONDS.
+				"timeout": h.TimeoutSecs,
 				"headers": map[string]string{
 					"Authorization": "Bearer " + apiKey,
 				},
 			},
 		},
+	}
+	// Omit the matcher key entirely for events that always fire (Claude Code
+	// does not support matchers for UserPromptSubmit).
+	if h.Matcher != "" {
+		entry["matcher"] = h.Matcher
 	}
 	data, _ := json.Marshal(entry)
 	return data
@@ -450,7 +508,7 @@ func canonicalize(v any) ([]byte, error) {
 // computeHookURL turns a Listen address into a URL Claude Code can hit.
 // Bind-all addresses (empty, ":N", "0.0.0.0:N", "[::]:N") collapse to
 // 127.0.0.1 because 0.0.0.0 is not a valid destination on macOS.
-func computeHookURL(listen string) (string, error) {
+func computeHookURL(listen, endpointPath string) (string, error) {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
 		// Treat the whole string as a port if it starts with ":" (Go's
@@ -465,7 +523,7 @@ func computeHookURL(listen string) (string, error) {
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
-	return fmt.Sprintf("http://%s%s", net.JoinHostPort(host, port), hookEndpointPath), nil
+	return fmt.Sprintf("http://%s%s", net.JoinHostPort(host, port), endpointPath), nil
 }
 
 // backupSettingsOnce writes a settings.json.seam-bak-<ts> sibling the first

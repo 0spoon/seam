@@ -40,8 +40,12 @@ func runDoctor(args []string) error {
 
 	results = append(results, checkSeamdReachable(cfg))
 	results = append(results, checkClaudeMCPRegistration(cfg, *mcpRegistryPath))
-	results = append(results, checkSessionStartHookInstalled(cfg, *settingsPath))
-	results = append(results, checkHookEndpointReachable(cfg))
+	for _, h := range seamHooks {
+		results = append(results, checkHookInstalled(cfg, *settingsPath, h))
+	}
+	for _, h := range seamHooks {
+		results = append(results, checkHookEndpointReachable(cfg, h))
+	}
 
 	for _, r := range results {
 		switch r.level {
@@ -200,9 +204,9 @@ func checkClaudeMCPRegistration(cfg *config.Config, override string) doctorResul
 	return doctorResult{level: doctorOK, message: fmt.Sprintf("Seam MCP registered with Claude Code at %s", url)}
 }
 
-// checkSessionStartHookInstalled walks ~/.claude/settings.json and looks for
-// a SessionStart entry marked seam_managed: true.
-func checkSessionStartHookInstalled(cfg *config.Config, override string) doctorResult {
+// checkHookInstalled walks ~/.claude/settings.json and looks for a seam-managed
+// entry for the given hook event, verifying its URL and auth header.
+func checkHookInstalled(cfg *config.Config, override string, h seamHook) doctorResult {
 	target, err := resolveSettingsPath(override)
 	if err != nil {
 		return doctorResult{level: doctorError, message: fmt.Sprintf("resolve settings path: %v", err)}
@@ -210,7 +214,7 @@ func checkSessionStartHookInstalled(cfg *config.Config, override string) doctorR
 	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
 		return doctorResult{
 			level:   doctorWarn,
-			message: fmt.Sprintf("%s does not exist — run `make install-claude-hooks` to install the SessionStart hook", target),
+			message: fmt.Sprintf("%s does not exist — run `make install-claude-hooks` to install the %s hook", target, h.EventKey),
 		}
 	}
 	settings, _, err := loadSettings(target)
@@ -228,16 +232,16 @@ func checkSessionStartHookInstalled(cfg *config.Config, override string) doctorR
 	if err := json.Unmarshal(hooksRaw, &hooksMap); err != nil {
 		return doctorResult{level: doctorError, message: fmt.Sprintf("parse hooks: %v", err)}
 	}
-	raw, ok := hooksMap["SessionStart"]
+	raw, ok := hooksMap[h.EventKey]
 	if !ok {
 		return doctorResult{
 			level:   doctorWarn,
-			message: fmt.Sprintf("%s has no hooks.SessionStart entries — run `make install-claude-hooks`", target),
+			message: fmt.Sprintf("%s has no hooks.%s entries — run `make install-claude-hooks`", target, h.EventKey),
 		}
 	}
 	var entries []json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err != nil {
-		return doctorResult{level: doctorError, message: fmt.Sprintf("parse SessionStart: %v", err)}
+		return doctorResult{level: doctorError, message: fmt.Sprintf("parse %s: %v", h.EventKey, err)}
 	}
 
 	for _, entry := range entries {
@@ -250,23 +254,23 @@ func checkSessionStartHookInstalled(cfg *config.Config, override string) doctorR
 		}
 		hookList, _ := parsed["hooks"].([]any)
 		if len(hookList) == 0 {
-			return doctorResult{level: doctorError, message: "seam-managed SessionStart entry has no hooks list"}
+			return doctorResult{level: doctorError, message: fmt.Sprintf("seam-managed %s entry has no hooks list", h.EventKey)}
 		}
 		first, _ := hookList[0].(map[string]any)
 		if first == nil {
-			return doctorResult{level: doctorError, message: "seam-managed SessionStart entry has malformed hook"}
+			return doctorResult{level: doctorError, message: fmt.Sprintf("seam-managed %s entry has malformed hook", h.EventKey)}
 		}
 		url, _ := first["url"].(string)
 		expected := ""
 		if cfg != nil {
-			if u, err := computeHookURL(cfg.Listen); err == nil {
+			if u, err := computeHookURL(cfg.Listen, h.EndpointPath); err == nil {
 				expected = u
 			}
 		}
 		if expected != "" && url != expected {
 			return doctorResult{
 				level:   doctorWarn,
-				message: fmt.Sprintf("SessionStart hook URL is %q but seamd is configured for %q (re-run `make install-claude-hooks`)", url, expected),
+				message: fmt.Sprintf("%s hook URL is %q but seamd is configured for %q (re-run `make install-claude-hooks`)", h.EventKey, url, expected),
 			}
 		}
 		headers, _ := first["headers"].(map[string]any)
@@ -274,32 +278,41 @@ func checkSessionStartHookInstalled(cfg *config.Config, override string) doctorR
 		if cfg != nil && auth != "Bearer "+cfg.MCP.APIKey {
 			return doctorResult{
 				level:   doctorWarn,
-				message: "SessionStart hook Authorization header does not match mcp.api_key (re-run `make install-claude-hooks`)",
+				message: fmt.Sprintf("%s hook Authorization header does not match mcp.api_key (re-run `make install-claude-hooks`)", h.EventKey),
 			}
 		}
-		return doctorResult{level: doctorOK, message: fmt.Sprintf("SessionStart hook installed in %s", target)}
+		return doctorResult{level: doctorOK, message: fmt.Sprintf("%s hook installed in %s", h.EventKey, target)}
 	}
 	return doctorResult{
 		level:   doctorWarn,
-		message: fmt.Sprintf("no seam-managed SessionStart entry found in %s — run `make install-claude-hooks`", target),
+		message: fmt.Sprintf("no seam-managed %s entry found in %s — run `make install-claude-hooks`", h.EventKey, target),
 	}
 }
 
 // checkHookEndpointReachable POSTs a synthetic payload at the hook endpoint
 // to verify the auth chain and the response shape end-to-end. Skips silently
 // when the config is missing or seamd isn't running.
-func checkHookEndpointReachable(cfg *config.Config) doctorResult {
+func checkHookEndpointReachable(cfg *config.Config, h seamHook) doctorResult {
 	if cfg == nil {
 		return doctorResult{level: doctorWarn, message: "skipping hook endpoint check: config not loaded"}
 	}
 	if cfg.MCP.APIKey == "" {
 		return doctorResult{level: doctorWarn, message: "skipping hook endpoint check: mcp.api_key empty"}
 	}
-	hookURL, err := computeHookURL(cfg.Listen)
+	hookURL, err := computeHookURL(cfg.Listen, h.EndpointPath)
 	if err != nil {
 		return doctorResult{level: doctorError, message: fmt.Sprintf("invalid listen %q: %v", cfg.Listen, err)}
 	}
-	body, _ := json.Marshal(map[string]string{"source": "startup"})
+
+	// Event-specific synthetic payload.
+	var payload map[string]string
+	switch h.EventKey {
+	case "UserPromptSubmit":
+		payload = map[string]string{"user_prompt": "doctor probe", "cwd": "/"}
+	default:
+		payload = map[string]string{"source": "startup"}
+	}
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequest(http.MethodPost, hookURL, bytes.NewReader(body))
 	if err != nil {
 		return doctorResult{level: doctorError, message: fmt.Sprintf("build request: %v", err)}
@@ -309,11 +322,11 @@ func checkHookEndpointReachable(cfg *config.Config) doctorResult {
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return doctorResult{level: doctorWarn, message: fmt.Sprintf("hook endpoint not reachable (%v) — is seamd running?", err)}
+		return doctorResult{level: doctorWarn, message: fmt.Sprintf("%s hook endpoint not reachable (%v) — is seamd running?", h.EventKey, err)}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return doctorResult{level: doctorError, message: fmt.Sprintf("hook endpoint returned status %d", resp.StatusCode)}
+		return doctorResult{level: doctorError, message: fmt.Sprintf("%s hook endpoint returned status %d", h.EventKey, resp.StatusCode)}
 	}
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -327,13 +340,13 @@ func checkHookEndpointReachable(cfg *config.Config) doctorResult {
 	if hso == nil {
 		return doctorResult{level: doctorError, message: "hook response missing hookSpecificOutput"}
 	}
-	if hso["hookEventName"] != "SessionStart" {
-		return doctorResult{level: doctorError, message: fmt.Sprintf("hook response has wrong hookEventName %q", hso["hookEventName"])}
+	if hso["hookEventName"] != h.EventKey {
+		return doctorResult{level: doctorError, message: fmt.Sprintf("%s hook response has wrong hookEventName %q", h.EventKey, hso["hookEventName"])}
 	}
 	additional, _ := hso["additionalContext"].(string)
 	return doctorResult{
 		level:   doctorOK,
-		message: fmt.Sprintf("%s responds with valid briefing (%d chars)", hookURL, len(additional)),
+		message: fmt.Sprintf("%s hook responds OK (%d chars additionalContext)", h.EventKey, len(additional)),
 	}
 }
 
@@ -341,7 +354,7 @@ func checkHookEndpointReachable(cfg *config.Config) doctorResult {
 // Listen address into a URL Claude Code clients can hit. Reuses the same
 // localhost-collapse rules.
 func computeHealthURL(listen string) (string, error) {
-	url, err := computeHookURL(listen)
+	url, err := computeHookURL(listen, "/api/hooks/session-start")
 	if err != nil {
 		return "", err
 	}
@@ -350,7 +363,7 @@ func computeHealthURL(listen string) (string, error) {
 
 // computeMCPURL builds the URL Claude Code's MCP client should target.
 func computeMCPURL(listen string) (string, error) {
-	url, err := computeHookURL(listen)
+	url, err := computeHookURL(listen, "/api/hooks/session-start")
 	if err != nil {
 		return "", err
 	}

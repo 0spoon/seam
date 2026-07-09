@@ -905,6 +905,7 @@ func run() error {
 	// the open-task count in the briefing header.
 	hooksHandler := server.NewHooksHandler(
 		agentSvc,
+		agentSvc, // prompt-context service for the UserPromptSubmit hook
 		taskSvc,
 		cfg.MCP.APIKey,
 		logger,

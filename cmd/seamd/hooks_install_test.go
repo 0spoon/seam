@@ -28,7 +28,7 @@ func TestComputeHookURL(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.listen, func(t *testing.T) {
-			got, err := computeHookURL(tc.listen)
+			got, err := computeHookURL(tc.listen, "/api/hooks/session-start")
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
 		})
@@ -37,7 +37,7 @@ func TestComputeHookURL(t *testing.T) {
 
 func TestComputeHookURL_Error(t *testing.T) {
 	t.Parallel()
-	_, err := computeHookURL("not-a-listen")
+	_, err := computeHookURL("not-a-listen", "/api/hooks/session-start")
 	require.Error(t, err)
 }
 
@@ -56,7 +56,7 @@ func parseSettings(t *testing.T, body string) settingsFile {
 func TestMergeSeamHook_AppendsToEmptySettings(t *testing.T) {
 	t.Parallel()
 
-	updated, action, err := mergeSeamHook(parseSettings(t, "{}"), "http://127.0.0.1:8080/api/hooks/session-start", "k1")
+	updated, action, err := mergeSeamHook(parseSettings(t, "{}"), seamHooks[0], "http://127.0.0.1:8080/api/hooks/session-start", "k1")
 	require.NoError(t, err)
 	require.Equal(t, mergeActionAppended, action)
 
@@ -86,7 +86,7 @@ func TestMergeSeamHook_PreservesUserHooks(t *testing.T) {
         }
     }`
 	settings := parseSettings(t, body)
-	updated, action, err := mergeSeamHook(settings, "http://127.0.0.1:8080/api/hooks/session-start", "k1")
+	updated, action, err := mergeSeamHook(settings, seamHooks[0], "http://127.0.0.1:8080/api/hooks/session-start", "k1")
 	require.NoError(t, err)
 	require.Equal(t, mergeActionAppended, action)
 
@@ -105,11 +105,11 @@ func TestMergeSeamHook_PreservesUserHooks(t *testing.T) {
 func TestMergeSeamHook_UpdatesExistingInPlace(t *testing.T) {
 	t.Parallel()
 
-	first, _, err := mergeSeamHook(parseSettings(t, "{}"), "http://127.0.0.1:8080/api/hooks/session-start", "old-key")
+	first, _, err := mergeSeamHook(parseSettings(t, "{}"), seamHooks[0], "http://127.0.0.1:8080/api/hooks/session-start", "old-key")
 	require.NoError(t, err)
 
 	// Re-run with a different URL and key — should update in place, not append.
-	updated, action, err := mergeSeamHook(first, "http://192.168.1.5:9000/api/hooks/session-start", "new-key")
+	updated, action, err := mergeSeamHook(first, seamHooks[0], "http://192.168.1.5:9000/api/hooks/session-start", "new-key")
 	require.NoError(t, err)
 	require.Equal(t, mergeActionUpdated, action)
 
@@ -124,13 +124,113 @@ func TestMergeSeamHook_UpdatesExistingInPlace(t *testing.T) {
 func TestMergeSeamHook_IdempotentWithSameInputs(t *testing.T) {
 	t.Parallel()
 
-	first, _, err := mergeSeamHook(parseSettings(t, "{}"), "http://127.0.0.1:8080/api/hooks/session-start", "k1")
+	first, _, err := mergeSeamHook(parseSettings(t, "{}"), seamHooks[0], "http://127.0.0.1:8080/api/hooks/session-start", "k1")
 	require.NoError(t, err)
 
-	updated, action, err := mergeSeamHook(first, "http://127.0.0.1:8080/api/hooks/session-start", "k1")
+	updated, action, err := mergeSeamHook(first, seamHooks[0], "http://127.0.0.1:8080/api/hooks/session-start", "k1")
 	require.NoError(t, err)
 	require.Equal(t, mergeActionUnchanged, action)
 	require.Len(t, decodeSessionStart(t, updated), 1)
+}
+
+func TestMergeSeamHook_SessionStart_TimeoutInSeconds(t *testing.T) {
+	t.Parallel()
+
+	updated, _, err := mergeSeamHook(parseSettings(t, "{}"), seamHooks[0], "http://127.0.0.1:8080/api/hooks/session-start", "k1")
+	require.NoError(t, err)
+
+	entries := decodeHookEntries(t, updated, "SessionStart")
+	require.Len(t, entries, 1)
+	require.Equal(t, "startup|resume|clear|compact", entries[0]["matcher"])
+	first := entries[0]["hooks"].([]any)[0].(map[string]any)
+	// Timeout must be 10 SECONDS, not 3000ms.
+	require.Equal(t, float64(10), first["timeout"])
+}
+
+func TestMergeSeamHook_UserPromptSubmit_OmitsMatcher(t *testing.T) {
+	t.Parallel()
+
+	updated, action, err := mergeSeamHook(parseSettings(t, "{}"), seamHooks[1], "http://127.0.0.1:8080/api/hooks/user-prompt-submit", "k1")
+	require.NoError(t, err)
+	require.Equal(t, mergeActionAppended, action)
+
+	entries := decodeHookEntries(t, updated, "UserPromptSubmit")
+	require.Len(t, entries, 1)
+	// UserPromptSubmit has no matcher support -> key must be absent.
+	_, hasMatcher := entries[0]["matcher"]
+	require.False(t, hasMatcher, "UserPromptSubmit entry must omit the matcher key")
+	require.Equal(t, true, entries[0]["seam_managed"])
+	first := entries[0]["hooks"].([]any)[0].(map[string]any)
+	require.Equal(t, "http://127.0.0.1:8080/api/hooks/user-prompt-submit", first["url"])
+	require.Equal(t, float64(5), first["timeout"])
+}
+
+func TestInstallHooks_WritesBothHooks(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+	cfgPath := writeTempConfig(t, dir)
+	require.NoError(t, runInstallHooks([]string{"-config", cfgPath, "-settings", settingsPath}))
+
+	settings := parseSettings(t, readFile(t, settingsPath))
+	ss := decodeHookEntries(t, settings, "SessionStart")
+	require.Len(t, ss, 1)
+	ups := decodeHookEntries(t, settings, "UserPromptSubmit")
+	require.Len(t, ups, 1)
+}
+
+func TestInstallHooks_LegacyUpgradesSessionStartAndAddsPromptHook(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.json")
+	// Legacy state: only a seam-managed SessionStart entry with the old
+	// millisecond timeout and no UserPromptSubmit hook.
+	legacy := `{
+        "hooks": {
+            "SessionStart": [
+                {"matcher": "startup|resume|clear|compact", "seam_managed": true, "hooks": [{"type": "http", "url": "http://127.0.0.1:8080/api/hooks/session-start", "timeout": 3000, "headers": {"Authorization": "Bearer old"}}]}
+            ]
+        }
+    }`
+	require.NoError(t, os.WriteFile(settingsPath, []byte(legacy), 0o600))
+	cfgPath := writeTempConfig(t, dir)
+	require.NoError(t, runInstallHooks([]string{"-config", cfgPath, "-settings", settingsPath}))
+
+	settings := parseSettings(t, readFile(t, settingsPath))
+	ss := decodeHookEntries(t, settings, "SessionStart")
+	require.Len(t, ss, 1, "existing SessionStart entry upgraded in place, not duplicated")
+	first := ss[0]["hooks"].([]any)[0].(map[string]any)
+	require.Equal(t, float64(10), first["timeout"], "millisecond timeout must be upgraded to seconds")
+	require.Equal(t, "Bearer test-mcp-key", first["headers"].(map[string]any)["Authorization"])
+
+	ups := decodeHookEntries(t, settings, "UserPromptSubmit")
+	require.Len(t, ups, 1, "UserPromptSubmit hook must be added")
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(b)
+}
+
+func decodeHookEntries(t *testing.T, settings settingsFile, eventKey string) []map[string]any {
+	t.Helper()
+	hooksRaw, ok := settings["hooks"]
+	require.True(t, ok, "hooks key missing")
+	var hooksMap map[string]any
+	require.NoError(t, json.Unmarshal(hooksRaw, &hooksMap))
+	raw, ok := hooksMap[eventKey]
+	require.True(t, ok, "%s key missing", eventKey)
+	arr, ok := raw.([]any)
+	require.True(t, ok, "%s must be an array", eventKey)
+	out := make([]map[string]any, 0, len(arr))
+	for _, e := range arr {
+		out = append(out, e.(map[string]any))
+	}
+	return out
 }
 
 // --- removeSeamHook ---

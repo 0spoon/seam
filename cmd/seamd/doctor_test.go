@@ -131,7 +131,7 @@ func TestCheckSessionStartHookInstalled_Missing(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	res := checkSessionStartHookInstalled(nil, filepath.Join(dir, "settings.json"))
+	res := checkHookInstalled(nil, filepath.Join(dir, "settings.json"), seamHooks[0])
 	require.Equal(t, doctorWarn, res.level)
 	require.Contains(t, res.message, "install-claude-hooks")
 }
@@ -148,7 +148,7 @@ func TestCheckSessionStartHookInstalled_OK(t *testing.T) {
 
 	cfg := mustConfigForListen(t, "http://127.0.0.1:8080")
 	cfg.MCP.APIKey = "test-mcp-key"
-	res := checkSessionStartHookInstalled(cfg, settingsPath)
+	res := checkHookInstalled(cfg, settingsPath, seamHooks[0])
 	require.Equal(t, doctorOK, res.level, res.message)
 }
 
@@ -163,7 +163,7 @@ func TestCheckSessionStartHookInstalled_URLMismatch(t *testing.T) {
 
 	cfg := mustConfigForListen(t, "http://127.0.0.1:9999")
 	cfg.MCP.APIKey = "test-mcp-key"
-	res := checkSessionStartHookInstalled(cfg, settingsPath)
+	res := checkHookInstalled(cfg, settingsPath, seamHooks[0])
 	require.Equal(t, doctorWarn, res.level)
 	require.Contains(t, res.message, "9999")
 }
@@ -185,9 +185,9 @@ func TestCheckHookEndpointReachable_OK(t *testing.T) {
 
 	cfg := mustConfigForListen(t, srv.URL)
 	cfg.MCP.APIKey = "test-key"
-	res := checkHookEndpointReachable(cfg)
+	res := checkHookEndpointReachable(cfg, seamHooks[0])
 	require.Equal(t, doctorOK, res.level, res.message)
-	require.Contains(t, res.message, "valid briefing")
+	require.Contains(t, res.message, "responds OK")
 }
 
 func TestCheckHookEndpointReachable_WrongShape(t *testing.T) {
@@ -201,7 +201,7 @@ func TestCheckHookEndpointReachable_WrongShape(t *testing.T) {
 
 	cfg := mustConfigForListen(t, srv.URL)
 	cfg.MCP.APIKey = "test-key"
-	res := checkHookEndpointReachable(cfg)
+	res := checkHookEndpointReachable(cfg, seamHooks[0])
 	require.Equal(t, doctorError, res.level)
 }
 
@@ -215,7 +215,7 @@ func TestCheckHookEndpointReachable_Unauthorized(t *testing.T) {
 
 	cfg := mustConfigForListen(t, srv.URL)
 	cfg.MCP.APIKey = "test-key"
-	res := checkHookEndpointReachable(cfg)
+	res := checkHookEndpointReachable(cfg, seamHooks[0])
 	require.Equal(t, doctorError, res.level)
 	require.Contains(t, res.message, "401")
 }

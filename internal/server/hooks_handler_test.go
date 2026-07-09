@@ -30,6 +30,43 @@ func (m *mockBriefingService) HookBriefing(ctx context.Context, userID string, p
 	return m.hookBriefingFn(ctx, userID, payload, maxChars, hardCap, openTaskCount)
 }
 
+type mockPromptContexter struct {
+	fn func(ctx context.Context, userID, cwd, prompt string, maxHits int) ([]agent.PromptHit, error)
+}
+
+func (m *mockPromptContexter) PromptContext(ctx context.Context, userID, cwd, prompt string, maxHits int) ([]agent.PromptHit, error) {
+	if m.fn == nil {
+		return nil, nil
+	}
+	return m.fn(ctx, userID, cwd, prompt, maxHits)
+}
+
+func newTestHooksHandlerWithPrompt(t *testing.T, promptSvc PromptContexter) *httptest.Server {
+	t.Helper()
+	h := NewHooksHandler(&mockBriefingService{}, promptSvc, nil, testAPIKey, nil, 2000, 6000)
+	srv := httptest.NewServer(h.Routes())
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func postUserPrompt(t *testing.T, srv *httptest.Server, apiKey string, payload map[string]any) (*http.Response, []byte) {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/user-prompt-submit", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { resp.Body.Close() })
+	respBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp, respBody
+}
+
 type mockTaskCounter struct {
 	summaryFn func(ctx context.Context, userID string, filter task.TaskFilter) (*task.TaskSummary, error)
 }
@@ -43,7 +80,7 @@ func (m *mockTaskCounter) Summary(ctx context.Context, userID string, filter tas
 
 func newTestHooksHandler(t *testing.T, agentSvc HookBriefingService, taskSvc HookTaskCounter) *httptest.Server {
 	t.Helper()
-	h := NewHooksHandler(agentSvc, taskSvc, testAPIKey, nil, 2000, 6000)
+	h := NewHooksHandler(agentSvc, nil, taskSvc, testAPIKey, nil, 2000, 6000)
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
 	return srv
@@ -132,6 +169,69 @@ func TestHooksHandler_WireFormat(t *testing.T) {
 	require.Contains(t, hso, "hookEventName")
 	require.Contains(t, hso, "additionalContext")
 	require.Equal(t, "SessionStart", hso["hookEventName"])
+}
+
+// TestUserPromptSubmit_WireFormat locks the UserPromptSubmit response shape.
+func TestUserPromptSubmit_WireFormat(t *testing.T) {
+	t.Parallel()
+
+	mock := &mockPromptContexter{
+		fn: func(_ context.Context, _, cwd, prompt string, _ int) ([]agent.PromptHit, error) {
+			require.Equal(t, "/repo/x", cwd)
+			require.Contains(t, prompt, "wear")
+			return []agent.PromptHit{
+				{Category: "protocol", Name: "mw75-wear", Description: "wear polarity", UpdatedAt: time.Now().UTC()},
+			}, nil
+		},
+	}
+	srv := newTestHooksHandlerWithPrompt(t, mock)
+	resp, body := postUserPrompt(t, srv, testAPIKey, map[string]any{
+		"user_prompt":     "the wear detection is inverted again",
+		"cwd":             "/repo/x",
+		"hook_event_name": "UserPromptSubmit",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(body, &raw))
+	require.Contains(t, raw, "continue")
+	require.Contains(t, raw, "suppressOutput")
+	hso, ok := raw["hookSpecificOutput"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "UserPromptSubmit", hso["hookEventName"])
+	ac, _ := hso["additionalContext"].(string)
+	require.Contains(t, ac, "<seam-recall>")
+	require.Contains(t, ac, "protocol/mw75-wear")
+	require.Contains(t, ac, "mcp__seam__memory_read")
+}
+
+func TestUserPromptSubmit_NoHits_EmptyContext(t *testing.T) {
+	t.Parallel()
+
+	mock := &mockPromptContexter{
+		fn: func(context.Context, string, string, string, int) ([]agent.PromptHit, error) {
+			return nil, nil
+		},
+	}
+	srv := newTestHooksHandlerWithPrompt(t, mock)
+	resp, body := postUserPrompt(t, srv, testAPIKey, map[string]any{
+		"user_prompt": "commit and push to dev",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var got hookSessionStartResponse
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.True(t, got.Continue)
+	require.Equal(t, "UserPromptSubmit", got.HookSpecificOutput.HookEventName)
+	require.Empty(t, got.HookSpecificOutput.AdditionalContext)
+}
+
+func TestUserPromptSubmit_MissingBearer(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestHooksHandlerWithPrompt(t, &mockPromptContexter{})
+	resp, _ := postUserPrompt(t, srv, "", map[string]any{"user_prompt": "hi"})
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 func TestHooksHandler_BriefingErrorReturnsEmptyContext(t *testing.T) {
@@ -265,7 +365,7 @@ func TestHooksHandler_NoTaskCounterMeansNegativeCount(t *testing.T) {
 func TestHooksHandler_EmptyAPIKeyRejectsAll(t *testing.T) {
 	t.Parallel()
 
-	h := NewHooksHandler(&mockBriefingService{}, nil, "" /* apiKey */, nil, 2000, 6000)
+	h := NewHooksHandler(&mockBriefingService{}, nil, nil, "" /* apiKey */, nil, 2000, 6000)
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
 

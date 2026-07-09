@@ -51,7 +51,9 @@ type HooksConfig struct {
 	MaxBriefingChars int `yaml:"max_briefing_chars"`
 
 	// BriefingCap is the hard maximum for the hook briefing in characters.
-	// Default: 6000. Anything longer is truncated with an ellipsis.
+	// Default: 6000. Anything longer is truncated with an ellipsis. Claude Code
+	// itself caps a hook's additionalContext at 10,000 chars, so this default
+	// stays safely below that external limit.
 	// env: SEAM_HOOKS_BRIEFING_CAP
 	BriefingCap int `yaml:"briefing_cap"`
 }

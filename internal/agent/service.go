@@ -91,6 +91,12 @@ type Service struct {
 	// researchCache caches the research project ID per user.
 	researchCacheMu sync.RWMutex
 	researchCache   map[string]string // userID -> projectID
+
+	// promptCorpusCache caches the scored prompt-context corpus per project
+	// slug ("" = all) with a short TTL, keeping UserPromptSubmit off the
+	// single-connection DB write path.
+	promptCorpusMu    sync.RWMutex
+	promptCorpusCache map[string]*promptCorpus
 }
 
 // NewService creates a new agent Service.

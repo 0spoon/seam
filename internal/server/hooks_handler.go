@@ -31,6 +31,12 @@ type HookTaskCounter interface {
 	Summary(ctx context.Context, userID string, filter task.TaskFilter) (*task.TaskSummary, error)
 }
 
+// PromptContexter is the subset of agent.Service the UserPromptSubmit hook
+// needs: it matches the user's prompt against memory descriptions.
+type PromptContexter interface {
+	PromptContext(ctx context.Context, userID, cwd, prompt string, maxHits int) ([]agent.PromptHit, error)
+}
+
 // hookHandlerTimeout caps the time the handler spends assembling a briefing.
 // We MUST return quickly: Claude Code waits for the hook to respond before
 // the agent starts, and we never want to stall a cold launch on a slow
@@ -41,12 +47,13 @@ const hookHandlerTimeout = 2 * time.Second
 // in the MVP is SessionStart, which returns a briefing wrapped in the shape
 // Claude Code expects so it can inject our text as additionalContext.
 type HooksHandler struct {
-	agentService HookBriefingService
-	taskService  HookTaskCounter // optional
-	apiKey       string
-	logger       *slog.Logger
-	maxChars     int
-	briefingCap  int
+	agentService  HookBriefingService
+	promptService PromptContexter // optional; nil disables prompt-context
+	taskService   HookTaskCounter // optional
+	apiKey        string
+	logger        *slog.Logger
+	maxChars      int
+	briefingCap   int
 }
 
 // NewHooksHandler builds a HooksHandler. apiKey is the static MCP bearer
@@ -57,6 +64,7 @@ type HooksHandler struct {
 // briefing endpoint to the network unauthenticated.
 func NewHooksHandler(
 	agentService HookBriefingService,
+	promptService PromptContexter,
 	taskService HookTaskCounter,
 	apiKey string,
 	logger *slog.Logger,
@@ -73,12 +81,13 @@ func NewHooksHandler(
 		briefingCap = maxChars * 3
 	}
 	return &HooksHandler{
-		agentService: agentService,
-		taskService:  taskService,
-		apiKey:       apiKey,
-		logger:       logger,
-		maxChars:     maxChars,
-		briefingCap:  briefingCap,
+		agentService:  agentService,
+		promptService: promptService,
+		taskService:   taskService,
+		apiKey:        apiKey,
+		logger:        logger,
+		maxChars:      maxChars,
+		briefingCap:   briefingCap,
 	}
 }
 
@@ -86,6 +95,7 @@ func NewHooksHandler(
 func (h *HooksHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/session-start", h.sessionStart)
+	r.Post("/user-prompt-submit", h.userPromptSubmit)
 	return r
 }
 
@@ -149,6 +159,63 @@ func (h *HooksHandler) sessionStart(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(&resp); err != nil {
 		h.logger.Warn("hooks.session_start: encode response failed", "error", err)
+	}
+}
+
+// userPromptPayload mirrors the JSON Claude Code POSTs to a UserPromptSubmit
+// hook. The prompt field is `user_prompt` (not `prompt`). Extra fields
+// (prompt_id, permission_mode, ...) are ignored via tolerant decode.
+type userPromptPayload struct {
+	SessionID     string `json:"session_id"`
+	CWD           string `json:"cwd"`
+	UserPrompt    string `json:"user_prompt"`
+	HookEventName string `json:"hook_event_name"`
+}
+
+// userPromptSubmit handles POST /api/hooks/user-prompt-submit. Like the
+// SessionStart hook it must never return a non-2xx for an internal error
+// (only 401 on auth failure), and it returns an empty additionalContext when
+// nothing relevant is found — Claude Code ignores empty additionalContext.
+func (h *HooksHandler) userPromptSubmit(w http.ResponseWriter, r *http.Request) {
+	if !auth.VerifyMCPAPIKey(r, h.apiKey) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var payload userPromptPayload
+	if r.Body != nil {
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+			h.logger.Debug("hooks.user_prompt_submit: ignoring malformed payload", "error", err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), hookHandlerTimeout)
+	defer cancel()
+
+	additionalContext := ""
+	if h.promptService != nil && payload.UserPrompt != "" {
+		hits, err := h.promptService.PromptContext(ctx, userdb.DefaultUserID, payload.CWD, payload.UserPrompt, 3)
+		if err != nil {
+			h.logger.Debug("hooks.user_prompt_submit: prompt context failed", "error", err)
+		} else {
+			additionalContext = agent.RenderPromptRecall(hits)
+		}
+	}
+
+	resp := hookSessionStartResponse{
+		Continue:       true,
+		SuppressOutput: true,
+		HookSpecificOutput: hookSessionStartSpecificOp{
+			HookEventName:     "UserPromptSubmit",
+			AdditionalContext: additionalContext,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(&resp); err != nil {
+		h.logger.Warn("hooks.user_prompt_submit: encode response failed", "error", err)
 	}
 }
 

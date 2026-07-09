@@ -43,7 +43,7 @@ internal/           Core domain packages (strict layering, no circular imports)
   watcher/          fsnotify file watcher + startup reconciliation
   webhook/          Webhook CRUD, HMAC delivery, SSRF protection
   ws/               WebSocket hub (connection registry, broadcast)
-migrations/         Embedded SQL schema (001_initial.sql, single flattened migration)
+migrations/         Embedded SQL schema (sequential numbered migrations: 001_initial, 002_token_usage, 003_retrieval)
 web/                React SPA (TypeScript, Vite, Zustand)
   src/api/          REST + WebSocket client with JWT auto-refresh
   src/components/   UI components (CSS Modules)
@@ -160,6 +160,7 @@ make clean                 # Remove bin/, web/dist, coverage files
 ---
 id: 01HX...
 title: "Note Title"
+description: "One-line summary used for retrieval and the memory index"
 project: project-slug
 tags: [tag1, tag2]
 created: 2026-03-08T10:00:00Z
@@ -191,7 +192,19 @@ Seam exposes an MCP server at `/api/mcp` that gives you persistent memory and ac
 
 **Available tool groups:** sessions (`session_*`), agent memory (`memory_*`), user notes (`notes_*`), tasks (`tasks_*`), projects (`project_*`), knowledge graph (`graph_neighbors`), review queue (`review_queue`), webhooks (`webhook_*`), research lab (`lab_open`, `trial_*`, `decision_*`), context search (`recall`, `context_gather`). Full reference: `docs/mcp.md`.
 
-**Not reachable over MCP** (HTTP/UI only, as of 2026-07): scheduler + daily briefing management, librarian (off by default via the `librarian_enabled` setting), usage dashboard API, capture (URL fetch / voice), and the built-in assistant.
+**Not reachable over MCP** (HTTP/UI only, as of 2026-07): scheduler + daily briefing management, librarian (off by default via the `librarian_enabled` setting), usage + retrieval dashboard APIs, the read-only agent-visibility API (`/api/agent`), capture (URL fetch / voice), and the built-in assistant.
+
+## Agent Retrieval Pipeline
+
+Beyond the MCP tools, Seam proactively feeds context to Claude Code agents and surfaces agent activity in the web UI (added 2026-07):
+
+- **Repo-aware briefings**: `session_start` resolves the agent's cwd to a Seam project via the `repo_project_map` owner setting and returns a project-scoped briefing (pinned constraints, a memory index, and recent findings). The Claude Code `SessionStart` hook injects this automatically.
+- **Prompt-context injection**: a `UserPromptSubmit` hook scores each prompt against the memory corpus with a pure-Go IDF-lite lexical matcher (precision-over-recall floor) and injects only high-confidence memories -- no embedder in the hook path.
+- **Unified `recall` MCP tool**: one retrieval entry point across sessions and memories, with provenance and staleness.
+- **Retrieval telemetry**: injections and reads are recorded in `retrieval_events` (fire-and-forget); the Usage dashboard reports per-kind hit counts and the read-after-inject rate.
+- **Agent-visibility UI**: the read-only `/api/agent` API backs the web **Agents**, **Usage**, and **Tasks** pages. Memories are notes in the `agent-memory` project -- mutate them via the note editor or MCP tools, never the agent API.
+
+Install both hooks with `make install-claude-hooks`; verify the wiring with `make doctor`.
 
 ## Coding Rules
 

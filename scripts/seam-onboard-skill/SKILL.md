@@ -124,10 +124,12 @@ Seam is a local-first personal knowledge system with persistent memory, notes, t
 
 **Use Seam for non-trivial work. Skip it for trivial edits, throwaway scripts, and things already covered by the codebase or the current conversation.**
 
+If Seam's Claude Code hooks are installed (`make install-claude-hooks`), every session starts with an auto-injected `<seam-briefing>` scoped to the repo's Seam project (resolved from your cwd via the `repo_project_map` setting), and prompts that match stored memories get a `<seam-recall>` injection. Read what was injected before re-searching; use `mcp__seam__recall` for on-demand retrieval.
+
 When the task is non-trivial:
 
-- Call `mcp__seam__session_start` at the start to get a briefing (recent activity, relevant memories, open tasks). Pass your absolute working directory as `cwd` so the briefing is scoped to the repo's Seam project (pinned constraints + a per-project memory index). Call `mcp__seam__session_end` when done to persist findings for the next agent.
-- Use `mcp__seam__memory_write` / `mcp__seam__memory_read` for knowledge that should survive beyond this conversation (architectural decisions, debugging insights, gotchas, user preferences about their notes).
+- Call `mcp__seam__session_start` at the start to get the full briefing (recent activity, relevant memories, open tasks) — the auto-injected one is the short version. Pass your absolute working directory as `cwd` so the briefing is scoped to the repo's Seam project (pinned constraints + a per-project memory index). Call `mcp__seam__session_end` when done to persist findings for the next agent. `session_end` findings must be 1500 characters or fewer — summarize, and put longer content in a note.
+- Use `mcp__seam__memory_write` / `mcp__seam__memory_read` for knowledge that should survive beyond this conversation (architectural decisions, debugging insights, gotchas, user preferences about their notes). Always pass `project:` (the repo's Seam project slug, shown in the briefing) for project-specific knowledge — omitting it creates a global memory that will not appear in project-scoped briefings. `description` (one line, written for a future agent deciding whether to read it) is required.
 - Use `mcp__seam__notes_search` or `mcp__seam__context_gather` before asking the user to find things in their knowledge base — it is faster and more accurate than making them look.
 - Use `mcp__seam__notes_create` to capture durable work output (research findings, meeting summaries, decision records). Agent-created notes are auto-tagged `created-by:agent`.
 - For systematic debugging investigations, use the research lab tools (`lab_open`, `trial_record`, `decision_record`, `trial_query`) so parallel agents can collaborate on the same lab.

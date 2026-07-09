@@ -43,7 +43,7 @@ func (m *mockPromptContexter) PromptContext(ctx context.Context, userID, cwd, pr
 
 func newTestHooksHandlerWithPrompt(t *testing.T, promptSvc PromptContexter) *httptest.Server {
 	t.Helper()
-	h := NewHooksHandler(&mockBriefingService{}, promptSvc, nil, testAPIKey, nil, 2000, 6000)
+	h := NewHooksHandler(&mockBriefingService{}, promptSvc, nil, nil, testAPIKey, nil, 2000, 6000)
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
 	return srv
@@ -80,7 +80,7 @@ func (m *mockTaskCounter) Summary(ctx context.Context, userID string, filter tas
 
 func newTestHooksHandler(t *testing.T, agentSvc HookBriefingService, taskSvc HookTaskCounter) *httptest.Server {
 	t.Helper()
-	h := NewHooksHandler(agentSvc, nil, taskSvc, testAPIKey, nil, 2000, 6000)
+	h := NewHooksHandler(agentSvc, nil, taskSvc, nil, testAPIKey, nil, 2000, 6000)
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
 	return srv
@@ -365,7 +365,7 @@ func TestHooksHandler_NoTaskCounterMeansNegativeCount(t *testing.T) {
 func TestHooksHandler_EmptyAPIKeyRejectsAll(t *testing.T) {
 	t.Parallel()
 
-	h := NewHooksHandler(&mockBriefingService{}, nil, nil, "" /* apiKey */, nil, 2000, 6000)
+	h := NewHooksHandler(&mockBriefingService{}, nil, nil, nil, "" /* apiKey */, nil, 2000, 6000)
 	srv := httptest.NewServer(h.Routes())
 	t.Cleanup(srv.Close)
 

@@ -17,22 +17,25 @@ import (
 
 // Handler handles HTTP requests for usage dashboard endpoints.
 type Handler struct {
-	store       *Store
-	dbManager   userdb.Manager
-	settingsSvc *settings.Service
-	logger      *slog.Logger
+	store          *Store
+	retrievalStore *RetrievalStore
+	dbManager      userdb.Manager
+	settingsSvc    *settings.Service
+	logger         *slog.Logger
 }
 
-// NewHandler creates a new usage Handler.
-func NewHandler(store *Store, dbManager userdb.Manager, settingsSvc *settings.Service, logger *slog.Logger) *Handler {
+// NewHandler creates a new usage Handler. retrievalStore may be nil to disable
+// the retrieval telemetry endpoint.
+func NewHandler(store *Store, retrievalStore *RetrievalStore, dbManager userdb.Manager, settingsSvc *settings.Service, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Handler{
-		store:       store,
-		dbManager:   dbManager,
-		settingsSvc: settingsSvc,
-		logger:      logger,
+		store:          store,
+		retrievalStore: retrievalStore,
+		dbManager:      dbManager,
+		settingsSvc:    settingsSvc,
+		logger:         logger,
 	}
 }
 
@@ -46,7 +49,36 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/timeseries", h.getTimeSeries)
 	r.Get("/budget", h.getBudget)
 	r.Put("/budget", h.updateBudget)
+	r.Get("/retrieval", h.getRetrieval)
 	return r
+}
+
+// getRetrieval returns retrieval telemetry aggregated over the last ?days
+// (default 30) days.
+func (h *Handler) getRetrieval(w http.ResponseWriter, r *http.Request) {
+	userID, db, ok := h.resolveDB(w, r)
+	if !ok {
+		return
+	}
+	if h.retrievalStore == nil {
+		writeError(w, http.StatusNotFound, "retrieval telemetry not enabled")
+		return
+	}
+	days := 30
+	if v := r.URL.Query().Get("days"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	since := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+
+	sum, err := h.retrievalStore.Summary(r.Context(), db, since)
+	if err != nil {
+		h.logger.Error("get retrieval summary failed", "error", err, "user_id", userID)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, sum)
 }
 
 func (h *Handler) getSummary(w http.ResponseWriter, r *http.Request) {

@@ -420,6 +420,10 @@ func run() error {
 	usageTracker := usage.NewTracker(usageStore, userDBMgr, settingsSvc, logger)
 	trackingEnabled := cfg.Usage.TrackingEnabled == nil || *cfg.Usage.TrackingEnabled
 
+	// Set up retrieval telemetry (fire-and-forget, mirrors the usage tracker).
+	retrievalStore := usage.NewRetrievalStore()
+	retrievalRecorder := usage.NewRetrievalRecorder(retrievalStore, userDBMgr, logger)
+
 	// trackedChat creates a function-labeled ChatCompleter wrapper.
 	// The raw chatCompleter is preserved for type assertions (e.g. ToolChatCompleter).
 	trackedChat := func(fn usage.Function) ai.ChatCompleter {
@@ -442,7 +446,7 @@ func run() error {
 		embeddingClient = usage.NewTrackedEmbedder(embeddingClient, usageTracker, cfg.Embeddings.Provider)
 	}
 
-	usageHandler := usage.NewHandler(usageStore, userDBMgr, settingsSvc, logger)
+	usageHandler := usage.NewHandler(usageStore, retrievalStore, userDBMgr, settingsSvc, logger)
 
 	var aiHandler *ai.Handler
 	var aiQueue *ai.Queue
@@ -887,14 +891,15 @@ func run() error {
 		Logger:          logger,
 	})
 	mcpSrv := seamMCP.New(seamMCP.Config{
-		AgentService:    agentSvc,
-		TaskService:     taskSvc,
-		WebhookService:  webhookSvc,
-		GraphService:    graphSvc,
-		ReviewService:   reviewSvc,
-		TemplateService: templateSvc,
-		ToolCallLogger:  agentSvc,
-		Logger:          logger,
+		AgentService:      agentSvc,
+		TaskService:       taskSvc,
+		WebhookService:    webhookSvc,
+		GraphService:      graphSvc,
+		ReviewService:     reviewSvc,
+		TemplateService:   templateSvc,
+		ToolCallLogger:    agentSvc,
+		RetrievalRecorder: retrievalRecorder,
+		Logger:            logger,
 	})
 	mcpHandler := mcpSrv.Handler(jwtMgr, cfg.MCP.APIKey)
 
@@ -907,6 +912,7 @@ func run() error {
 		agentSvc,
 		agentSvc, // prompt-context service for the UserPromptSubmit hook
 		taskSvc,
+		retrievalRecorder,
 		cfg.MCP.APIKey,
 		logger,
 		cfg.Hooks.MaxBriefingChars,

@@ -22,6 +22,7 @@ import (
 	"github.com/katata/seam/internal/search"
 	"github.com/katata/seam/internal/task"
 	"github.com/katata/seam/internal/template"
+	"github.com/katata/seam/internal/usage"
 	"github.com/katata/seam/internal/userdb"
 	"github.com/katata/seam/internal/webhook"
 )
@@ -111,14 +112,20 @@ type TemplateService interface {
 
 // Config holds dependencies for the MCP server.
 type Config struct {
-	AgentService    AgentService
-	TaskService     TaskService     // optional: task tracking tools
-	WebhookService  WebhookService  // optional: webhook management tools
-	GraphService    GraphService    // optional: knowledge graph tools
-	ReviewService   ReviewService   // optional: knowledge gardening tools
-	TemplateService TemplateService // optional: note template tools
-	ToolCallLogger  ToolCallLogger  // optional: persists tool call audits to DB
-	Logger          *slog.Logger
+	AgentService      AgentService
+	TaskService       TaskService       // optional: task tracking tools
+	WebhookService    WebhookService    // optional: webhook management tools
+	GraphService      GraphService      // optional: knowledge graph tools
+	ReviewService     ReviewService     // optional: knowledge gardening tools
+	TemplateService   TemplateService   // optional: note template tools
+	ToolCallLogger    ToolCallLogger    // optional: persists tool call audits to DB
+	RetrievalRecorder RetrievalRecorder // optional: retrieval telemetry
+	Logger            *slog.Logger
+}
+
+// RetrievalRecorder records retrieval telemetry fire-and-forget. Optional.
+type RetrievalRecorder interface {
+	Record(ctx context.Context, ev *usage.RetrievalEvent)
 }
 
 // Server wraps an MCP server with agent tools.

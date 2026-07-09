@@ -17,9 +17,17 @@ import (
 	"github.com/katata/seam/internal/reqctx"
 	"github.com/katata/seam/internal/task"
 	"github.com/katata/seam/internal/template"
+	"github.com/katata/seam/internal/usage"
 	"github.com/katata/seam/internal/validate"
 	"github.com/katata/seam/internal/webhook"
 )
+
+// recordRetrieval logs a retrieval event when telemetry is enabled.
+func (s *Server) recordRetrieval(ctx context.Context, ev *usage.RetrievalEvent) {
+	if s.cfg.RetrievalRecorder != nil {
+		s.cfg.RetrievalRecorder.Record(ctx, ev)
+	}
+}
 
 // Input validation limits.
 const (
@@ -439,6 +447,12 @@ func (s *Server) handleMemoryRead(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	title, description, body, err := s.cfg.AgentService.MemoryRead(ctx, userID, category, name)
+	s.recordRetrieval(ctx, &usage.RetrievalEvent{
+		Kind:  usage.RetrievalKindMemoryRead,
+		Query: category + "/" + name,
+		Items: []string{category + "/" + name},
+		Hit:   err == nil,
+	})
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("memory_read", err)), nil
 	}
@@ -574,6 +588,18 @@ func (s *Server) handleRecall(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if err != nil {
 		return mcp.NewToolResultError(sanitizeError("recall", err)), nil
 	}
+
+	items := make([]string, 0, len(hits))
+	for _, h := range hits {
+		items = append(items, h.Key)
+	}
+	s.recordRetrieval(ctx, &usage.RetrievalEvent{
+		Kind:        usage.RetrievalKindRecall,
+		ProjectSlug: project,
+		Query:       query,
+		Items:       items,
+		Hit:         len(hits) > 0,
+	})
 
 	data, jsonErr := json.Marshal(map[string]any{"hits": hits})
 	if jsonErr != nil {

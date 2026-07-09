@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +15,7 @@ import (
 	"github.com/katata/seam/internal/agent"
 	"github.com/katata/seam/internal/auth"
 	"github.com/katata/seam/internal/task"
+	"github.com/katata/seam/internal/usage"
 	"github.com/katata/seam/internal/userdb"
 )
 
@@ -37,6 +39,12 @@ type PromptContexter interface {
 	PromptContext(ctx context.Context, userID, cwd, prompt string, maxHits int) ([]agent.PromptHit, error)
 }
 
+// RetrievalRecorder records retrieval/injection telemetry fire-and-forget.
+// Optional — nil disables telemetry.
+type RetrievalRecorder interface {
+	Record(ctx context.Context, ev *usage.RetrievalEvent)
+}
+
 // hookHandlerTimeout caps the time the handler spends assembling a briefing.
 // We MUST return quickly: Claude Code waits for the hook to respond before
 // the agent starts, and we never want to stall a cold launch on a slow
@@ -48,8 +56,9 @@ const hookHandlerTimeout = 2 * time.Second
 // Claude Code expects so it can inject our text as additionalContext.
 type HooksHandler struct {
 	agentService  HookBriefingService
-	promptService PromptContexter // optional; nil disables prompt-context
-	taskService   HookTaskCounter // optional
+	promptService PromptContexter   // optional; nil disables prompt-context
+	taskService   HookTaskCounter   // optional
+	recorder      RetrievalRecorder // optional; nil disables telemetry
 	apiKey        string
 	logger        *slog.Logger
 	maxChars      int
@@ -66,6 +75,7 @@ func NewHooksHandler(
 	agentService HookBriefingService,
 	promptService PromptContexter,
 	taskService HookTaskCounter,
+	recorder RetrievalRecorder,
 	apiKey string,
 	logger *slog.Logger,
 	maxChars int,
@@ -84,10 +94,18 @@ func NewHooksHandler(
 		agentService:  agentService,
 		promptService: promptService,
 		taskService:   taskService,
+		recorder:      recorder,
 		apiKey:        apiKey,
 		logger:        logger,
 		maxChars:      maxChars,
 		briefingCap:   briefingCap,
+	}
+}
+
+// recordRetrieval logs a retrieval event when telemetry is enabled.
+func (h *HooksHandler) recordRetrieval(ctx context.Context, ev *usage.RetrievalEvent) {
+	if h.recorder != nil {
+		h.recorder.Record(ctx, ev)
 	}
 }
 
@@ -146,6 +164,13 @@ func (h *HooksHandler) sessionStart(w http.ResponseWriter, r *http.Request) {
 		briefing = ""
 	}
 
+	// Telemetry: a "hit" is a project-scoped briefing (the feature working).
+	h.recordRetrieval(ctx, &usage.RetrievalEvent{
+		Kind:  usage.RetrievalKindBriefing,
+		Query: payload.CWD,
+		Hit:   strings.Contains(briefing, "Seam project:"),
+	})
+
 	resp := hookSessionStartResponse{
 		Continue:       true,
 		SuppressOutput: true,
@@ -200,6 +225,16 @@ func (h *HooksHandler) userPromptSubmit(w http.ResponseWriter, r *http.Request) 
 			h.logger.Debug("hooks.user_prompt_submit: prompt context failed", "error", err)
 		} else {
 			additionalContext = agent.RenderPromptRecall(hits)
+			items := make([]string, 0, len(hits))
+			for _, hit := range hits {
+				items = append(items, hit.Category+"/"+hit.Name)
+			}
+			h.recordRetrieval(ctx, &usage.RetrievalEvent{
+				Kind:  usage.RetrievalKindPromptContext,
+				Query: payload.UserPrompt,
+				Items: items,
+				Hit:   len(hits) > 0,
+			})
 		}
 	}
 

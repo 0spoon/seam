@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> **Seam is retired and this repository is archived.** It has been superseded by
+> [**Seamless**](https://github.com/0spoon/seamless), a ground-up successor focused on
+> memory and coordination for agent fleets. Development continues there.
+
 <p align="center">
   <br/>
   <img alt="Seam" width="120" src="./resources/logo.svg">
